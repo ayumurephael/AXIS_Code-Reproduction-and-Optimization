@@ -1,0 +1,13 @@
+{
+  "checkpoint": "/home2/xuhaijie/axis_repro/baseline/experiments/reproduction/phase2_torch251/epoch_3_inference.pth",
+  "checkpoint_sha256": "8d562f8ff22c6709caaa2f7ba8208f3631a652d1932f001f39fa75ff8700fa4b",
+  "subset": "full",
+  "world_size": 2,
+  "modes": [
+    "base",
+    "wo_fixed_hint",
+    "wo_local_hint",
+    "wo_windows"
+  ],
+  "rows": 1136
+}

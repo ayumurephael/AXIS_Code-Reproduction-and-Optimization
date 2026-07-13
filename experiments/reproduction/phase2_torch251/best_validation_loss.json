@@ -1,0 +1,49 @@
+{
+  "selection_metric": "minimum full-validation mean teacher-forced loss",
+  "candidates": [
+    {
+      "predictions": "experiments/reproduction/val_epoch_1/predictions.jsonl",
+      "rows": 3000,
+      "mean_loss": 0.8187499130368233,
+      "median_loss": 0.8053155541419983,
+      "mean_loss_by_question_type": {
+        "multiple_choice": 0.7731450435428339,
+        "open_ended": 0.917630691406361,
+        "true_false": 0.7662652123280351
+      }
+    },
+    {
+      "predictions": "experiments/reproduction/val_epoch_2/predictions.jsonl",
+      "rows": 3000,
+      "mean_loss": 0.773748096982638,
+      "median_loss": 0.7651225328445435,
+      "mean_loss_by_question_type": {
+        "multiple_choice": 0.7307209034698118,
+        "open_ended": 0.871454249353801,
+        "true_false": 0.7200464117323038
+      }
+    },
+    {
+      "predictions": "experiments/reproduction/val_epoch_3/predictions.jsonl",
+      "rows": 3000,
+      "mean_loss": 0.7616787144641082,
+      "median_loss": 0.7490074932575226,
+      "mean_loss_by_question_type": {
+        "multiple_choice": 0.7212041717974546,
+        "open_ended": 0.8561493179563773,
+        "true_false": 0.7087358422152443
+      }
+    }
+  ],
+  "best": {
+    "predictions": "experiments/reproduction/val_epoch_3/predictions.jsonl",
+    "rows": 3000,
+    "mean_loss": 0.7616787144641082,
+    "median_loss": 0.7490074932575226,
+    "mean_loss_by_question_type": {
+      "multiple_choice": 0.7212041717974546,
+      "open_ended": 0.8561493179563773,
+      "true_false": 0.7087358422152443
+    }
+  }
+}

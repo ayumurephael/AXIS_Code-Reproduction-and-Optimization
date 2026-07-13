@@ -1,0 +1,18 @@
+{
+  "models": {
+    "base": {
+      "multiple_choice/final": 3.906978415783469,
+      "multiple_choice/correctness": 3.976746939834064,
+      "multiple_choice/reasoning_quality": 3.7441851929987475,
+      "open_ended/final": 3.0515516873945177,
+      "open_ended/accuracy": 2.963646267934937,
+      "open_ended/completeness": 2.6545547188243734,
+      "open_ended/relevance": 3.6172711400958626,
+      "true_false/final": 3.6666663933195776,
+      "true_false/correctness": 3.714285633549065,
+      "true_false/justification_quality": 3.5952375329753443,
+      "macro_final": 3.541732165499188
+    }
+  },
+  "paired_vs_axis": {}
+}
