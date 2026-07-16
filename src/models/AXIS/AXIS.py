@@ -23,7 +23,13 @@ class MultiheadAttention(nn.Module):
         head_dim: Dimension of each attention head.
     """
     
-    def __init__(self, embed_dim: int, num_heads: int) -> None:
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        qk_norm: bool = False,
+        qk_norm_seq_len: Optional[int] = None,
+    ) -> None:
         """Initialize MultiheadAttention module.
         
         Args:
@@ -41,6 +47,13 @@ class MultiheadAttention(nn.Module):
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
         self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.qk_norm = bool(qk_norm)
+        if self.qk_norm:
+            if qk_norm_seq_len is None or qk_norm_seq_len < 2:
+                raise ValueError("QK-Norm requires qk_norm_seq_len >= 2")
+            initial_scale = math.log2(qk_norm_seq_len**2 - qk_norm_seq_len)
+            self.qk_scale = nn.Parameter(torch.tensor(initial_scale, dtype=torch.float32))
+
 
     def forward(
         self,
@@ -59,6 +72,12 @@ class MultiheadAttention(nn.Module):
         K = K.view(key.shape[0], key.shape[1], self.num_heads, self.head_dim).transpose(1, 2)
         V = V.view(value.shape[0], value.shape[1], self.num_heads, self.head_dim).transpose(1, 2)
 
+        if self.qk_norm:
+            original_dtype = Q.dtype
+            Q = F.normalize(Q.float(), p=2, dim=-1).to(original_dtype)
+            K = F.normalize(K.float(), p=2, dim=-1).to(original_dtype)
+            Q = Q * self.qk_scale.to(device=Q.device, dtype=Q.dtype)
+
         # Prepare attention mask for padding
         if attn_mask is not None:
             attn_mask = attn_mask.unsqueeze(1).unsqueeze(2)
@@ -66,11 +85,16 @@ class MultiheadAttention(nn.Module):
             attn_mask = None
 
         # Compute scaled dot-product attention (non-causal)
-        y = F.scaled_dot_product_attention(
-            Q, K, V,
-            attn_mask=attn_mask,
-            is_causal=False  # Non-causal attention for encoder
-        )
+        if self.qk_norm:
+            y = F.scaled_dot_product_attention(
+                Q, K, V, attn_mask=attn_mask, is_causal=False, scale=1.0
+            )
+        else:
+            y = F.scaled_dot_product_attention(
+                Q, K, V,
+                attn_mask=attn_mask,
+                is_causal=False
+            )
 
         # Reshape and project output
         y = y.transpose(1, 2).contiguous().view(query.shape[0], query.shape[1], -1)
@@ -86,13 +110,20 @@ class Perceiver(nn.Module):
     and text embeddings.
     """
     
-    def __init__(self, 
-                 vocab_size: int,
-                 hidden_size: int,
-                 d_proj: int,
-                 num_prototype: int,
-                 num_fixed_tokens: int,
-                 num_heads: int):
+    def __init__(
+        self,
+        vocab_size: int,
+        hidden_size: int,
+        d_proj: int,
+        num_prototype: int,
+        num_fixed_tokens: int,
+        num_heads: int,
+        qk_norm: bool = False,
+        qk_norm_seq_len: Optional[int] = None,
+        continuous_bypass: bool = False,
+        direct_task_prompt: bool = False,
+        gate_bias: float = -2.0,
+    ):
         """Initialize Perceiver module.
         
         Args:
@@ -109,39 +140,47 @@ class Perceiver(nn.Module):
         self.d_proj = d_proj
         self.num_prototype = num_prototype
         self.num_fixed_tokens = num_fixed_tokens
-        
-        # Mapping layer from vocab to prototype space
+        self.continuous_bypass = bool(continuous_bypass)
+        self.direct_task_prompt = bool(direct_task_prompt)
+
         self.mapping_layer = nn.Linear(vocab_size, num_prototype)
-        
-        # Fixed prompt embeddings
-        self.fix_prompt_embeddings = nn.Parameter(
-            torch.randn(1, num_fixed_tokens, hidden_size)
-        )
-        
-        # Local time series projection
+        if self.direct_task_prompt:
+            self.task_prompt_embeddings = nn.Parameter(
+                torch.randn(1, num_fixed_tokens, hidden_size)
+            )
+        else:
+            self.fix_prompt_embeddings = nn.Parameter(
+                torch.randn(1, num_fixed_tokens, hidden_size)
+            )
+
         self.local_word_proj = nn.Linear(d_proj, hidden_size)
-        
-        # Cross-attention for local embeddings
         self.local_attention = MultiheadAttention(
             embed_dim=hidden_size,
-            num_heads=num_heads
+            num_heads=num_heads,
+            qk_norm=qk_norm,
+            qk_norm_seq_len=qk_norm_seq_len,
         )
-        
+        if self.continuous_bypass:
+            self.continuous_proj = nn.Linear(d_proj, hidden_size)
+            self.gate_proj = nn.Linear(2 * hidden_size, hidden_size)
+            self.fusion_norm = nn.LayerNorm(hidden_size)
+            self._gate_bias = float(gate_bias)
+
         self._init_parameters()
     
     def _init_parameters(self) -> None:
         """Initialize parameters for the Perceiver module."""
-        # Initialize linear layers
         linear_layers = [
             self.local_word_proj,
-            self.mapping_layer
+            self.mapping_layer,
         ]
+        if self.continuous_bypass:
+            linear_layers.append(self.continuous_proj)
         for layer in linear_layers:
             nn.init.xavier_uniform_(layer.weight)
             if layer.bias is not None:
                 nn.init.zeros_(layer.bias)
 
-        # Initialize attention layers
         attention_layers = [
             self.local_attention.q_proj,
             self.local_attention.k_proj,
@@ -150,11 +189,17 @@ class Perceiver(nn.Module):
         ]
         for layer in attention_layers:
             nn.init.xavier_uniform_(layer.weight)
-            if layer.bias is not None:
-                nn.init.zeros_(layer.bias)
 
-        # Initialize prompt embeddings
-        nn.init.normal_(self.fix_prompt_embeddings, mean=0.0, std=0.02)
+        if self.continuous_bypass:
+            nn.init.zeros_(self.gate_proj.weight)
+            nn.init.constant_(self.gate_proj.bias, self._gate_bias)
+
+        prompt = (
+            self.task_prompt_embeddings
+            if self.direct_task_prompt
+            else self.fix_prompt_embeddings
+        )
+        nn.init.normal_(prompt, mean=0.0, std=0.02)
     
     def get_source_embeddings(self, word_embeddings: torch.Tensor) -> torch.Tensor:
         """Transform word embeddings to source embeddings for cross-attention.
@@ -173,14 +218,16 @@ class Perceiver(nn.Module):
                                 start_idx: int,
                                 end_idx: int) -> torch.Tensor:
         local_ts_embeddings = local_embeddings[start_idx:end_idx, :].unsqueeze(0)
-        local_ts_embeddings = self.local_word_proj(local_ts_embeddings)
-        projected_local_embeddings = self.local_attention(
-            local_ts_embeddings, 
-            source_embeddings, 
-            source_embeddings
-        ).squeeze(0)
-        
-        return projected_local_embeddings
+        semantic = self.local_attention(
+            self.local_word_proj(local_ts_embeddings),
+            source_embeddings,
+            source_embeddings,
+        )
+        if not self.continuous_bypass:
+            return semantic.squeeze(0)
+        continuous = self.continuous_proj(local_ts_embeddings)
+        gate = torch.sigmoid(self.gate_proj(torch.cat([continuous, semantic], dim=-1)))
+        return self.fusion_norm(continuous + gate * semantic).squeeze(0)
     
     def process_fixed_embeddings(self, 
                                 source_embeddings: torch.Tensor,
@@ -194,16 +241,15 @@ class Perceiver(nn.Module):
         Returns:
             Processed fixed embeddings.
         """
-        # Get fixed embeddings
+        if self.direct_task_prompt:
+            return self.task_prompt_embeddings.squeeze(0)[:num_tokens]
+
         fixed_embeddings = self.fix_prompt_embeddings.squeeze(0)[:num_tokens].unsqueeze(0)
-        
-        # Apply cross-attention
         processed_fixed_embeddings = self.local_attention(
             fixed_embeddings,
             source_embeddings,
             source_embeddings
         ).squeeze(0)
-        
         return processed_fixed_embeddings
 
 
@@ -259,7 +305,12 @@ class AXIS(nn.Module):
             d_proj=config.ts_config.d_proj,
             num_prototype=num_prototype,
             num_fixed_tokens=self.num_fixed_tokens,
-            num_heads=config.llm_config.num_heads
+            num_heads=config.llm_config.num_heads,
+            qk_norm=getattr(config.llm_config, "qk_norm", False),
+            qk_norm_seq_len=getattr(config.llm_config, "qk_norm_seq_len", None),
+            continuous_bypass=getattr(config.llm_config, "continuous_bypass", False),
+            direct_task_prompt=getattr(config.llm_config, "direct_task_prompt", False),
+            gate_bias=getattr(config.llm_config, "gate_bias", -2.0),
         )
         
         self.local_hint_token_id = self.tokenizer.convert_tokens_to_ids('<|local_hint|>')

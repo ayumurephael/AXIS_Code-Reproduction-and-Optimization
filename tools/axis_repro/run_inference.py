@@ -10,6 +10,7 @@ import torch
 
 from .common import load_axis_records, read_jsonl
 from .io_utils import append_jsonl
+from .architecture_redesign import add_architecture_arguments
 from .model_utils import build_model, load_axis_checkpoint, sha256_file
 
 
@@ -22,17 +23,22 @@ def dist_info():
     return rank, world, local
 
 
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--data", default="data/AXIS_qa_test")
+    parser.add_argument("--subset", choices=["paper140", "full"], default="paper140")
+    parser.add_argument("--series-split-manifest")
+    parser.add_argument("--series-split-key", default="val_series")
+    parser.add_argument("--modes", nargs="+", default=["base"])
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--max-records", type=int)
+    add_architecture_arguments(parser, default_variant="loss_only")
+    return parser
+
+
 def main() -> None:
-    p = argparse.ArgumentParser()
-    p.add_argument("--checkpoint", required=True)
-    p.add_argument("--data", default="data/AXIS_qa_test")
-    p.add_argument("--subset", choices=["paper140", "full"], default="paper140")
-    p.add_argument("--series-split-manifest")
-    p.add_argument("--series-split-key", default="val_series")
-    p.add_argument("--modes", nargs="+", default=["base"])
-    p.add_argument("--output", required=True)
-    p.add_argument("--max-records", type=int)
-    a = p.parse_args()
+    a = build_parser().parse_args()
     rank, world, local = dist_info()
     records = load_axis_records(a.data, a.subset, max_records=a.max_records)
     if a.series_split_manifest:
@@ -43,7 +49,11 @@ def main() -> None:
     shard = out / f"rank{rank}.jsonl"
     done = {(x["record_id"], x["mode"]) for x in read_jsonl(shard)} if shard.exists() else set()
 
-    model = build_model()
+    model = build_model(
+        architecture_variant=a.architecture_variant,
+        qk_norm_seq_len=a.qk_norm_seq_len,
+        gate_bias=a.gate_bias,
+    )
     load_axis_checkpoint(model, a.checkpoint)
     model.to(torch.device("cuda", local)).eval()
     for r in records:
@@ -72,6 +82,9 @@ def main() -> None:
         (out / "run_manifest.json").write_text(json.dumps({
             "checkpoint": str(Path(a.checkpoint).resolve()), "checkpoint_sha256": sha256_file(a.checkpoint),
             "subset": a.subset, "world_size": world, "modes": a.modes, "rows": len(rows),
+            "architecture_variant": a.architecture_variant,
+            "qk_norm_seq_len": a.qk_norm_seq_len,
+            "gate_bias": a.gate_bias,
         }, indent=2), encoding="utf-8")
         print(f"wrote {len(rows)} rows to {merged}")
     if world > 1: torch.distributed.destroy_process_group()

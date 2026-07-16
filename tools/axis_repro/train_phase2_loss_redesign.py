@@ -16,6 +16,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
 from . import model_utils
+from .architecture_redesign import (
+    ARCHITECTURE_VARIANTS,
+    add_architecture_arguments,
+    local_length_percentile,
+    qk_scale_initial_value,
+)
 from .loss_redesign import (
     SLR_MODES,
     CounterfactualAXISDataset,
@@ -177,8 +183,16 @@ def _axis_loss_redesign_forward(
     return loss
 
 
-def build_model():
-    model = _PLAIN_BUILD()
+def build_model(
+    architecture_variant: str = "loss_only",
+    qk_norm_seq_len: int | None = None,
+    gate_bias: float = -2.0,
+):
+    model = _PLAIN_BUILD(
+        architecture_variant=architecture_variant,
+        qk_norm_seq_len=qk_norm_seq_len,
+        gate_bias=gate_bias,
+    )
     llm = model.axis.model
     llm.gradient_checkpointing_enable()
     llm.enable_input_require_grads()
@@ -195,7 +209,9 @@ def save_atomic(payload, path: Path) -> None:
     os.replace(temporary, path)
 
 
-def main() -> None:
+def build_parser(
+    default_architecture_variant: str = "loss_only",
+) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--phase1", required=True)
     parser.add_argument("--counterfactual-index", required=True)
@@ -210,7 +226,15 @@ def main() -> None:
     parser.add_argument("--max-steps", type=int)
     parser.add_argument("--beta", type=float, default=1.0)
     parser.add_argument("--margin", type=float, default=math.log(2.0))
-    args = parser.parse_args()
+    add_architecture_arguments(
+        parser,
+        default_variant=default_architecture_variant,
+    )
+    return parser
+
+
+def main(default_architecture_variant: str = "loss_only") -> None:
+    args = build_parser(default_architecture_variant).parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
 
@@ -226,7 +250,52 @@ def main() -> None:
 
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    model = build_model()
+    dataset = CounterfactualAXISDataset(
+        args.data,
+        args.counterfactual_index,
+        split="train",
+        train_ratio=0.95,
+        seed=args.seed,
+    )
+    architecture_flags = ARCHITECTURE_VARIANTS[args.architecture_variant]
+    qk_norm_seq_len = args.qk_norm_seq_len
+    qk_length_source = None
+    if architecture_flags["qk_norm"]:
+        if qk_norm_seq_len is None and rank == 0:
+            qk_norm_seq_len = local_length_percentile(dataset.series_files, 97.5)
+        qk_length_tensor = torch.tensor(
+            [qk_norm_seq_len or 0],
+            dtype=torch.int64,
+            device=local,
+        )
+        torch.distributed.broadcast(qk_length_tensor, src=0)
+        qk_norm_seq_len = int(qk_length_tensor.item())
+        qk_length_source = (
+            "cli_override"
+            if args.qk_norm_seq_len is not None
+            else "seeded_train_local_p97.5"
+        )
+    else:
+        qk_norm_seq_len = None
+    architecture_meta = {
+        "variant": args.architecture_variant,
+        **architecture_flags,
+        "qk_norm_seq_len": qk_norm_seq_len,
+        "qk_scale_initial": (
+            qk_scale_initial_value(qk_norm_seq_len)
+            if qk_norm_seq_len is not None
+            else None
+        ),
+        "qk_length_source": qk_length_source,
+        "qk_length_percentile": 97.5 if qk_length_source == "seeded_train_local_p97.5" else None,
+        "gate_bias": args.gate_bias,
+        "task_prompt_tokens": 30,
+    }
+    model = build_model(
+        architecture_variant=args.architecture_variant,
+        qk_norm_seq_len=qk_norm_seq_len,
+        gate_bias=args.gate_bias,
+    )
     load_phase1_fresh_hint(model, args.phase1)
     trainable = freeze_for_phase2(model)
     model.to(local)
@@ -235,13 +304,6 @@ def main() -> None:
         ddp.module.axis.perceiver.parameters(),
         lr=args.lr,
         weight_decay=args.weight_decay,
-    )
-    dataset = CounterfactualAXISDataset(
-        args.data,
-        args.counterfactual_index,
-        split="train",
-        train_ratio=0.95,
-        seed=args.seed,
     )
     sampler = DistributedSampler(dataset, num_replicas=world, rank=rank, shuffle=True, seed=args.seed)
     loader = DataLoader(
@@ -274,6 +336,7 @@ def main() -> None:
         "trainable_parameters": trainable,
         "train_series": len(dataset),
         "steps_per_rank_epoch": len(loader),
+        "architecture": architecture_meta,
     }
     if rank == 0:
         print(json.dumps(metadata), flush=True)
