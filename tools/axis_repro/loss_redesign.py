@@ -184,19 +184,19 @@ def memory_safe_token_nll_sums(
         chunk_targets = targets[:, start:start + chunk_size]
         chunk_head_mask = head_mask[:, start:start + chunk_size].bool()
 
-        def token_losses(current_hidden):
+        def token_losses(current_hidden, current_targets):
             logits = lm_head(current_hidden).float()
             return F.cross_entropy(
                 logits.reshape(-1, logits.shape[-1]),
-                chunk_targets.reshape(-1),
+                current_targets.reshape(-1),
                 ignore_index=-100,
                 reduction="none",
-            ).reshape(chunk_targets.shape)
+            ).reshape(current_targets.shape)
 
         if checkpoint_chunks and torch.is_grad_enabled():
-            nll = checkpoint(token_losses, chunk_hidden, use_reentrant=False)
+            nll = checkpoint(token_losses, chunk_hidden, chunk_targets, use_reentrant=False)
         else:
-            nll = token_losses(chunk_hidden)
+            nll = token_losses(chunk_hidden, chunk_targets)
         valid = chunk_targets.ne(-100)
         selected_head = valid & chunk_head_mask
         full_sums = full_sums + (nll * valid).sum(dim=1)

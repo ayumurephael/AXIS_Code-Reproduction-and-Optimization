@@ -224,5 +224,17 @@ class MemorySafeNLLTests(unittest.TestCase):
         self.assertTrue(torch.equal(head_counts, (valid & head_mask).sum(1)))
 
 
+    def test_checkpoint_backward_uses_each_chunks_own_targets(self):
+        lm_head = torch.nn.Linear(2, 3, bias=False)
+        hidden = torch.randn(1, 3, 2, requires_grad=True)
+        targets = torch.tensor([[0, 1, 2]])
+        head_mask = torch.tensor([[True, True, True]])
+        full_sums, _, _, _ = memory_safe_token_nll_sums(
+            lm_head, hidden, targets, head_mask, chunk_size=2, checkpoint_chunks=True
+        )
+        full_sums.sum().backward()
+        self.assertIsNotNone(hidden.grad)
+
+
 if __name__ == "__main__":
     unittest.main()
