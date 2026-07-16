@@ -5,6 +5,11 @@ import math
 from typing import Tuple, List, Optional, Dict, Any, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaTokenizer
 from src.models.AXIS.Pretrain_ts_encoder import TimeSeriesPretrainModel
+from tools.axis_repro.loss_redesign import (
+    build_answer_head_mask_from_offsets,
+    evidence_mode_spec,
+    format_axis_question_prompt,
+)
 
 class MultiheadAttention(nn.Module):
     """Standard Multi-head Attention module, non-causal by default.
@@ -266,151 +271,158 @@ class AXIS(nn.Module):
 
 
 
-    def generate_input_ids_and_labels(self, 
-                                      questions: List[str], 
-                                      answers: List[str], 
-                                      time_series: torch.Tensor,
-                                      start_indices: List[int], 
-                                      end_indices: List[int],
-                                      ablation_mode: Optional[str] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+    def generate_input_ids_and_labels(
+        self,
+        questions: List[str],
+        answers: List[str],
+        time_series: torch.Tensor,
+        start_indices: List[int],
+        end_indices: List[int],
+        ablation_mode: Optional[str] = None,
+        question_types: Optional[List[str]] = None,
+        window_values_override: Optional[List[torch.Tensor]] = None,
+        evidence_mode: Optional[str] = None,
+        return_answer_head_mask: bool = False,
+    ):
         batch_size = len(questions)
+        if len(answers) != batch_size or len(start_indices) != batch_size or len(end_indices) != batch_size:
+            raise ValueError("questions, answers, and window indices must have the same length")
+        if time_series.size(0) != batch_size:
+            raise ValueError("time-series batch size does not match questions")
+        if window_values_override is not None and len(window_values_override) != batch_size:
+            raise ValueError("window override batch size does not match questions")
+        if return_answer_head_mask and (question_types is None or len(question_types) != batch_size):
+            raise ValueError("question types are required for answer-head supervision")
+
         question_prompts = []
         answer_prompts = []
-        
-        # Verify input lengths
-        if len(answers) != batch_size:
-            raise ValueError(f"Answers length ({len(answers)}) does not match batch size ({batch_size})")
-        if len(start_indices) != batch_size:
-            raise ValueError(f"Start indices length ({len(start_indices)}) does not match batch size ({batch_size})")
-        if len(end_indices) != batch_size:
-            raise ValueError(f"End indices length ({len(end_indices)}) does not match batch size ({batch_size})")
-        if time_series.size(0) != batch_size:
-            raise ValueError(f"Time series batch size ({time_series.size(0)}) does not match batch size ({batch_size})")
-        
-        for i in range(batch_size):
-            num_local_hint_tokens = end_indices[i] - start_indices[i]
-            num_fixed_hint_tokens = self.num_fixed_tokens
-
-            # Create special token sequences for each hint type (may be removed by ablation)
-            if ablation_mode == "wo_local_hint":
-                local_hint_tokens = ""
+        mode_local = mode_window = True
+        if evidence_mode is not None:
+            mode_local, mode_window, _ = evidence_mode_spec(evidence_mode)
+        for index in range(batch_size):
+            include_local = mode_local and ablation_mode != "wo_local_hint"
+            include_window = mode_window and ablation_mode != "wo_windows"
+            include_fixed = ablation_mode != "wo_fixed_hint"
+            if window_values_override is None:
+                values = time_series[index, start_indices[index]:end_indices[index]]
             else:
-                local_hint_tokens = "<|local_hint|>" * num_local_hint_tokens
-            
-            if ablation_mode == "wo_fixed_hint":
-                fixed_hint_tokens = ""
-            else:
-                fixed_hint_tokens = "<|fixed_hint|>" * num_fixed_hint_tokens
+                values = window_values_override[index]
+            missing_text = "(not provided)" if evidence_mode is not None else "(removed)"
+            question_prompts.append(format_axis_question_prompt(
+                question=questions[index],
+                start_index=start_indices[index],
+                end_index=end_indices[index],
+                window_values=values,
+                num_fixed_tokens=self.num_fixed_tokens,
+                include_local=include_local,
+                include_window=include_window,
+                include_fixed=include_fixed,
+                missing_window_text=missing_text,
+            ))
+            answer_prompts.append(f"Answer: {answers[index]}")
 
-            # Time series values text (may be removed by ablation)
-            str_time_series = ', '.join(f'{(x * 100):.0f}' for x in time_series[i][start_indices[i]:end_indices[i]].tolist())
-            if ablation_mode == "wo_windows":
-                str_time_series_text = "(removed)"
-            else:
-                str_time_series_text = str_time_series
-
-            # Build prompt with optional ablations (prompt stays in English)
-            question_prompt = f"""
-            You are an expert time series analyst. Analyze the provided data and answer the question.
-
-            ### Time Series Data
-            - **Window:** Steps {start_indices[i]} to {end_indices[i]}
-            - **Values (scaled by 100):** {str_time_series_text}
-
-            ### Contextual Hints
-            - **Per-Step Analysis:** {local_hint_tokens}
-            - **Overall Summary Hints:** {fixed_hint_tokens}
-
-            ### Question
-            {questions[i]}
-            """
-            question_prompts.append(question_prompt)
-            answer_prompts.append(f"Answer: {answers[i]}")
         question_input = self.tokenizer(
             question_prompts,
             return_tensors="pt",
             padding=True,
             truncation=True,
-            add_special_tokens=True
+            add_special_tokens=True,
         )
-        answer_input = self.tokenizer(
-            answer_prompts,
+        answer_kwargs = dict(
             return_tensors="pt",
             padding=True,
             truncation=True,
-            add_special_tokens=True
+            add_special_tokens=True,
         )
-        full_input_ids = torch.cat([question_input['input_ids'], 
-                                    torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0),
-                                    answer_input['input_ids'], 
-                                    torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0)],
-                                    dim=1)
-        full_attention_mask = torch.cat([question_input['attention_mask'], 
-                                         torch.ones(batch_size, 1),
-                                         answer_input['attention_mask'], 
-                                         torch.ones(batch_size, 1)],
-                                         dim=1)
-        full_labels = torch.cat([torch.full_like(question_input['input_ids'], -100), 
-                                torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0),
-                                answer_input['input_ids'], 
-                                torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0)],
-                                dim=1)
+        if return_answer_head_mask:
+            answer_kwargs["return_offsets_mapping"] = True
+        answer_input = self.tokenizer(answer_prompts, **answer_kwargs)
+        offset_mapping = answer_input.pop("offset_mapping", None)
 
+        eos_column = torch.full((batch_size, 1), self.tokenizer.eos_token_id, dtype=torch.long)
+        one_column = torch.ones(batch_size, 1, dtype=question_input["attention_mask"].dtype)
+        full_input_ids = torch.cat(
+            [question_input["input_ids"], eos_column, answer_input["input_ids"], eos_column],
+            dim=1,
+        )
+        full_attention_mask = torch.cat(
+            [question_input["attention_mask"], one_column, answer_input["attention_mask"], one_column],
+            dim=1,
+        )
+        full_labels = torch.cat(
+            [
+                torch.full_like(question_input["input_ids"], -100),
+                eos_column,
+                answer_input["input_ids"],
+                eos_column,
+            ],
+            dim=1,
+        )
         full_labels[full_labels == self.tokenizer.pad_token_id] = -100
-        question_length = question_input['input_ids'].shape[1]
         full_labels[:, -1] = self.tokenizer.eos_token_id
+        question_length = question_input["input_ids"].shape[1]
 
-        return full_input_ids, full_attention_mask, full_labels, question_length
+        if not return_answer_head_mask:
+            return full_input_ids, full_attention_mask, full_labels, question_length
+        answer_head_mask, _ = build_answer_head_mask_from_offsets(
+            answers,
+            question_types or [],
+            offset_mapping,
+            answer_input["attention_mask"],
+        )
+        full_answer_head_mask = torch.cat(
+            [
+                torch.zeros_like(question_input["input_ids"], dtype=torch.bool),
+                torch.zeros((batch_size, 1), dtype=torch.bool),
+                answer_head_mask,
+                torch.zeros((batch_size, 1), dtype=torch.bool),
+            ],
+            dim=1,
+        )
+        return full_input_ids, full_attention_mask, full_labels, question_length, full_answer_head_mask
      
-    def get_hint_embeddings(self, 
-                            input_ids: torch.Tensor,
-                            local_embeddings: torch.Tensor, 
-                            start_indices: List[int], 
-                            end_indices: List[int]) -> torch.Tensor:
-        """Replace special tokens in input embeddings with computed hint embeddings.
-        
-        Args:
-            input_ids: Input token IDs of shape (batch_size, seq_len).
-            local_embeddings: Local time series embeddings of shape (batch_size, local_seq_len, d_proj).
-            start_indices: Start indices for local embeddings extraction.
-            end_indices: End indices for local embeddings extraction.
-            
-        Returns:
-            Modified input embeddings with special tokens replaced by hint embeddings.
-        """
+    def get_hint_embeddings(
+        self,
+        input_ids: torch.Tensor,
+        local_embeddings: torch.Tensor,
+        start_indices: List[int],
+        end_indices: List[int],
+        local_window_embeddings_override: Optional[List[torch.Tensor]] = None,
+    ) -> torch.Tensor:
         input_embeddings = self.model.get_input_embeddings()(input_ids)
-        batch_size = local_embeddings.shape[0]
-        
-        # Get word embeddings dynamically to handle device placement
+        batch_size = input_ids.shape[0]
+        if local_window_embeddings_override is not None and len(local_window_embeddings_override) != batch_size:
+            raise ValueError("local override batch size does not match input IDs")
         word_embeddings = self.model.get_input_embeddings().weight
         source_embeddings = self.perceiver.get_source_embeddings(word_embeddings)
-    
-        for i in range(batch_size):
-            # Process local embeddings using Perceiver
-            projected_local_embeddings = self.perceiver.process_local_embeddings(
-                local_embeddings[i], 
-                source_embeddings, 
-                start_indices[i], 
-                end_indices[i]
-            )
-            
-            current_input_ids = input_ids[i]
-            
-            # Replace local hint tokens
-            local_hint_positions = (current_input_ids == self.local_hint_token_id).nonzero(as_tuple=True)[0]
-            input_embeddings[i, local_hint_positions] = projected_local_embeddings[:len(local_hint_positions)].to(input_embeddings.dtype)
 
-            # Process fixed embeddings using Perceiver
-            fixed_hint_positions = (current_input_ids == self.fixed_hint_token_id).nonzero(as_tuple=True)[0]
-            if len(fixed_hint_positions) > 0:
-                processed_fixed_embeddings = self.perceiver.process_fixed_embeddings(
-                    source_embeddings, 
-                    len(fixed_hint_positions)
+        for index in range(batch_size):
+            current_input_ids = input_ids[index]
+            local_positions = (current_input_ids == self.local_hint_token_id).nonzero(as_tuple=True)[0]
+            if len(local_positions) > 0:
+                if local_window_embeddings_override is None:
+                    local_source = local_embeddings[index]
+                    local_start, local_end = start_indices[index], end_indices[index]
+                else:
+                    local_source = local_window_embeddings_override[index]
+                    local_start, local_end = 0, local_source.shape[0]
+                if local_end - local_start != len(local_positions):
+                    raise ValueError("local override length does not match anchor hint-token count")
+                projected = self.perceiver.process_local_embeddings(
+                    local_source,
+                    source_embeddings,
+                    local_start,
+                    local_end,
                 )
-                # Match dtype with input_embeddings
-                processed_fixed_embeddings_typed = processed_fixed_embeddings.to(input_embeddings.dtype)
-                input_embeddings[i, fixed_hint_positions] = processed_fixed_embeddings_typed
+                input_embeddings[index, local_positions] = projected.to(input_embeddings.dtype)
 
+            fixed_positions = (current_input_ids == self.fixed_hint_token_id).nonzero(as_tuple=True)[0]
+            if len(fixed_positions) > 0:
+                processed_fixed = self.perceiver.process_fixed_embeddings(
+                    source_embeddings,
+                    len(fixed_positions),
+                )
+                input_embeddings[index, fixed_positions] = processed_fixed.to(input_embeddings.dtype)
         return input_embeddings
 
     def forward(self, 
@@ -421,7 +433,11 @@ class AXIS(nn.Module):
                 start_indices: List[int],
                 end_indices: List[int],
                 return_logits: Optional[bool] = False,
-                ablation_mode: Optional[str] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+                ablation_mode: Optional[str] = None,
+                question_types: Optional[List[str]] = None,
+                window_values_override: Optional[List[torch.Tensor]] = None,
+                local_window_embeddings_override: Optional[List[torch.Tensor]] = None,
+                evidence_mode: Optional[str] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Forward pass for AXIS model.
         
         Args:
@@ -444,7 +460,10 @@ class AXIS(nn.Module):
             time_series=time_series,
             start_indices=start_indices,
             end_indices=end_indices,
-            ablation_mode=ablation_mode
+            ablation_mode=ablation_mode,
+            question_types=question_types,
+            window_values_override=window_values_override,
+            evidence_mode=evidence_mode,
         )
         
         # Move tensors to model device for multi-GPU compatibility
@@ -457,7 +476,8 @@ class AXIS(nn.Module):
             input_ids=input_ids, 
             local_embeddings=local_embeddings, 
             start_indices=start_indices, 
-            end_indices=end_indices
+            end_indices=end_indices,
+            local_window_embeddings_override=local_window_embeddings_override
         )
         
         # Model forward pass
@@ -557,56 +577,77 @@ class AXISCombinedModel(nn.Module):
         self.axis = AXIS(config)
         self.ts_pretrain_model = TimeSeriesPretrainModel(config)
     
-    def forward(self, 
-                padded_sequences: torch.Tensor,
-                attention_masks: torch.Tensor,
-                questions: List[str],
-                answers: List[str],
-                start_indices: List[int],
-                end_indices: List[int],
-                return_logits: Optional[bool] = False,
-                ablation_mode: Optional[str] = None) -> torch.Tensor:
-        """Forward pass for the combined model.
-        
-        Args:
-            padded_sequences: Padded time series sequences
-            attention_masks: Attention masks for the sequences
-            questions: List of questions
-            answers: List of answers
-            start_indices: Start indices for local embeddings
-            end_indices: End indices for local embeddings
-            return_logits: Whether to return logits along with loss
-            
-        Returns:
-            Loss tensor (and optionally logits)
-        """
-        # Generate embeddings using pretrain model
-        # Check if ts training is enabled
-
+    def forward(
+        self,
+        padded_sequences: torch.Tensor,
+        attention_masks: torch.Tensor,
+        questions: List[str],
+        answers: List[str],
+        start_indices: List[int],
+        end_indices: List[int],
+        return_logits: Optional[bool] = False,
+        ablation_mode: Optional[str] = None,
+        question_types: Optional[List[str]] = None,
+        negative_local_sequences: Optional[torch.Tensor] = None,
+        negative_local_masks: Optional[torch.Tensor] = None,
+        negative_local_start_indices: Optional[List[int]] = None,
+        negative_local_end_indices: Optional[List[int]] = None,
+        negative_window_values: Optional[List[torch.Tensor]] = None,
+        slr_mode: Optional[str] = None,
+        source_valid: Optional[torch.Tensor] = None,
+        beta: float = 1.0,
+        margin: float = math.log(2.0),
+    ) -> torch.Tensor:
         if not self.config.enable_ts_train:
             with torch.no_grad():
-                local_embeddings = self.ts_pretrain_model(
-                    padded_sequences, 
-                    mask=attention_masks
-                )
+                local_embeddings = self.ts_pretrain_model(padded_sequences, mask=attention_masks)
         else:
-            local_embeddings = self.ts_pretrain_model(
-                padded_sequences, 
-                mask=attention_masks
-            )
-        
-        # Generate predictions using axis model
-        return self.axis(
-            local_embeddings=local_embeddings,
-            time_series=padded_sequences,
-            questions=questions,
-            answers=answers,
-            start_indices=start_indices,
-            end_indices=end_indices,
-            return_logits=return_logits,
-            ablation_mode=ablation_mode
-        )
-    
+            local_embeddings = self.ts_pretrain_model(padded_sequences, mask=attention_masks)
+
+        axis_kwargs = {
+            "local_embeddings": local_embeddings,
+            "time_series": padded_sequences,
+            "questions": questions,
+            "answers": answers,
+            "start_indices": start_indices,
+            "end_indices": end_indices,
+            "return_logits": return_logits,
+            "ablation_mode": ablation_mode,
+        }
+        if slr_mode is not None:
+            _, _, changed_source = evidence_mode_spec(slr_mode)
+            negative_local_windows = None
+            if changed_source == "local":
+                required = (
+                    negative_local_sequences,
+                    negative_local_masks,
+                    negative_local_start_indices,
+                    negative_local_end_indices,
+                )
+                if any(value is None for value in required):
+                    raise ValueError("local SLR mode requires negative Local sequences and indices")
+                with torch.no_grad():
+                    negative_embeddings = self.ts_pretrain_model(
+                        negative_local_sequences,
+                        mask=negative_local_masks,
+                    )
+                negative_local_windows = [
+                    negative_embeddings[index, start:end]
+                    for index, (start, end) in enumerate(
+                        zip(negative_local_start_indices, negative_local_end_indices)
+                    )
+                ]
+            axis_kwargs.update({
+                "question_types": question_types,
+                "negative_local_window_embeddings": negative_local_windows,
+                "negative_window_values": negative_window_values,
+                "slr_mode": slr_mode,
+                "source_valid": source_valid,
+                "beta": beta,
+                "margin": margin,
+            })
+        return self.axis(**axis_kwargs)
+
     def generate(self,
                  padded_sequences: torch.Tensor,
                  attention_masks: torch.Tensor,
