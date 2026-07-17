@@ -125,7 +125,9 @@ class Pipeline:
         self.model_name = str(Path(args.model_name).resolve())
         self.credential_file = Path(args.credential_file).resolve()
         self.poll_seconds = args.poll_seconds
-        self.python = str((self.root / ".venv" / "bin" / "python").resolve())
+        # Preserve the virtual-environment entry point. Resolving this symlink
+        # selects the base interpreter and silently drops the venv site-packages.
+        self.python = str(self.root / ".venv" / "bin" / "python")
         self.gpus = args.gpus
         self.expected_donor_top_m = args.expected_donor_top_m
         self.stop_before_geval = bool(args.stop_before_geval)

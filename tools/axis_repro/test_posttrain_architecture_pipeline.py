@@ -1,6 +1,9 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from .posttrain_architecture_pipeline import (
+    Pipeline,
     PipelineError,
     build_parser,
     strict_best_epoch,
@@ -9,6 +12,23 @@ from .posttrain_architecture_pipeline import (
 
 
 class PosttrainArchitecturePipelineTest(unittest.TestCase):
+    def test_pipeline_preserves_virtualenv_python_entrypoint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            args = build_parser().parse_args([
+                "--root",
+                str(root),
+                "--model-name",
+                str(root / "model"),
+                "--credential-file",
+                str(root / "credential.md"),
+            ])
+            pipeline = Pipeline(args)
+            self.assertEqual(
+                pipeline.python,
+                str(root / ".venv" / "bin" / "python"),
+            )
+
     def test_strict_best_epoch(self) -> None:
         payload = {
             "candidates": [
