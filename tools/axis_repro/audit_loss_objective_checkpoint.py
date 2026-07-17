@@ -1,0 +1,95 @@
+"""Fail-closed audit for the coherent binary-state Phase-II objective."""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import torch
+
+
+EXPECTED_OBJECTIVE = "answer_nll_plus_coherent_binary_state_ce_v2"
+EXPECTED_GROUP_LRS = {
+    "local_continuous": 5e-5,
+    "prototype_attention": 2e-5,
+    "task_prompt": 5e-5,
+}
+
+
+def audit_loss_objective_checkpoint(payload: dict) -> dict:
+    metadata = payload.get("reproduction_meta")
+    if not isinstance(metadata, dict):
+        raise ValueError("checkpoint is missing reproduction metadata")
+    if metadata.get("objective") != EXPECTED_OBJECTIVE or int(metadata.get("objective_version", 0)) != 2:
+        raise ValueError("checkpoint does not use coherent binary state objective v2")
+    if int(metadata.get("counterfactual_index_version", 0)) != 2:
+        raise ValueError("checkpoint was not trained with coherent counterfactual index v2")
+    if abs(float(metadata.get("beta_target", -1.0)) - 0.2) > 1e-12:
+        raise ValueError("checkpoint beta target is not 0.2")
+    if abs(float(metadata.get("beta_warmup_ratio", -1.0)) - 0.1) > 1e-12:
+        raise ValueError("checkpoint beta warmup ratio is not 0.1")
+    if abs(float(metadata.get("gradient_clip", -1.0)) - 1.0) > 1e-12:
+        raise ValueError("checkpoint gradient clipping is not 1.0")
+    if metadata.get("fixed_hint_state_gradient") is not False:
+        raise ValueError("state loss must not update Fixed/task-prompt parameters")
+    if metadata.get("fixed_hint_answer_gradient") is not True:
+        raise ValueError("answer loss must train Fixed/task-prompt parameters")
+    if "margin" in metadata or "modes" in metadata:
+        raise ValueError("checkpoint contains obsolete SLR metadata")
+
+    verbalizers = metadata.get("state_verbalizers", {})
+    normal_id = verbalizers.get("normal_id")
+    anomalous_id = verbalizers.get("anomalous_id")
+    if not isinstance(normal_id, int) or not isinstance(anomalous_id, int) or normal_id == anomalous_id:
+        raise ValueError("checkpoint has invalid one-token state verbalizers")
+    if not str(verbalizers.get("question", "")).rstrip().endswith("State:"):
+        raise ValueError("checkpoint state prompt does not end at the classification position")
+
+    optimizer_groups = metadata.get("optimizer_groups", {})
+    for name, expected_lr in EXPECTED_GROUP_LRS.items():
+        group = optimizer_groups.get(name)
+        if not group or int(group.get("parameters", 0)) <= 0:
+            raise ValueError(f"checkpoint is missing optimizer group {name}")
+        if abs(float(group.get("lr", -1.0)) - expected_lr) > 1e-12:
+            raise ValueError(f"checkpoint optimizer LR mismatch for {name}")
+    policy = metadata.get("counterfactual_policy", {})
+    if policy.get("phase_fallback") is not False:
+        raise ValueError("checkpoint counterfactual policy used a phase fallback")
+    if policy.get("post_patch_dual_source_validation") is not True:
+        raise ValueError("checkpoint counterfactual policy skipped dual-source validation")
+    if not float(policy.get("gamma_window", 0.0)) > 0.0 or not float(policy.get("gamma_local", 0.0)) > 0.0:
+        raise ValueError("checkpoint counterfactual thresholds are not positive")
+
+    return {
+        "ok": True,
+        "objective": EXPECTED_OBJECTIVE,
+        "epoch": int(payload.get("epoch", 0)),
+        "global_step": int(payload.get("global_step", 0)),
+        "beta_target": metadata["beta_target"],
+        "beta_warmup_ratio": metadata["beta_warmup_ratio"],
+        "gradient_clip": metadata["gradient_clip"],
+        "state_verbalizers": {
+            "normal_text": verbalizers.get("normal_text"),
+            "anomalous_text": verbalizers.get("anomalous_text"),
+            "normal_id": normal_id,
+            "anomalous_id": anomalous_id,
+        },
+        "optimizer_groups": optimizer_groups,
+        "counterfactual_index_version": metadata["counterfactual_index_version"],
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--output")
+    args = parser.parse_args()
+    payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    result = audit_loss_objective_checkpoint(payload)
+    if args.output:
+        Path(args.output).write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(json.dumps(result), flush=True)
+
+
+if __name__ == "__main__":
+    main()

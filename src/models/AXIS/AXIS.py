@@ -5,11 +5,7 @@ import math
 from typing import Tuple, List, Optional, Dict, Any, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaTokenizer
 from src.models.AXIS.Pretrain_ts_encoder import TimeSeriesPretrainModel
-from tools.axis_repro.loss_redesign import (
-    build_answer_head_mask_from_offsets,
-    evidence_mode_spec,
-    format_axis_question_prompt,
-)
+from tools.axis_repro.loss_redesign import format_axis_question_prompt
 
 class MultiheadAttention(nn.Module):
     """Standard Multi-head Attention module, non-causal by default.
@@ -337,10 +333,7 @@ class AXIS(nn.Module):
         start_indices: List[int],
         end_indices: List[int],
         ablation_mode: Optional[str] = None,
-        question_types: Optional[List[str]] = None,
         window_values_override: Optional[List[torch.Tensor]] = None,
-        evidence_mode: Optional[str] = None,
-        return_answer_head_mask: bool = False,
     ):
         batch_size = len(questions)
         if len(answers) != batch_size or len(start_indices) != batch_size or len(end_indices) != batch_size:
@@ -349,23 +342,18 @@ class AXIS(nn.Module):
             raise ValueError("time-series batch size does not match questions")
         if window_values_override is not None and len(window_values_override) != batch_size:
             raise ValueError("window override batch size does not match questions")
-        if return_answer_head_mask and (question_types is None or len(question_types) != batch_size):
-            raise ValueError("question types are required for answer-head supervision")
 
         question_prompts = []
         answer_prompts = []
-        mode_local = mode_window = True
-        if evidence_mode is not None:
-            mode_local, mode_window, _ = evidence_mode_spec(evidence_mode)
         for index in range(batch_size):
-            include_local = mode_local and ablation_mode != "wo_local_hint"
-            include_window = mode_window and ablation_mode != "wo_windows"
+            include_local = ablation_mode != "wo_local_hint"
+            include_window = ablation_mode != "wo_windows"
             include_fixed = ablation_mode != "wo_fixed_hint"
-            if window_values_override is None:
-                values = time_series[index, start_indices[index]:end_indices[index]]
-            else:
-                values = window_values_override[index]
-            missing_text = "(not provided)" if evidence_mode is not None else "(removed)"
+            values = (
+                time_series[index, start_indices[index]:end_indices[index]]
+                if window_values_override is None
+                else window_values_override[index]
+            )
             question_prompts.append(format_axis_question_prompt(
                 question=questions[index],
                 start_index=start_indices[index],
@@ -375,7 +363,7 @@ class AXIS(nn.Module):
                 include_local=include_local,
                 include_window=include_window,
                 include_fixed=include_fixed,
-                missing_window_text=missing_text,
+                missing_window_text="(removed)",
             ))
             answer_prompts.append(f"Answer: {answers[index]}")
 
@@ -386,17 +374,13 @@ class AXIS(nn.Module):
             truncation=True,
             add_special_tokens=True,
         )
-        answer_kwargs = dict(
+        answer_input = self.tokenizer(
+            answer_prompts,
             return_tensors="pt",
             padding=True,
             truncation=True,
             add_special_tokens=True,
         )
-        if return_answer_head_mask:
-            answer_kwargs["return_offsets_mapping"] = True
-        answer_input = self.tokenizer(answer_prompts, **answer_kwargs)
-        offset_mapping = answer_input.pop("offset_mapping", None)
-
         eos_column = torch.full((batch_size, 1), self.tokenizer.eos_token_id, dtype=torch.long)
         one_column = torch.ones(batch_size, 1, dtype=question_input["attention_mask"].dtype)
         full_input_ids = torch.cat(
@@ -419,26 +403,46 @@ class AXIS(nn.Module):
         full_labels[full_labels == self.tokenizer.pad_token_id] = -100
         full_labels[:, -1] = self.tokenizer.eos_token_id
         question_length = question_input["input_ids"].shape[1]
+        return full_input_ids, full_attention_mask, full_labels, question_length
 
-        if not return_answer_head_mask:
-            return full_input_ids, full_attention_mask, full_labels, question_length
-        answer_head_mask, _ = build_answer_head_mask_from_offsets(
-            answers,
-            question_types or [],
-            offset_mapping,
-            answer_input["attention_mask"],
+    def generate_state_input_ids(
+        self,
+        state_question: str,
+        time_series: torch.Tensor,
+        start_indices: List[int],
+        end_indices: List[int],
+        window_values_override: Optional[List[torch.Tensor]] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        batch_size = time_series.shape[0]
+        if len(start_indices) != batch_size or len(end_indices) != batch_size:
+            raise ValueError("state window indices do not match batch size")
+        if window_values_override is not None and len(window_values_override) != batch_size:
+            raise ValueError("state window override does not match batch size")
+        prompts = []
+        for index in range(batch_size):
+            values = (
+                time_series[index, start_indices[index]:end_indices[index]]
+                if window_values_override is None
+                else window_values_override[index]
+            )
+            prompts.append(format_axis_question_prompt(
+                question=state_question,
+                start_index=start_indices[index],
+                end_index=end_indices[index],
+                window_values=values,
+                num_fixed_tokens=self.num_fixed_tokens,
+                include_local=True,
+                include_window=True,
+                include_fixed=True,
+            ))
+        encoded = self.tokenizer(
+            prompts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            add_special_tokens=True,
         )
-        full_answer_head_mask = torch.cat(
-            [
-                torch.zeros_like(question_input["input_ids"], dtype=torch.bool),
-                torch.zeros((batch_size, 1), dtype=torch.bool),
-                answer_head_mask,
-                torch.zeros((batch_size, 1), dtype=torch.bool),
-            ],
-            dim=1,
-        )
-        return full_input_ids, full_attention_mask, full_labels, question_length, full_answer_head_mask
-     
+        return encoded["input_ids"], encoded["attention_mask"]
     def get_hint_embeddings(
         self,
         input_ids: torch.Tensor,
@@ -446,6 +450,7 @@ class AXIS(nn.Module):
         start_indices: List[int],
         end_indices: List[int],
         local_window_embeddings_override: Optional[List[torch.Tensor]] = None,
+        detach_fixed_hint: bool = False,
     ) -> torch.Tensor:
         input_embeddings = self.model.get_input_embeddings()(input_ids)
         batch_size = input_ids.shape[0]
@@ -480,9 +485,56 @@ class AXIS(nn.Module):
                     source_embeddings,
                     len(fixed_positions),
                 )
+                if detach_fixed_hint:
+                    processed_fixed = processed_fixed.detach()
                 input_embeddings[index, fixed_positions] = processed_fixed.to(input_embeddings.dtype)
         return input_embeddings
 
+    def state_logits(
+        self,
+        local_embeddings: torch.Tensor,
+        time_series: torch.Tensor,
+        start_indices: List[int],
+        end_indices: List[int],
+        window_values_override: List[torch.Tensor],
+        state_question: str,
+        normal_id: int,
+        anomalous_id: int,
+        *,
+        fixed_hint_frozen: bool = True,
+    ) -> torch.Tensor:
+        if self.tokenizer.padding_side != "right":
+            raise ValueError("state_logits requires right-side tokenizer padding")
+        input_ids, attention_mask = self.generate_state_input_ids(
+            state_question,
+            time_series,
+            start_indices,
+            end_indices,
+            window_values_override=window_values_override,
+        )
+        device = self.get_device()
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+        embeds = self.get_hint_embeddings(
+            input_ids,
+            local_embeddings,
+            start_indices,
+            end_indices,
+            detach_fixed_hint=fixed_hint_frozen,
+        )
+        hidden = self.model.model(
+            inputs_embeds=embeds,
+            attention_mask=attention_mask,
+            use_cache=False,
+            return_dict=True,
+        ).last_hidden_state
+        last_index = attention_mask.sum(dim=1) - 1
+        batch_index = torch.arange(hidden.shape[0], device=device)
+        final_hidden = hidden[batch_index, last_index]
+        selected_weight = self.model.lm_head.weight[
+            torch.tensor([normal_id, anomalous_id], device=device)
+        ]
+        return F.linear(final_hidden, selected_weight)
     def forward(self, 
                 local_embeddings: torch.Tensor, 
                 time_series: torch.Tensor, 
@@ -492,10 +544,8 @@ class AXIS(nn.Module):
                 end_indices: List[int],
                 return_logits: Optional[bool] = False,
                 ablation_mode: Optional[str] = None,
-                question_types: Optional[List[str]] = None,
                 window_values_override: Optional[List[torch.Tensor]] = None,
-                local_window_embeddings_override: Optional[List[torch.Tensor]] = None,
-                evidence_mode: Optional[str] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+                local_window_embeddings_override: Optional[List[torch.Tensor]] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Forward pass for AXIS model.
         
         Args:
@@ -519,9 +569,7 @@ class AXIS(nn.Module):
             start_indices=start_indices,
             end_indices=end_indices,
             ablation_mode=ablation_mode,
-            question_types=question_types,
             window_values_override=window_values_override,
-            evidence_mode=evidence_mode,
         )
         
         # Move tensors to model device for multi-GPU compatibility
@@ -645,16 +693,16 @@ class AXISCombinedModel(nn.Module):
         end_indices: List[int],
         return_logits: Optional[bool] = False,
         ablation_mode: Optional[str] = None,
-        question_types: Optional[List[str]] = None,
-        negative_local_sequences: Optional[torch.Tensor] = None,
-        negative_local_masks: Optional[torch.Tensor] = None,
-        negative_local_start_indices: Optional[List[int]] = None,
-        negative_local_end_indices: Optional[List[int]] = None,
-        negative_window_values: Optional[List[torch.Tensor]] = None,
-        slr_mode: Optional[str] = None,
-        source_valid: Optional[torch.Tensor] = None,
-        beta: float = 1.0,
-        margin: float = math.log(2.0),
+        counterfactual_sequences: Optional[torch.Tensor] = None,
+        counterfactual_masks: Optional[torch.Tensor] = None,
+        positive_window_values: Optional[List[torch.Tensor]] = None,
+        counterfactual_window_values: Optional[List[torch.Tensor]] = None,
+        state_targets: Optional[torch.Tensor] = None,
+        counterfactual_valid: Optional[torch.Tensor] = None,
+        state_question: Optional[str] = None,
+        normal_id: Optional[int] = None,
+        anomalous_id: Optional[int] = None,
+        beta: float = 0.2,
     ) -> torch.Tensor:
         if not self.config.enable_ts_train:
             with torch.no_grad():
@@ -672,40 +720,37 @@ class AXISCombinedModel(nn.Module):
             "return_logits": return_logits,
             "ablation_mode": ablation_mode,
         }
-        if slr_mode is not None:
-            _, _, changed_source = evidence_mode_spec(slr_mode)
-            negative_local_windows = None
-            if changed_source == "local":
-                required = (
-                    negative_local_sequences,
-                    negative_local_masks,
-                    negative_local_start_indices,
-                    negative_local_end_indices,
+        if counterfactual_sequences is not None:
+            required = (
+                counterfactual_masks,
+                positive_window_values,
+                counterfactual_window_values,
+                state_targets,
+                counterfactual_valid,
+                state_question,
+                normal_id,
+                anomalous_id,
+            )
+            if any(value is None for value in required):
+                raise ValueError("consistent state supervision inputs are incomplete")
+            with torch.no_grad():
+                counterfactual_embeddings = self.ts_pretrain_model(
+                    counterfactual_sequences,
+                    mask=counterfactual_masks,
                 )
-                if any(value is None for value in required):
-                    raise ValueError("local SLR mode requires negative Local sequences and indices")
-                with torch.no_grad():
-                    negative_embeddings = self.ts_pretrain_model(
-                        negative_local_sequences,
-                        mask=negative_local_masks,
-                    )
-                negative_local_windows = [
-                    negative_embeddings[index, start:end]
-                    for index, (start, end) in enumerate(
-                        zip(negative_local_start_indices, negative_local_end_indices)
-                    )
-                ]
             axis_kwargs.update({
-                "question_types": question_types,
-                "negative_local_window_embeddings": negative_local_windows,
-                "negative_window_values": negative_window_values,
-                "slr_mode": slr_mode,
-                "source_valid": source_valid,
+                "counterfactual_local_embeddings": counterfactual_embeddings,
+                "counterfactual_time_series": counterfactual_sequences,
+                "positive_window_values": positive_window_values,
+                "counterfactual_window_values": counterfactual_window_values,
+                "state_targets": state_targets,
+                "counterfactual_valid": counterfactual_valid,
+                "state_question": state_question,
+                "normal_id": normal_id,
+                "anomalous_id": anomalous_id,
                 "beta": beta,
-                "margin": margin,
             })
         return self.axis(**axis_kwargs)
-
     def generate(self,
                  padded_sequences: torch.Tensor,
                  attention_masks: torch.Tensor,
@@ -751,4 +796,4 @@ class AXISCombinedModel(nn.Module):
             logits = self.ts_pretrain_model.anomaly_head(local_embeddings)
             anomaly_scores = [logits[i, start_indices[i]:end_indices[i], :] for i in range(len(start_indices))]
             return answer, anomaly_scores
-        
+

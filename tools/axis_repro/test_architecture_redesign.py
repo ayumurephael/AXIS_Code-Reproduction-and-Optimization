@@ -290,6 +290,12 @@ class PipelineCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed.architecture_variant, "full")
         self.assertIsNone(parsed.qk_norm_seq_len)
         self.assertEqual(parsed.gate_bias, -2.0)
+        self.assertEqual(parsed.beta, 0.2)
+        self.assertEqual(parsed.beta_warmup_ratio, 0.1)
+        self.assertEqual(parsed.local_lr, 5e-5)
+        self.assertEqual(parsed.attention_lr, 2e-5)
+        self.assertEqual(parsed.prompt_lr, 5e-5)
+        self.assertFalse(hasattr(parsed, "margin"))
 
     def test_checkpoint_architecture_validation_is_fail_closed(self) -> None:
         self.assertTrue(hasattr(model_utils, "validate_checkpoint_architecture"))

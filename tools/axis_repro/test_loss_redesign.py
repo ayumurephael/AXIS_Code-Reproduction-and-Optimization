@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,232 +10,337 @@ from pathlib import Path
 import torch
 
 from .loss_redesign import (
+    COUNTERFACTUAL_INDEX_VERSION,
     CounterfactualAXISDataset,
-    build_answer_head_mask_from_offsets,
-    compute_source_likelihood_ratio_loss,
+    build_state_question,
+    compute_state_loss,
     counterfactual_collate_fn,
-    evidence_mode_spec,
-    extract_answer_head,
     format_axis_question_prompt,
     memory_safe_token_nll_sums,
-    retrieve_exact,
+    retrieve_consistent_donors,
+    scheduled_beta,
+    select_state_verbalizers,
 )
+from .audit_counterfactual_index import audit_index
+from .audit_loss_objective_checkpoint import audit_loss_objective_checkpoint
+from .train_phase2_loss_redesign import phase2_parameter_groups
 
 
-class AnswerHeadTests(unittest.TestCase):
-    def test_true_false_uses_only_leading_label(self):
-        self.assertEqual(
-            extract_answer_head("False. The window is anomalous.", "true_false"),
-            "False",
-        )
+class FakeTokenizer:
+    def __init__(self, mapping):
+        self.mapping = mapping
 
-    def test_first_sentence_does_not_split_decimal(self):
-        answer = "A) The value rises from 1.25 to 2.50. This supports the choice."
-        self.assertEqual(
-            extract_answer_head(answer, "multiple_choice"),
-            "A) The value rises from 1.25 to 2.50.",
-        )
+    def encode(self, text, add_special_tokens=False):
+        self.last_add_special_tokens = add_special_tokens
+        return self.mapping[text]
 
-    def test_open_ended_requires_decision_in_first_sentence(self):
-        answer = "The values rise smoothly. There is no anomaly in the window."
-        self.assertIsNone(extract_answer_head(answer, "open_ended"))
 
-    def test_open_ended_keeps_complete_decision_sentence(self):
-        answer = "There is no anomaly near value 1.25. The pattern is smooth."
-        self.assertEqual(
-            extract_answer_head(answer, "open_ended"),
-            "There is no anomaly near value 1.25.",
-        )
+class StateVerbalizerTests(unittest.TestCase):
+    def test_uses_first_distinct_one_token_pair(self):
+        tokenizer = FakeTokenizer({
+            " normal": [10],
+            " anomalous": [11],
+            " N": [12],
+            " A": [13],
+            " 0": [14],
+            " 1": [15],
+        })
+        verbalizers = select_state_verbalizers(tokenizer)
+        self.assertEqual((verbalizers.normal_id, verbalizers.anomalous_id), (10, 11))
+        self.assertIn("NORMAL", verbalizers.question)
+        self.assertIn("ANOMALOUS", verbalizers.question)
+        self.assertFalse(tokenizer.last_add_special_tokens)
+
+    def test_falls_back_and_makes_mapping_explicit(self):
+        tokenizer = FakeTokenizer({
+            " normal": [1, 2],
+            " anomalous": [3, 4],
+            " N": [5],
+            " A": [6],
+            " 0": [7],
+            " 1": [8],
+        })
+        verbalizers = select_state_verbalizers(tokenizer)
+        self.assertEqual((verbalizers.normal_text, verbalizers.anomalous_text), (" N", " A"))
+        self.assertIn("N = NORMAL", verbalizers.question)
+        self.assertIn("A = ANOMALOUS", verbalizers.question)
+
+    def test_state_question_ends_at_classification_position(self):
+        self.assertTrue(build_state_question(" 0", " 1").endswith("State:"))
 
 
 class PromptTests(unittest.TestCase):
-    def test_local_only_removes_window_without_inventing_values(self):
+    def test_state_prompt_contains_both_consistent_sources(self):
         prompt = format_axis_question_prompt(
-            question="Is it anomalous?",
-            start_index=10,
-            end_index=12,
-            window_values=torch.tensor([9.0, 8.0]),
-            num_fixed_tokens=2,
-            include_local=True,
-            include_window=False,
-        )
-        self.assertIn("Steps 10 to 12", prompt)
-        self.assertIn("(not provided)", prompt)
-        self.assertEqual(prompt.count("<|local_hint|>"), 2)
-
-    def test_window_only_uses_override_values_and_removes_local_tokens(self):
-        prompt = format_axis_question_prompt(
-            question="Is it anomalous?",
+            question=build_state_question(" 0", " 1"),
             start_index=10,
             end_index=12,
             window_values=torch.tensor([1.11, -2.22]),
             num_fixed_tokens=2,
-            include_local=False,
+            include_local=True,
             include_window=True,
         )
         self.assertIn("111, -222", prompt)
-        self.assertNotIn("<|local_hint|>", prompt)
-        self.assertIn("Steps 10 to 12", prompt)
+        self.assertEqual(prompt.count("<|local_hint|>"), 2)
+        self.assertEqual(prompt.count("<|fixed_hint|>"), 2)
+        self.assertIn("0 = NORMAL", prompt)
+        self.assertIn("1 = ANOMALOUS", prompt)
+
+    def test_state_forward_can_detach_fixed_hint_only(self):
+        source = Path("src/models/AXIS/AXIS.py").read_text(encoding="utf-8")
+        self.assertIn("detach_fixed_hint: bool = False", source)
+        self.assertIn("processed_fixed = processed_fixed.detach()", source)
 
 
-class LossTests(unittest.TestCase):
-    def test_slr_matches_documented_formula_and_skips_invalid_rows(self):
-        answer_loss = torch.tensor(2.0)
-        e_pos = torch.tensor([4.0, 6.0, 100.0])
-        e_neg = torch.tensor([5.0, 5.0, 0.0])
-        counts = torch.tensor([2, 2, 1])
-        valid = torch.tensor([True, True, False])
-        total, stats = compute_source_likelihood_ratio_loss(
-            answer_loss,
-            e_pos,
-            e_neg,
-            counts,
-            valid,
-            beta=0.5,
-            margin=math.log(2.0),
-        )
-        expected_row0 = 4.0 / 2.0
-        expected_row1 = 6.0 / 2.0 + (math.log(2.0) + 6.0 - 5.0) / 2.0
-        expected = 2.0 + 0.5 * ((expected_row0 + expected_row1) / 2.0)
-        self.assertAlmostEqual(float(total), expected, places=6)
-        self.assertEqual(stats["valid_rows"], 2)
-        self.assertEqual(stats["active_hinges"], 1)
+class LossAndScheduleTests(unittest.TestCase):
+    def test_binary_state_ce_uses_only_two_logits(self):
+        logits = torch.tensor([[2.0, 0.0], [0.0, 2.0]])
+        targets = torch.tensor([0, 1])
+        expected = torch.nn.functional.cross_entropy(logits, targets)
+        self.assertAlmostEqual(float(compute_state_loss(logits, targets)), float(expected), places=7)
+
+    def test_beta_ramps_zero_to_point_two_in_first_ten_percent(self):
+        self.assertEqual(scheduled_beta(0, 100, target_beta=0.2, warmup_ratio=0.1), 0.0)
+        self.assertAlmostEqual(scheduled_beta(9, 100, target_beta=0.2, warmup_ratio=0.1), 0.2)
+        self.assertAlmostEqual(scheduled_beta(99, 100, target_beta=0.2, warmup_ratio=0.1), 0.2)
 
 
 class RetrievalTests(unittest.TestCase):
-    def test_hard_constraints_reject_contaminated_donor(self):
-        anchor = torch.tensor([[0.0, 0.0]])
+    def test_retrieval_respects_donor_validity_and_ratio(self):
+        anchors = torch.tensor([[0.0, 0.0]])
         donor_normal = torch.tensor([[0.0, 0.0], [0.1, 0.1]])
         donor_abnormal = torch.tensor([[4.0, 0.0], [4.1, 0.1]])
-        control_gap = torch.tensor([2.0, 0.0])
-        best, found = retrieve_exact(
-            anchor,
+        best, found, ratio = retrieve_consistent_donors(
+            anchors,
             donor_normal,
             donor_abnormal,
-            control_gap,
-            gamma=0.0,
+            torch.tensor([False, True]),
             tau=0.25,
         )
         self.assertTrue(bool(found[0]))
         self.assertEqual(int(best[0]), 1)
+        self.assertLessEqual(float(ratio[0]), 0.25)
 
-    def test_selection_minimizes_distance_not_pollution_ratio(self):
-        anchor = torch.tensor([[0.0, 0.0]])
-        donor_normal = torch.tensor([[0.10, 0.10], [0.20, 0.20]])
-        donor_abnormal = torch.tensor([[1.10, 0.10], [10.20, 0.20]])
-        control_gap = torch.zeros(2)
-        best, found = retrieve_exact(
-            anchor,
-            donor_normal,
-            donor_abnormal,
-            control_gap,
-            gamma=0.0,
+    def test_retrieval_rejects_baseline_mismatch(self):
+        best, found, ratio = retrieve_consistent_donors(
+            torch.tensor([[0.0, 0.0]]),
+            torch.tensor([[10.0, 10.0]]),
+            torch.tensor([[11.0, 10.0]]),
+            torch.tensor([True]),
             tau=0.25,
         )
-        self.assertTrue(bool(found[0]))
-        self.assertEqual(int(best[0]), 0)
+        self.assertFalse(bool(found[0]))
+        self.assertTrue(math.isinf(float(ratio[0])))
 
 
 class CounterfactualDatasetTests(unittest.TestCase):
-    def _write_series(self, root: Path, name: str, time_series, normal_series, windows):
-        payload = {"sample_id": int(name[7:13]), "original_data": {"time_series": time_series, "normal_series": normal_series}, "windows": windows}
+    @staticmethod
+    def _write_series(root: Path, name: str, time_series, normal_series, windows):
+        payload = {
+            "sample_id": int(name[7:13]),
+            "original_data": {"time_series": time_series, "normal_series": normal_series},
+            "windows": windows,
+        }
         (root / "series" / name).write_text(json.dumps(payload), encoding="utf-8")
 
-    def test_collate_builds_self_normal_and_donor_negatives(self):
+    def test_collate_uses_anchor_coordinate_patches_for_both_sources(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "series").mkdir()
             windows0 = [
-                {"window_range": {"start": 0, "end": 2}, "question": "q0", "answer": "True. anomaly", "question_type": "true_false", "has_anomaly": True},
-                {"window_range": {"start": 2, "end": 4}, "question": "q1", "answer": "There is no anomaly.", "question_type": "open_ended", "has_anomaly": False},
+                {"window_range": {"start": 0, "end": 2}, "question": "q0", "answer": "a0", "question_type": "true_false", "has_anomaly": True},
+                {"window_range": {"start": 2, "end": 4}, "question": "q1", "answer": "a1", "question_type": "open_ended", "has_anomaly": False},
             ]
-            windows1 = [{"window_range": {"start": 1, "end": 3}, "question": "donor", "answer": "True.", "question_type": "true_false", "has_anomaly": True}]
+            windows1 = [
+                {"window_range": {"start": 1, "end": 3}, "question": "donor", "answer": "a", "question_type": "true_false", "has_anomaly": True}
+            ]
             self._write_series(root, "series_000000.json", [0, 1, 2, 3], [0, 0, 0, 0], windows0)
-            self._write_series(root, "series_000001.json", [9, 8, 7, 6], [0, 0, 0, 0], windows1)
+            self._write_series(root, "series_000001.json", [1, 9, 7, 4], [1, 2, 3, 4], windows1)
+            train_series = ["series_000000.json", "series_000001.json"]
+            random.Random(0).shuffle(train_series)
             index = {
+                "version": COUNTERFACTUAL_INDEX_VERSION,
                 "seed": 0,
                 "train_ratio": 1.0,
+                "train_series": train_series,
+                "policy": {
+                    "name": "coherent_full_sequence_patch_with_explicit_state_targets",
+                    "phase_fallback": False,
+                    "post_patch_dual_source_validation": True,
+                    "same_length_required": True,
+                    "gamma_window": 0.1,
+                    "gamma_local": 0.1,
+                    "tau": 0.25,
+                },
+                "stats": {
+                    "valid_pairs": 2,
+                    "valid_residual_transplants": 1,
+                    "valid_anomaly_deletions": 1,
+                },
                 "records": {
-                    "series_000000.json:0": {"window": {"valid": True, "kind": "self_normal"}, "local": {"valid": True, "kind": "self_normal"}},
+                    "series_000000.json:0": {"has_anomaly": True, "valid": True, "kind": "self_normal_patch", "target_state": 0},
                     "series_000000.json:1": {
-                        "window": {"valid": True, "kind": "donor", "series_file": "series_000001.json", "window_index": 0},
-                        "local": {"valid": True, "kind": "donor", "series_file": "series_000001.json", "window_index": 0},
+                        "has_anomaly": False,
+                        "valid": True,
+                        "kind": "residual_transplant",
+                        "target_state": 1,
+                        "donor_series_file": "series_000001.json",
+                        "donor_window_index": 0,
+                    },
+                    "series_000001.json:0": {
+                        "has_anomaly": True,
+                        "valid": False,
+                        "kind": "invalid",
+                        "reason": "fixture",
                     },
                 },
             }
             index_path = root / "index.json"
             index_path.write_text(json.dumps(index), encoding="utf-8")
+            dataset = CounterfactualAXISDataset(
+                str(root), str(index_path), split="train", train_ratio=1.0, seed=0
+            )
+            item_index = next(index for index, path in enumerate(dataset.series_files) if path.name == "series_000000.json")
+            batch = counterfactual_collate_fn([dataset[item_index]])
+            self.assertTrue(torch.equal(
+                batch["counterfactual_sequences"][0, :4].float(),
+                torch.tensor([0.0, 0.0, 2.0, 3.0]),
+            ))
+            self.assertTrue(torch.equal(
+                batch["counterfactual_sequences"][1, :4].float(),
+                torch.tensor([0.0, 1.0, 9.0, 7.0]),
+            ))
+            self.assertTrue(torch.equal(batch["state_targets"], torch.tensor([1, 0])))
+            self.assertTrue(bool(batch["counterfactual_valid"].all()))
+            self.assertEqual(batch["start_indices"], [0, 2])
+            self.assertEqual(batch["end_indices"], [2, 4])
+            audit = audit_index(str(root), str(index_path), seed=0, train_ratio=1.0)
+            self.assertTrue(audit["ok"])
+            self.assertEqual(audit["valid_pairs"], 2)
+
+    def test_invalid_pair_is_copied_but_never_marked_valid(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "series").mkdir()
+            windows = [{
+                "window_range": {"start": 0, "end": 2},
+                "question": "q",
+                "answer": "a",
+                "question_type": "true_false",
+                "has_anomaly": False,
+            }]
+            self._write_series(root, "series_000000.json", [1, 2], [1, 2], windows)
+            index_path = root / "index.json"
+            index_path.write_text(json.dumps({
+                "version": COUNTERFACTUAL_INDEX_VERSION,
+                "seed": 0,
+                "train_ratio": 1.0,
+                "train_series": ["series_000000.json"],
+                "records": {},
+            }), encoding="utf-8")
             dataset = CounterfactualAXISDataset(str(root), str(index_path), split="train", train_ratio=1.0, seed=0)
             batch = counterfactual_collate_fn([dataset[0]])
-            self.assertTrue(torch.equal(batch["negative_window_values"][0], torch.tensor([0.0, 0.0])))
-            self.assertTrue(torch.equal(batch["negative_window_values"][1], torch.tensor([8.0, 7.0])))
-            self.assertTrue(torch.equal(batch["negative_local_sequences"][0, :4], torch.zeros(4)))
-            self.assertTrue(torch.equal(batch["negative_local_sequences"][1, :4], torch.tensor([9.0, 8.0, 7.0, 6.0], dtype=torch.bfloat16)))
-            self.assertEqual(batch["negative_local_start_indices"], [0, 1])
-            self.assertEqual(batch["negative_local_end_indices"], [2, 3])
-            self.assertTrue(bool(batch["local_source_valid"].all()))
-            self.assertTrue(bool(batch["window_source_valid"].all()))
-
-
-class TokenMaskAndModeTests(unittest.TestCase):
-    def test_answer_head_mask_uses_character_offsets(self):
-        answers = ["False. explanation", "Values rise. There is no anomaly."]
-        question_types = ["true_false", "open_ended"]
-        offsets = torch.tensor([
-            [[0, 0], [0, 7], [8, 13], [13, 14], [15, 26]],
-            [[0, 0], [0, 7], [8, 14], [15, 21], [21, 22]],
-        ])
-        attention = torch.ones(offsets.shape[:2], dtype=torch.long)
-        mask, heads = build_answer_head_mask_from_offsets(
-            answers, question_types, offsets, attention
-        )
-        self.assertEqual(heads, ["False", None])
-        self.assertTrue(torch.equal(mask[0], torch.tensor([False, False, True, False, False])))
-        self.assertFalse(bool(mask[1].any()))
-
-    def test_mode_mapping_changes_exactly_one_source(self):
-        self.assertEqual(evidence_mode_spec("local_only"), (True, False, "local"))
-        self.assertEqual(evidence_mode_spec("window_only"), (False, True, "window"))
-        self.assertEqual(evidence_mode_spec("full_local"), (True, True, "local"))
-        self.assertEqual(evidence_mode_spec("full_window"), (True, True, "window"))
+            self.assertFalse(bool(batch["counterfactual_valid"][0]))
+            self.assertTrue(torch.equal(batch["padded_sequences"], batch["counterfactual_sequences"]))
 
 
 class MemorySafeNLLTests(unittest.TestCase):
     def test_chunked_token_nll_matches_direct_cross_entropy(self):
         lm_head = torch.nn.Linear(2, 3, bias=False)
-        with torch.no_grad():
-            lm_head.weight.copy_(torch.tensor([[1.0, 0.0], [0.0, 1.0], [-1.0, -1.0]]))
-        hidden = torch.tensor([
-            [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
-            [[-1.0, 0.0], [0.0, -1.0], [0.5, 0.5]],
-        ])
-        targets = torch.tensor([[0, 1, -100], [2, 1, 0]])
-        head_mask = torch.tensor([[True, False, False], [False, True, True]])
-        full_sums, full_counts, head_sums, head_counts = memory_safe_token_nll_sums(
-            lm_head, hidden, targets, head_mask, chunk_size=1, checkpoint_chunks=False
+        hidden = torch.tensor([[[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]])
+        targets = torch.tensor([[0, 1, -100]])
+        sums, counts = memory_safe_token_nll_sums(
+            lm_head, hidden, targets, chunk_size=1, checkpoint_chunks=False
         )
         direct = torch.nn.functional.cross_entropy(
             lm_head(hidden).reshape(-1, 3), targets.reshape(-1),
-            ignore_index=-100, reduction="none"
-        ).reshape(2, 3)
+            ignore_index=-100, reduction="none",
+        ).reshape(1, 3)
         valid = targets.ne(-100)
-        self.assertTrue(torch.allclose(full_sums, (direct * valid).sum(1)))
-        self.assertTrue(torch.equal(full_counts, valid.sum(1)))
-        self.assertTrue(torch.allclose(head_sums, (direct * (valid & head_mask)).sum(1)))
-        self.assertTrue(torch.equal(head_counts, (valid & head_mask).sum(1)))
-
+        self.assertTrue(torch.allclose(sums, (direct * valid).sum(1)))
+        self.assertTrue(torch.equal(counts, valid.sum(1)))
 
     def test_checkpoint_backward_uses_each_chunks_own_targets(self):
         lm_head = torch.nn.Linear(2, 3, bias=False)
         hidden = torch.randn(1, 3, 2, requires_grad=True)
-        targets = torch.tensor([[0, 1, 2]])
-        head_mask = torch.tensor([[True, True, True]])
-        full_sums, _, _, _ = memory_safe_token_nll_sums(
-            lm_head, hidden, targets, head_mask, chunk_size=2, checkpoint_chunks=True
+        sums, _ = memory_safe_token_nll_sums(
+            lm_head,
+            hidden,
+            torch.tensor([[0, 1, 2]]),
+            chunk_size=2,
+            checkpoint_chunks=True,
         )
-        full_sums.sum().backward()
+        sums.sum().backward()
         self.assertIsNotNone(hidden.grad)
 
 
+class OptimizerGroupingTests(unittest.TestCase):
+    class TinyPerceiver(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.mapping_layer = torch.nn.Linear(2, 2)
+            self.local_attention = torch.nn.Linear(2, 2)
+            self.local_word_proj = torch.nn.Linear(2, 2)
+            self.continuous_proj = torch.nn.Linear(2, 2)
+            self.gate_proj = torch.nn.Linear(4, 2)
+            self.fusion_norm = torch.nn.LayerNorm(2)
+            self.task_prompt_embeddings = torch.nn.Parameter(torch.randn(1, 3, 2))
+
+    def test_recommended_learning_rates_cover_every_parameter_once(self):
+        module = self.TinyPerceiver()
+        groups, metadata = phase2_parameter_groups(module)
+        self.assertEqual(metadata["prototype_attention"]["lr"], 2e-5)
+        self.assertEqual(metadata["local_continuous"]["lr"], 5e-5)
+        self.assertEqual(metadata["task_prompt"]["lr"], 5e-5)
+        parameter_ids = [id(parameter) for group in groups for parameter in group["params"]]
+        self.assertEqual(len(parameter_ids), len(set(parameter_ids)))
+        self.assertEqual(
+            sum(parameter.numel() for parameter in module.parameters()),
+            sum(item["parameters"] for item in metadata.values()),
+        )
+
+
+class ObjectiveCheckpointAuditTests(unittest.TestCase):
+    def _payload(self):
+        return {
+            "epoch": 1,
+            "global_step": 10,
+            "reproduction_meta": {
+                "objective": "answer_nll_plus_coherent_binary_state_ce_v2",
+                "objective_version": 2,
+                "counterfactual_index_version": 2,
+                "beta_target": 0.2,
+                "beta_warmup_ratio": 0.1,
+                "gradient_clip": 1.0,
+                "fixed_hint_state_gradient": False,
+                "fixed_hint_answer_gradient": True,
+                "state_verbalizers": {
+                    "normal_text": " N",
+                    "anomalous_text": " A",
+                    "normal_id": 10,
+                    "anomalous_id": 11,
+                    "question": "Classify.\nState:",
+                },
+                "optimizer_groups": {
+                    "local_continuous": {"lr": 5e-5, "parameters": 1},
+                    "prototype_attention": {"lr": 2e-5, "parameters": 1},
+                    "task_prompt": {"lr": 5e-5, "parameters": 1},
+                },
+                "counterfactual_policy": {
+                    "phase_fallback": False,
+                    "post_patch_dual_source_validation": True,
+                    "gamma_window": 0.1,
+                    "gamma_local": 0.1,
+                },
+            },
+        }
+
+    def test_accepts_only_v2_objective_metadata(self):
+        result = audit_loss_objective_checkpoint(self._payload())
+        self.assertTrue(result["ok"])
+        broken = self._payload()
+        broken["reproduction_meta"]["margin"] = math.log(2.0)
+        with self.assertRaises(ValueError):
+            audit_loss_objective_checkpoint(broken)
 if __name__ == "__main__":
     unittest.main()
