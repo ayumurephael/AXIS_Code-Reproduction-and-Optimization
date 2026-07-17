@@ -128,6 +128,7 @@ class Pipeline:
         self.python = str((self.root / ".venv" / "bin" / "python").resolve())
         self.gpus = args.gpus
         self.expected_donor_top_m = args.expected_donor_top_m
+        self.stop_before_geval = bool(args.stop_before_geval)
         self.pipeline_dir.mkdir(parents=True, exist_ok=True)
 
     def event(self, stage: str, state: str, **details) -> None:
@@ -561,6 +562,14 @@ class Pipeline:
             selected_epoch = self.select_checkpoint()
             full_predictions = self.run_full284(selected_epoch)
             paper_predictions = self.filter_paper140(selected_epoch, full_predictions)
+            if self.stop_before_geval:
+                self.event(
+                    "pipeline",
+                    "awaiting_geval_approval",
+                    selected_epoch=selected_epoch,
+                    paper140_predictions=str(paper_predictions),
+                )
+                return
             scores = self.run_geval(selected_epoch, paper_predictions)
             self.aggregate_and_bundle(selected_epoch, scores)
             self.event("pipeline", "completed", selected_epoch=selected_epoch)
@@ -597,6 +606,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--poll-seconds", type=int, default=30)
     parser.add_argument("--gpus", default="0,1,2")
     parser.add_argument("--expected-donor-top-m", type=int, default=1)
+    parser.add_argument(
+        "--stop-before-geval", action="store_true",
+        help="Complete all local/GPU inference stages, then stop before external API transfer.",
+    )
     return parser
 
 
