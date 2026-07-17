@@ -67,6 +67,7 @@ def main() -> None:
                 append_jsonl(shard, row); done.add((r.record_id, mode))
     if world > 1:
         torch.distributed.barrier(device_ids=[local])
+        torch.distributed.destroy_process_group()
     if rank == 0:
         rows = []
         for i in range(world): rows.extend(read_jsonl(out / f"rank{i}.jsonl"))
@@ -78,7 +79,6 @@ def main() -> None:
             "subset": a.subset, "world_size": world, "modes": a.modes, "rows": len(rows),
         }, indent=2), encoding="utf-8")
         print(f"wrote {len(rows)} rows to {merged}")
-    if world > 1: torch.distributed.destroy_process_group()
 
 
 if __name__ == "__main__":
