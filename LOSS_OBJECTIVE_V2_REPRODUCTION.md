@@ -29,6 +29,8 @@ and Phase-I TS encoder remain frozen.
 - Anomalous anchor: patch only the target interval with its paired `normal_series` interval.
 - Normal anchor: retrieve a same-length paired anomalous donor and transplant only
   `time_series - normal_series` into the anchor interval.
+- Rank all same-length, tau-compatible donors by Window distance, then sample uniformly from the
+  nearest `M=8`; sampling is deterministically keyed by `SHA256(seed:anchor_key)`.
 - Re-encode every patched full sequence with the frozen Phase-I encoder; never reuse a donor Local
   embedding at an anchor position.
 - `tau=0.25`. Window and Local gamma thresholds are P5 of the nonzero labeled-anomaly effects on
@@ -51,33 +53,32 @@ AdamW weight decay is `1e-5`; global Perceiver gradient clipping is `1.0`.
 ## GPU-server commands
 
 ```bash
-# Build and audit coherent counterfactual index v2 (single GPU indexing stage).
+# Build and audit coherent counterfactual index v3 (single GPU indexing stage).
 CUDA_VISIBLE_DEVICES=0 python -m tools.axis_repro.build_counterfactual_index \
   --data data/anomaly_llava_training_dataset \
   --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-  --output experiments/reproduction/coherent_state_v2/counterfactual_index.json \
-  --seed 72 --train-ratio 0.95 --tau 0.25 --gamma-percentile 5
+  --output experiments/reproduction/coherent_state_v3/counterfactual_index.json \
+  --seed 72 --train-ratio 0.95 --tau 0.25 --donor-top-m 8 --gamma-percentile 5
 
 python -m tools.axis_repro.audit_counterfactual_index \
   --data data/anomaly_llava_training_dataset \
-  --index experiments/reproduction/coherent_state_v2/counterfactual_index.json \
-  --output experiments/reproduction/coherent_state_v2/counterfactual_index_audit.json
+  --index experiments/reproduction/coherent_state_v3/counterfactual_index.json \
+  --expected-donor-top-m 8 \
+  --output experiments/reproduction/coherent_state_v3/counterfactual_index_audit.json
 
 # Loss-only branch: v2 objective on the original AXIS architecture.
 CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
   -m tools.axis_repro.train_phase2_loss_redesign \
   --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-  --counterfactual-index experiments/reproduction/coherent_state_v2/counterfactual_index.json \
+  --counterfactual-index experiments/reproduction/coherent_state_v3/counterfactual_index.json \
   --data data/anomaly_llava_training_dataset \
-  --output experiments/reproduction/loss_redesign/coherent_state_v2/phase2 \
-  --epochs 3 --seed 72 \
-  --local-lr 5e-5 --attention-lr 2e-5 --prompt-lr 5e-5 \
+  --output experiments/reproduction/loss_redesign/coherent_state_v3/phase2 \
+  --epochs 3 --seed 72 \  --local-lr 5e-5 --attention-lr 2e-5 --prompt-lr 5e-5 \
   --weight-decay 1e-5 --gradient-clip 1.0 \
   --beta 0.2 --beta-warmup-ratio 0.1
 
 python -m tools.axis_repro.audit_loss_objective_checkpoint \
-  --checkpoint experiments/reproduction/loss_redesign/coherent_state_v2/phase2/epoch_1.pth
-```
+  --checkpoint experiments/reproduction/loss_redesign/coherent_state_v3/phase2/epoch_1.pth```
 
 Formal checkpoint selection remains the complete 1,500-series teacher-forced validation protocol.
 After strict minimum-NLL selection, run full284 inference, filter the fixed paper140 manifest, and
