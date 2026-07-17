@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import math
-import re
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -14,91 +14,62 @@ from torch.utils.checkpoint import checkpoint
 from src.models.AXIS.dataset import AXISAnomalyQADataset
 
 
-SLR_MODES = ("local_only", "window_only", "full_local", "full_window")
+COUNTERFACTUAL_INDEX_VERSION = 2
+STATE_VERBALIZER_CANDIDATES = (
+    (" normal", " anomalous"),
+    (" N", " A"),
+    (" 0", " 1"),
+)
 
 
-def _normalize_question_type(question_type: str) -> str:
-    normalized = re.sub(r"[^a-z]+", "_", question_type.lower()).strip("_")
-    aliases = {
-        "multiplechoice": "multiple_choice",
-        "openended": "open_ended",
-        "truefalse": "true_false",
-    }
-    return aliases.get(normalized.replace("_", ""), normalized)
+@dataclass(frozen=True)
+class StateVerbalizers:
+    normal_text: str
+    anomalous_text: str
+    normal_id: int
+    anomalous_id: int
+    question: str
+
+    def to_metadata(self) -> dict[str, Any]:
+        return asdict(self)
 
 
-def _first_sentence_without_decimal_split(text: str) -> str:
-    text = text.strip()
-    for index, char in enumerate(text):
-        if char != ".":
-            continue
-        previous_is_digit = index > 0 and text[index - 1].isdigit()
-        next_is_digit = index + 1 < len(text) and text[index + 1].isdigit()
-        if previous_is_digit and next_is_digit:
-            continue
-        return text[: index + 1].strip()
-    return text
+def build_state_question(normal_text: str, anomalous_text: str) -> str:
+    normal_label = normal_text.strip()
+    anomalous_label = anomalous_text.strip()
+    lines = [
+        "Classify only the target time-series window.",
+        "",
+        "NORMAL means that the target window contains no anomaly.",
+        "ANOMALOUS means that the target window contains an anomaly.",
+        "",
+    ]
+    if normal_label.lower() == "normal" and anomalous_label.lower() == "anomalous":
+        lines.append("Return exactly one label: NORMAL or ANOMALOUS.")
+    else:
+        lines.extend([
+            "Return exactly one token using this mapping:",
+            f"{normal_label} = NORMAL",
+            f"{anomalous_label} = ANOMALOUS",
+        ])
+    lines.append("State:")
+    return "\n".join(lines)
 
 
-def extract_answer_head(answer: str, question_type: str) -> Optional[str]:
-    """Extract the short answer head used by the source-likelihood ratio."""
-    question_type = _normalize_question_type(question_type)
-    answer = answer.strip()
-    if question_type == "true_false":
-        match = re.match(r"(?i)^(true|false)\b", answer)
-        return match.group(1) if match else None
-
-    head = _first_sentence_without_decimal_split(answer)
-    if not head:
-        return None
-    if question_type == "open_ended":
-        decision = re.search(r"(?i)\b(?:anomal(?:y|ies|ous)|abnormal|normal)\b", head)
-        if decision is None:
-            return None
-    if question_type == "multiple_choice":
-        return head
-    if question_type == "open_ended":
-        return head
-    return None
-
-
-def evidence_mode_spec(mode: str) -> tuple[bool, bool, str]:
-    specs = {
-        "local_only": (True, False, "local"),
-        "window_only": (False, True, "window"),
-        "full_local": (True, True, "local"),
-        "full_window": (True, True, "window"),
-    }
-    try:
-        return specs[mode]
-    except KeyError as error:
-        raise ValueError(f"unknown SLR mode: {mode}") from error
-
-
-def build_answer_head_mask_from_offsets(
-    answers: list[str],
-    question_types: list[str],
-    offset_mapping: torch.Tensor,
-    attention_mask: torch.Tensor,
-    *,
-    answer_prefix: str = "Answer: ",
-) -> tuple[torch.Tensor, list[Optional[str]]]:
-    if len(answers) != len(question_types) or offset_mapping.shape[:2] != attention_mask.shape:
-        raise ValueError("answer-head mask inputs have inconsistent batch shapes")
-    result = torch.zeros(offset_mapping.shape[:2], dtype=torch.bool)
-    heads: list[Optional[str]] = []
-    for row, (answer, question_type) in enumerate(zip(answers, question_types)):
-        head = extract_answer_head(answer, question_type)
-        heads.append(head)
-        if head is None:
-            continue
-        head_start = len(answer_prefix)
-        head_end = head_start + len(head)
-        starts = offset_mapping[row, :, 0]
-        ends = offset_mapping[row, :, 1]
-        overlaps = (ends > head_start) & (starts < head_end) & (ends > starts)
-        result[row] = overlaps & attention_mask[row].bool().cpu()
-    return result, heads
+def select_state_verbalizers(tokenizer) -> StateVerbalizers:
+    """Select two distinct one-token labels in the documented priority order."""
+    for normal_text, anomalous_text in STATE_VERBALIZER_CANDIDATES:
+        normal_ids = tokenizer.encode(normal_text, add_special_tokens=False)
+        anomalous_ids = tokenizer.encode(anomalous_text, add_special_tokens=False)
+        if len(normal_ids) == 1 and len(anomalous_ids) == 1 and normal_ids[0] != anomalous_ids[0]:
+            return StateVerbalizers(
+                normal_text=normal_text,
+                anomalous_text=anomalous_text,
+                normal_id=int(normal_ids[0]),
+                anomalous_id=int(anomalous_ids[0]),
+                question=build_state_question(normal_text, anomalous_text),
+            )
+    raise RuntimeError("No distinct one-token state verbalizers found")
 
 
 def format_axis_question_prompt(
@@ -137,52 +108,50 @@ def format_axis_question_prompt(
             """
 
 
-def compute_source_likelihood_ratio_loss(
-    answer_loss: torch.Tensor,
-    positive_head_nll: torch.Tensor,
-    negative_head_nll: torch.Tensor,
-    head_token_counts: torch.Tensor,
-    valid_rows: torch.Tensor,
+def scheduled_beta(
+    step: int,
+    total_steps: int,
     *,
-    beta: float,
-    margin: float = math.log(2.0),
-) -> tuple[torch.Tensor, dict[str, float | int]]:
-    valid_rows = valid_rows.bool() & (head_token_counts > 0)
-    safe_counts = head_token_counts.clamp_min(1).to(positive_head_nll.dtype)
-    hinge = F.relu(margin + positive_head_nll - negative_head_nll)
-    row_loss = (positive_head_nll + hinge) / safe_counts
-    if bool(valid_rows.any()):
-        slr_loss = row_loss[valid_rows].mean()
-    else:
-        slr_loss = answer_loss.new_zeros(())
-    total = answer_loss + beta * slr_loss
-    stats: dict[str, float | int] = {
-        "answer_loss": float(answer_loss.detach()),
-        "slr_loss": float(slr_loss.detach()),
-        "valid_rows": int(valid_rows.sum().detach()),
-        "active_hinges": int(((hinge > 0) & valid_rows).sum().detach()),
-    }
-    return total, stats
+    target_beta: float = 0.2,
+    warmup_ratio: float = 0.1,
+) -> float:
+    """Linearly increase beta from zero over the first warmup_ratio of updates."""
+    if step < 0 or total_steps <= 0:
+        raise ValueError("step must be non-negative and total_steps must be positive")
+    if target_beta < 0 or not 0.0 <= warmup_ratio <= 1.0:
+        raise ValueError("invalid beta schedule")
+    if target_beta == 0.0 or warmup_ratio == 0.0:
+        return float(target_beta)
+    warmup_steps = max(2, int(math.ceil(total_steps * warmup_ratio)))
+    progress = min(1.0, step / float(warmup_steps - 1))
+    return float(target_beta * progress)
+
+
+def compute_state_loss(state_logits: torch.Tensor, state_targets: torch.Tensor) -> torch.Tensor:
+    if state_logits.ndim != 2 or state_logits.shape[1] != 2:
+        raise ValueError("state logits must have shape [N, 2]")
+    if state_targets.shape != state_logits.shape[:1]:
+        raise ValueError("state targets must have shape [N]")
+    if state_logits.shape[0] == 0:
+        return state_logits.new_zeros(())
+    return F.cross_entropy(state_logits.float(), state_targets.long())
 
 
 def memory_safe_token_nll_sums(
     lm_head,
     hidden: torch.Tensor,
     targets: torch.Tensor,
-    head_mask: torch.Tensor,
     *,
     chunk_size: int = 64,
     checkpoint_chunks: bool = True,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return per-row full-answer NLL sums/counts without retaining full-vocab logits."""
     batch_size = hidden.shape[0]
     full_sums = hidden.new_zeros(batch_size, dtype=torch.float32)
-    head_sums = hidden.new_zeros(batch_size, dtype=torch.float32)
     full_counts = torch.zeros(batch_size, dtype=torch.long, device=hidden.device)
-    head_counts = torch.zeros(batch_size, dtype=torch.long, device=hidden.device)
     for start in range(0, hidden.shape[1], chunk_size):
         chunk_hidden = hidden[:, start:start + chunk_size]
         chunk_targets = targets[:, start:start + chunk_size]
-        chunk_head_mask = head_mask[:, start:start + chunk_size].bool()
 
         def token_losses(current_hidden, current_targets):
             logits = lm_head(current_hidden).float()
@@ -198,88 +167,134 @@ def memory_safe_token_nll_sums(
         else:
             nll = token_losses(chunk_hidden, chunk_targets)
         valid = chunk_targets.ne(-100)
-        selected_head = valid & chunk_head_mask
         full_sums = full_sums + (nll * valid).sum(dim=1)
-        head_sums = head_sums + (nll * selected_head).sum(dim=1)
         full_counts = full_counts + valid.sum(dim=1)
-        head_counts = head_counts + selected_head.sum(dim=1)
-    return full_sums, full_counts, head_sums, head_counts
+    return full_sums, full_counts
 
 
 @torch.no_grad()
-def retrieve_exact(
-    anchor: torch.Tensor,
+def retrieve_consistent_donors(
+    anchors: torch.Tensor,
     donor_normal: torch.Tensor,
     donor_abnormal: torch.Tensor,
-    control_gap: torch.Tensor,
+    donor_valid: torch.Tensor,
     *,
-    gamma: float,
     tau: float = 0.25,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    anchor = anchor.float()
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Match normal anchors to paired anomalous donors under the ratio constraint."""
+    anchors = anchors.float()
     donor_normal = donor_normal.float()
     donor_abnormal = donor_abnormal.float()
-    control_gap = control_gap.float()
-    dimensions = anchor.shape[1]
-    d2 = (
-        anchor.square().sum(dim=1, keepdim=True)
+    donor_valid = donor_valid.bool()
+    if anchors.ndim != 2 or donor_normal.shape != donor_abnormal.shape:
+        raise ValueError("retrieval tensors must be flattened matrices")
+    if donor_normal.shape[1] != anchors.shape[1] or donor_valid.numel() != donor_normal.shape[0]:
+        raise ValueError("retrieval tensors have incompatible shapes")
+    dimensions = anchors.shape[1]
+    distance2 = (
+        anchors.square().sum(dim=1, keepdim=True)
         + donor_normal.square().sum(dim=1).unsqueeze(0)
-        - 2.0 * anchor @ donor_normal.T
+        - 2.0 * anchors @ donor_normal.T
     ).clamp_min_(0.0) / dimensions
-    a2 = (donor_abnormal - donor_normal).square().mean(dim=1)
-    donor_valid = (a2 > gamma**2) & (control_gap.square() <= tau**2 * a2)
-    pair_valid = donor_valid.unsqueeze(0) & (d2 <= tau**2 * a2.unsqueeze(0))
-    cost = d2.masked_fill(~pair_valid, float("inf"))
+    effect2 = (donor_abnormal - donor_normal).square().mean(dim=1)
+    pair_valid = (
+        donor_valid.unsqueeze(0)
+        & effect2.gt(0).unsqueeze(0)
+        & (distance2 <= tau**2 * effect2.unsqueeze(0))
+    )
+    cost = distance2.masked_fill(~pair_valid, float("inf"))
     best_cost, best_index = cost.min(dim=1)
-    return best_index, torch.isfinite(best_cost)
-
+    found = torch.isfinite(best_cost)
+    safe_index = best_index.clamp(0, max(0, effect2.numel() - 1))
+    ratio = torch.sqrt(best_cost / effect2[safe_index].clamp_min(torch.finfo(effect2.dtype).tiny))
+    ratio = ratio.masked_fill(~found, float("inf"))
+    return best_index, found, ratio
 
 
 class CounterfactualAXISDataset(AXISAnomalyQADataset):
-    """Phase-II dataset that materializes source-specific counterfactuals."""
+    """Phase-II dataset with one coherent patched sequence per state pair."""
 
-    def __init__(self, dataset_dir: str, counterfactual_index: str, *, split: str = "train", train_ratio: float = 0.95, seed: int = 72, cache_size: int = 1000) -> None:
+    def __init__(
+        self,
+        dataset_dir: str,
+        counterfactual_index: str,
+        *,
+        split: str = "train",
+        train_ratio: float = 0.95,
+        seed: int = 72,
+        cache_size: int = 1000,
+    ) -> None:
         super().__init__(dataset_dir, split=split, train_ratio=train_ratio, seed=seed, cache_size=cache_size)
         self.counterfactual_index_path = Path(counterfactual_index)
         payload = json.loads(self.counterfactual_index_path.read_text(encoding="utf-8"))
+        if int(payload.get("version", 0)) != COUNTERFACTUAL_INDEX_VERSION:
+            raise ValueError("counterfactual index is not the coherent-pair v2 format")
         if int(payload["seed"]) != seed or float(payload["train_ratio"]) != train_ratio:
             raise ValueError("counterfactual index split does not match dataset split")
+        expected_files = [path.name for path in self.series_files]
+        if payload.get("train_series") != expected_files:
+            raise ValueError("counterfactual index train-series manifest does not match dataset")
         self.counterfactual_records = payload["records"]
+        self.index_metadata = payload
 
-    def _materialize_reference(self, reference: dict, anchor_data: dict, anchor_window: dict) -> dict:
-        anchor_start = int(anchor_window["window_range"]["start"])
-        anchor_end = int(anchor_window["window_range"]["end"])
-        anchor_time = torch.tensor(anchor_data["original_data"]["time_series"], dtype=torch.float32)
+    def _materialize_counterfactual(self, reference: dict, anchor_data: dict, anchor_window: dict) -> dict:
+        start = int(anchor_window["window_range"]["start"])
+        end = int(anchor_window["window_range"]["end"])
+        anchor = torch.tensor(anchor_data["original_data"]["time_series"], dtype=torch.float32)
+        anchor_values = anchor[start:end]
+        state = int(bool(anchor_window["has_anomaly"]))
         valid = bool(reference.get("valid", False))
         kind = reference.get("kind", "invalid")
-        if valid and kind == "self_normal":
-            source = torch.tensor(anchor_data["original_data"]["normal_series"], dtype=torch.float32)
-            source_start, source_end = anchor_start, anchor_end
-        elif valid and kind == "donor":
-            donor_data = self._load_series(self.series_dir / reference["series_file"])
-            donor_window = donor_data["windows"][int(reference["window_index"])]
-            source_start = int(donor_window["window_range"]["start"])
-            source_end = int(donor_window["window_range"]["end"])
-            source = torch.tensor(donor_data["original_data"]["time_series"], dtype=torch.float32)
+        counterfactual = anchor.clone()
+
+        if not valid:
+            values = anchor_values.clone()
+            kind = "invalid"
+        elif state == 1 and kind == "self_normal_patch":
+            normal = torch.tensor(anchor_data["original_data"]["normal_series"], dtype=torch.float32)
+            if normal.shape != anchor.shape:
+                raise ValueError("paired normal series has a different length")
+            values = normal[start:end].clone()
+        elif state == 0 and kind == "residual_transplant":
+            donor_data = self._load_series(self.series_dir / reference["donor_series_file"])
+            donor_window = donor_data["windows"][int(reference["donor_window_index"])]
+            if not bool(donor_window["has_anomaly"]):
+                raise ValueError("residual donor is not anomalous")
+            donor_start = int(donor_window["window_range"]["start"])
+            donor_end = int(donor_window["window_range"]["end"])
+            donor_current = torch.tensor(donor_data["original_data"]["time_series"], dtype=torch.float32)
+            donor_normal = torch.tensor(donor_data["original_data"]["normal_series"], dtype=torch.float32)
+            residual = donor_current[donor_start:donor_end] - donor_normal[donor_start:donor_end]
+            if residual.numel() != anchor_values.numel():
+                raise ValueError("residual donor length does not match anchor window")
+            values = anchor_values + residual
         else:
-            source = anchor_time
-            source_start, source_end = anchor_start, anchor_end
-            valid = False
-        return {"valid": valid, "series": source, "start": source_start, "end": source_end, "values": source[source_start:source_end].clone()}
+            raise ValueError(f"counterfactual kind/state mismatch: {kind}/{state}")
+
+        if valid:
+            if values.numel() != end - start or not bool(torch.isfinite(values).all()):
+                raise ValueError("counterfactual window is invalid")
+            counterfactual[start:end] = values
+        return {
+            "valid": valid,
+            "kind": kind,
+            "series": counterfactual,
+            "values": values,
+            "target_state": 1 - state,
+        }
 
     def __getitem__(self, idx: int) -> dict:
         file_path = self.series_files[idx]
         data = self._load_series(file_path)
         counterfactuals = []
         for window_index, window in enumerate(data["windows"]):
-            record = self.counterfactual_records.get(f"{file_path.name}:{window_index}", {})
-            counterfactuals.append({
-                "window": self._materialize_reference(record.get("window", {}), data, window),
-                "local": self._materialize_reference(record.get("local", {}), data, window),
-            })
+            key = f"{file_path.name}:{window_index}"
+            reference = self.counterfactual_records.get(key, {"valid": False, "kind": "invalid"})
+            if bool(reference.get("has_anomaly", window["has_anomaly"])) != bool(window["has_anomaly"]):
+                raise ValueError(f"counterfactual label mismatch for {key}")
+            counterfactuals.append(self._materialize_counterfactual(reference, data, window))
         return {
             "time_series": torch.tensor(data["original_data"]["time_series"], dtype=torch.float32),
-            "normal_series": torch.tensor(data["original_data"]["normal_series"], dtype=torch.float32),
             "analysis_data": data["windows"],
             "series_file": file_path.name,
             "counterfactuals": counterfactuals,
@@ -297,36 +312,47 @@ def _pad_with_mask(sequences: list[torch.Tensor]) -> tuple[torch.Tensor, torch.T
 def counterfactual_collate_fn(batch: list[dict]) -> dict:
     if not batch:
         raise ValueError("empty counterfactual batch")
-    positive_sequences, negative_local_sequences, negative_window_values = [], [], []
+    positive_sequences: list[torch.Tensor] = []
+    counterfactual_sequences: list[torch.Tensor] = []
+    positive_window_values: list[torch.Tensor] = []
+    counterfactual_window_values: list[torch.Tensor] = []
     questions, answers, starts, ends, question_types = [], [], [], [], []
-    negative_starts, negative_ends, local_valid, window_valid, record_ids = [], [], [], [], []
+    states, valid, record_ids, kinds = [], [], [], []
     for item in batch:
         for window_index, (window, counterfactual) in enumerate(zip(item["analysis_data"], item["counterfactuals"])):
+            start = int(window["window_range"]["start"])
+            end = int(window["window_range"]["end"])
             positive_sequences.append(item["time_series"])
+            counterfactual_sequences.append(counterfactual["series"])
+            positive_window_values.append(item["time_series"][start:end].float())
+            counterfactual_window_values.append(counterfactual["values"].float())
             questions.append(window["question"])
             answers.append(window["answer"])
-            starts.append(int(window["window_range"]["start"]))
-            ends.append(int(window["window_range"]["end"]))
+            starts.append(start)
+            ends.append(end)
             question_types.append(window.get("question_type", "unknown"))
-            local = counterfactual["local"]
-            window_source = counterfactual["window"]
-            negative_local_sequences.append(local["series"])
-            negative_starts.append(int(local["start"]))
-            negative_ends.append(int(local["end"]))
-            negative_window_values.append(window_source["values"].float())
-            local_valid.append(bool(local["valid"]))
-            window_valid.append(bool(window_source["valid"]))
+            states.append(int(bool(window["has_anomaly"])))
+            valid.append(bool(counterfactual["valid"]))
             record_ids.append(f'{item["series_file"]}:{window_index}')
-    padded, attention_masks = _pad_with_mask(positive_sequences)
-    negative_padded, negative_masks = _pad_with_mask(negative_local_sequences)
+            kinds.append(counterfactual["kind"])
+    positive_padded, positive_masks = _pad_with_mask(positive_sequences)
+    counterfactual_padded, counterfactual_masks = _pad_with_mask(counterfactual_sequences)
+    if positive_padded.shape != counterfactual_padded.shape:
+        raise ValueError("counterfactual patch changed full-series shape")
     return {
-        "padded_sequences": padded, "attention_masks": attention_masks,
-        "questions": questions, "answers": answers,
-        "start_indices": starts, "end_indices": ends, "question_types": question_types,
-        "negative_local_sequences": negative_padded, "negative_local_masks": negative_masks,
-        "negative_local_start_indices": negative_starts, "negative_local_end_indices": negative_ends,
-        "negative_window_values": negative_window_values,
-        "local_source_valid": torch.tensor(local_valid, dtype=torch.bool),
-        "window_source_valid": torch.tensor(window_valid, dtype=torch.bool),
+        "padded_sequences": positive_padded,
+        "attention_masks": positive_masks,
+        "counterfactual_sequences": counterfactual_padded,
+        "counterfactual_masks": counterfactual_masks,
+        "positive_window_values": positive_window_values,
+        "counterfactual_window_values": counterfactual_window_values,
+        "questions": questions,
+        "answers": answers,
+        "start_indices": starts,
+        "end_indices": ends,
+        "question_types": question_types,
+        "state_targets": torch.tensor(states, dtype=torch.long),
+        "counterfactual_valid": torch.tensor(valid, dtype=torch.bool),
         "record_ids": record_ids,
+        "counterfactual_kinds": kinds,
     }
