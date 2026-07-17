@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from dataclasses import asdict
+from datetime import timedelta
 from pathlib import Path
 
 import torch
@@ -16,9 +17,12 @@ from .model_utils import build_model, load_axis_checkpoint, sha256_file
 def dist_info():
     rank, world = int(os.getenv("RANK", "0")), int(os.getenv("WORLD_SIZE", "1"))
     local = int(os.getenv("LOCAL_RANK", "0"))
-    if world > 1:
-        torch.distributed.init_process_group("nccl")
     torch.cuda.set_device(local)
+    if world > 1:
+        # Validation records have highly variable generation lengths. Bind the
+        # rank before NCCL initialization and allow fast ranks to wait for a
+        # straggler without hitting the default ten-minute store timeout.
+        torch.distributed.init_process_group("nccl", timeout=timedelta(hours=2))
     return rank, world, local
 
 
@@ -62,7 +66,7 @@ def main() -> None:
                 row = asdict(r); row.update({"mode": mode, "response": response, "loss": float(loss)})
                 append_jsonl(shard, row); done.add((r.record_id, mode))
     if world > 1:
-        torch.distributed.barrier()
+        torch.distributed.barrier(device_ids=[local])
     if rank == 0:
         rows = []
         for i in range(world): rows.extend(read_jsonl(out / f"rank{i}.jsonl"))
