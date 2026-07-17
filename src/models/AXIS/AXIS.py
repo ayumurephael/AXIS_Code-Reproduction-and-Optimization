@@ -377,14 +377,20 @@ class AXIS(nn.Module):
                 include_window=True,
                 include_fixed=True,
             ))
-        encoded = self.tokenizer(
-            prompts,
-            return_tensors="pt",
-            padding=True,
-            truncation=True,
-            add_special_tokens=True,
-        )
+        previous_padding_side = self.tokenizer.padding_side
+        try:
+            self.tokenizer.padding_side = "right"
+            encoded = self.tokenizer(
+                prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                add_special_tokens=True,
+            )
+        finally:
+            self.tokenizer.padding_side = previous_padding_side
         return encoded["input_ids"], encoded["attention_mask"]
+
     def get_hint_embeddings(
         self,
         input_ids: torch.Tensor,
@@ -445,8 +451,6 @@ class AXIS(nn.Module):
         *,
         fixed_hint_frozen: bool = True,
     ) -> torch.Tensor:
-        if self.tokenizer.padding_side != "right":
-            raise ValueError("state_logits requires right-side tokenizer padding")
         input_ids, attention_mask = self.generate_state_input_ids(
             state_question,
             time_series,
@@ -454,6 +458,10 @@ class AXIS(nn.Module):
             end_indices,
             window_values_override=window_values_override,
         )
+        if attention_mask.shape[1] > 1 and bool(
+            (attention_mask[:, 1:] > attention_mask[:, :-1]).any()
+        ):
+            raise ValueError("state tokenization did not produce right-side padding")
         device = self.get_device()
         input_ids = input_ids.to(device)
         attention_mask = attention_mask.to(device)
@@ -738,4 +746,3 @@ class AXISCombinedModel(nn.Module):
             logits = self.ts_pretrain_model.anomaly_head(local_embeddings)
             anomaly_scores = [logits[i, start_indices[i]:end_indices[i], :] for i in range(len(start_indices))]
             return answer, anomaly_scores
-
