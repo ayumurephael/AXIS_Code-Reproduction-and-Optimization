@@ -17,7 +17,11 @@ EXPECTED_GROUP_LRS = {
 }
 
 
-def audit_loss_objective_checkpoint(payload: dict) -> dict:
+def audit_loss_objective_checkpoint(
+    payload: dict,
+    *,
+    expected_donor_top_m: int | None = None,
+) -> dict:
     metadata = payload.get("reproduction_meta")
     if not isinstance(metadata, dict):
         raise ValueError("checkpoint is missing reproduction metadata")
@@ -60,8 +64,11 @@ def audit_loss_objective_checkpoint(payload: dict) -> dict:
         raise ValueError("checkpoint counterfactual policy skipped dual-source validation")
     if policy.get("donor_selection") != "uniform_top_m_by_window_distance":
         raise ValueError("checkpoint did not use uniform Top-M donor sampling")
-    if int(policy.get("donor_top_m", 0)) != 8:
-        raise ValueError("checkpoint donor Top-M is not 8")
+    donor_top_m = int(policy.get("donor_top_m", 0))
+    if donor_top_m <= 0:
+        raise ValueError("checkpoint donor Top-M must be positive")
+    if expected_donor_top_m is not None and donor_top_m != expected_donor_top_m:
+        raise ValueError("checkpoint donor Top-M does not match the preregistered value")
     if policy.get("donor_sampling_key") != "sha256(seed:anchor_key)":
         raise ValueError("checkpoint donor sampling is not deterministically keyed")
     if policy.get("replacement_across_anchors") is not True:
@@ -87,16 +94,21 @@ def audit_loss_objective_checkpoint(payload: dict) -> dict:
         },
         "optimizer_groups": optimizer_groups,
         "counterfactual_index_version": metadata["counterfactual_index_version"],
+        "donor_top_m": donor_top_m,
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--expected-donor-top-m", type=int)
     parser.add_argument("--output")
     args = parser.parse_args()
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
-    result = audit_loss_objective_checkpoint(payload)
+    result = audit_loss_objective_checkpoint(
+        payload,
+        expected_donor_top_m=args.expected_donor_top_m,
+    )
     if args.output:
         Path(args.output).write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result), flush=True)

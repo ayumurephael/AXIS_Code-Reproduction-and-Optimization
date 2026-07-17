@@ -91,6 +91,9 @@ class PromptTests(unittest.TestCase):
         source = Path("src/models/AXIS/AXIS.py").read_text(encoding="utf-8")
         self.assertIn("detach_fixed_hint: bool = False", source)
         self.assertIn("processed_fixed = processed_fixed.detach()", source)
+        self.assertIn("previous_padding_side = self.tokenizer.padding_side", source)
+        self.assertIn("self.tokenizer.padding_side = previous_padding_side", source)
+        self.assertIn("state tokenization did not produce right-side padding", source)
 
 
 class LossAndScheduleTests(unittest.TestCase):
@@ -395,8 +398,10 @@ class ObjectiveCheckpointAuditTests(unittest.TestCase):
         }
 
     def test_accepts_only_v2_objective_metadata(self):
-        result = audit_loss_objective_checkpoint(self._payload())
+        result = audit_loss_objective_checkpoint(self._payload(), expected_donor_top_m=8)
         self.assertTrue(result["ok"])
+        with self.assertRaises(ValueError):
+            audit_loss_objective_checkpoint(self._payload(), expected_donor_top_m=1)
         broken = self._payload()
         broken["reproduction_meta"]["margin"] = math.log(2.0)
         with self.assertRaises(ValueError):

@@ -30,7 +30,8 @@ and Phase-I TS encoder remain frozen.
 - Normal anchor: retrieve a same-length paired anomalous donor and transplant only
   `time_series - normal_series` into the anchor interval.
 - Rank all same-length, tau-compatible donors by Window distance, then sample uniformly from the
-  nearest `M=8`; sampling is deterministically keyed by `SHA256(seed:anchor_key)`.
+  nearest `M`; `M=1` is exactly the original argmin rule used by the formal run, while `M>1`
+  enables deterministic keyed sampling via `SHA256(seed:anchor_key)`.
 - Re-encode every patched full sequence with the frozen Phase-I encoder; never reuse a donor Local
   embedding at an anchor position.
 - `tau=0.25`. Window and Local gamma thresholds are P5 of the nonzero labeled-anomaly effects on
@@ -57,31 +58,32 @@ AdamW weight decay is `1e-5`; global Perceiver gradient clipping is `1.0`.
 CUDA_VISIBLE_DEVICES=0 python -m tools.axis_repro.build_counterfactual_index \
   --data data/anomaly_llava_training_dataset \
   --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-  --output experiments/reproduction/coherent_state_v3/counterfactual_index.json \
-  --seed 72 --train-ratio 0.95 --tau 0.25 --donor-top-m 8 --gamma-percentile 5
+  --output experiments/reproduction/argmin_state_v3/counterfactual_index.json \
+  --seed 72 --train-ratio 0.95 --tau 0.25 --donor-top-m 1 --gamma-percentile 5
 
 python -m tools.axis_repro.audit_counterfactual_index \
   --data data/anomaly_llava_training_dataset \
-  --index experiments/reproduction/coherent_state_v3/counterfactual_index.json \
-  --expected-donor-top-m 8 \
-  --output experiments/reproduction/coherent_state_v3/counterfactual_index_audit.json
+  --index experiments/reproduction/argmin_state_v3/counterfactual_index.json \
+  --expected-donor-top-m 1 \
+  --output experiments/reproduction/argmin_state_v3/counterfactual_index_audit.json
 
 # Full architecture: v2 loss + QK-Norm + continuous bypass/sidecar + K=30 task prompt.
 CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
   -m tools.axis_repro.train_phase2_architecture_redesign \
   --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-  --counterfactual-index experiments/reproduction/coherent_state_v3/counterfactual_index.json \
+  --counterfactual-index experiments/reproduction/argmin_state_v3/counterfactual_index.json \
   --data data/anomaly_llava_training_dataset \
-  --output experiments/reproduction/architecture_redesign/full_state_v3/phase2 \
+  --output experiments/reproduction/architecture_redesign/full_argmin_state_v3/phase2 \
   --architecture-variant full --epochs 3 --seed 72 \
   --local-lr 5e-5 --attention-lr 2e-5 --prompt-lr 5e-5 \
   --weight-decay 1e-5 --gradient-clip 1.0 \
   --beta 0.2 --beta-warmup-ratio 0.1
 
 python -m tools.axis_repro.audit_loss_objective_checkpoint \
-  --checkpoint experiments/reproduction/architecture_redesign/full_state_v3/phase2/epoch_1.pth
+  --expected-donor-top-m 1 \
+  --checkpoint experiments/reproduction/architecture_redesign/full_argmin_state_v3/phase2/epoch_1.pth
 python -m tools.axis_repro.audit_architecture_checkpoint \
-  --checkpoint experiments/reproduction/architecture_redesign/full_state_v3/phase2/epoch_1.pth \
+  --checkpoint experiments/reproduction/architecture_redesign/full_argmin_state_v3/phase2/epoch_1.pth \
   --expected-variant full
 ```
 
