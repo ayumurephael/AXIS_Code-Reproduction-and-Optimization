@@ -376,7 +376,7 @@ class AXIS(nn.Module):
                 include_local=True,
                 include_window=True,
                 include_fixed=True,
-            ))
+            ).rstrip())
         previous_padding_side = self.tokenizer.padding_side
         try:
             self.tokenizer.padding_side = "right"
@@ -406,9 +406,11 @@ class AXIS(nn.Module):
             raise ValueError("local override batch size does not match input IDs")
         word_embeddings = self.model.get_input_embeddings().weight
         source_embeddings = self.perceiver.get_source_embeddings(word_embeddings)
+        rows = []
 
         for index in range(batch_size):
             current_input_ids = input_ids[index]
+            current_embeddings = input_embeddings[index]
             local_positions = (current_input_ids == self.local_hint_token_id).nonzero(as_tuple=True)[0]
             if len(local_positions) > 0:
                 if local_window_embeddings_override is None:
@@ -425,7 +427,12 @@ class AXIS(nn.Module):
                     local_start,
                     local_end,
                 )
-                input_embeddings[index, local_positions] = projected.to(input_embeddings.dtype)
+                current_embeddings = torch.index_copy(
+                    current_embeddings,
+                    dim=0,
+                    index=local_positions,
+                    source=projected.to(input_embeddings.dtype),
+                )
 
             fixed_positions = (current_input_ids == self.fixed_hint_token_id).nonzero(as_tuple=True)[0]
             if len(fixed_positions) > 0:
@@ -435,8 +442,14 @@ class AXIS(nn.Module):
                 )
                 if detach_fixed_hint:
                     processed_fixed = processed_fixed.detach()
-                input_embeddings[index, fixed_positions] = processed_fixed.to(input_embeddings.dtype)
-        return input_embeddings
+                current_embeddings = torch.index_copy(
+                    current_embeddings,
+                    dim=0,
+                    index=fixed_positions,
+                    source=processed_fixed.to(input_embeddings.dtype),
+                )
+            rows.append(current_embeddings)
+        return torch.stack(rows, dim=0)
 
     def state_logits(
         self,
@@ -449,7 +462,7 @@ class AXIS(nn.Module):
         normal_id: int,
         anomalous_id: int,
         *,
-        fixed_hint_frozen: bool = True,
+        fixed_hint_frozen: bool = False,
     ) -> torch.Tensor:
         input_ids, attention_mask = self.generate_state_input_ids(
             state_question,
@@ -481,10 +494,12 @@ class AXIS(nn.Module):
         last_index = attention_mask.sum(dim=1) - 1
         batch_index = torch.arange(hidden.shape[0], device=device)
         final_hidden = hidden[batch_index, last_index]
-        selected_weight = self.model.lm_head.weight[
-            torch.tensor([normal_id, anomalous_id], device=device)
-        ]
-        return F.linear(final_hidden, selected_weight)
+        label_ids = torch.tensor([normal_id, anomalous_id], device=device)
+        selected_weight = self.model.lm_head.weight[label_ids]
+        selected_bias = None
+        if self.model.lm_head.bias is not None:
+            selected_bias = self.model.lm_head.bias[label_ids]
+        return F.linear(final_hidden, selected_weight, bias=selected_bias)
     def forward(self, 
                 local_embeddings: torch.Tensor, 
                 time_series: torch.Tensor, 

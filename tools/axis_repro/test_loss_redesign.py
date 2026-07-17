@@ -41,33 +41,37 @@ class StateVerbalizerTests(unittest.TestCase):
         tokenizer = FakeTokenizer({
             " normal": [10],
             " anomalous": [11],
-            " N": [12],
-            " A": [13],
             " 0": [14],
             " 1": [15],
         })
         verbalizers = select_state_verbalizers(tokenizer)
-        self.assertEqual((verbalizers.normal_id, verbalizers.anomalous_id), (10, 11))
-        self.assertIn("NORMAL", verbalizers.question)
-        self.assertIn("ANOMALOUS", verbalizers.question)
+        self.assertEqual((verbalizers.normal_id, verbalizers.anomalous_id), (14, 15))
+        self.assertEqual((verbalizers.normal_text, verbalizers.anomalous_text), (" 0", " 1"))
         self.assertFalse(tokenizer.last_add_special_tokens)
 
-    def test_falls_back_and_makes_mapping_explicit(self):
+    def test_falls_back_to_bare_numeric_when_space_is_a_separate_token(self):
         tokenizer = FakeTokenizer({
-            " normal": [1, 2],
-            " anomalous": [3, 4],
-            " N": [5],
-            " A": [6],
-            " 0": [7],
-            " 1": [8],
+            " 0": [220, 15],
+            " 1": [220, 16],
+            "0": [15],
+            "1": [16],
         })
         verbalizers = select_state_verbalizers(tokenizer)
-        self.assertEqual((verbalizers.normal_text, verbalizers.anomalous_text), (" N", " A"))
-        self.assertIn("N = NORMAL", verbalizers.question)
-        self.assertIn("A = ANOMALOUS", verbalizers.question)
+        self.assertEqual((verbalizers.normal_id, verbalizers.anomalous_id), (15, 16))
+        self.assertEqual((verbalizers.normal_text, verbalizers.anomalous_text), ("0", "1"))
+
+    def test_rejects_non_single_numeric_labels(self):
+        tokenizer = FakeTokenizer({
+            " 0": [7, 8],
+            " 1": [9],
+            "0": [7, 8],
+            "1": [9],
+        })
+        with self.assertRaises(RuntimeError):
+            select_state_verbalizers(tokenizer)
 
     def test_state_question_ends_at_classification_position(self):
-        self.assertTrue(build_state_question(" 0", " 1").endswith("State:"))
+        self.assertTrue(build_state_question(" 0", " 1").endswith("Label:"))
 
 
 class PromptTests(unittest.TestCase):
@@ -84,16 +88,31 @@ class PromptTests(unittest.TestCase):
         self.assertIn("111, -222", prompt)
         self.assertEqual(prompt.count("<|local_hint|>"), 2)
         self.assertEqual(prompt.count("<|fixed_hint|>"), 2)
-        self.assertIn("0 = NORMAL", prompt)
-        self.assertIn("1 = ANOMALOUS", prompt)
+        self.assertIn("0 = normal", prompt)
+        self.assertIn("1 = anomalous", prompt)
 
-    def test_state_forward_can_detach_fixed_hint_only(self):
+    def test_state_forward_uses_noninplace_shared_fixed_path(self):
         source = Path("src/models/AXIS/AXIS.py").read_text(encoding="utf-8")
-        self.assertIn("detach_fixed_hint: bool = False", source)
-        self.assertIn("processed_fixed = processed_fixed.detach()", source)
+        train_source = Path("tools/axis_repro/train_phase2_loss_redesign.py").read_text(encoding="utf-8")
+        self.assertIn("torch.index_copy(", source)
+        self.assertIn("fixed_hint_frozen: bool = False", source)
+        self.assertNotIn("fixed_hint_frozen=True", train_source)
         self.assertIn("previous_padding_side = self.tokenizer.padding_side", source)
         self.assertIn("self.tokenizer.padding_side = previous_padding_side", source)
         self.assertIn("state tokenization did not produce right-side padding", source)
+    def test_noninplace_injection_preserves_both_gradient_sources(self):
+        local = torch.randn(2, 3, requires_grad=True)
+        fixed = torch.randn(2, 3, requires_grad=True)
+        base = torch.zeros(6, 3)
+        injected = torch.index_copy(base, 0, torch.tensor([1, 2]), local)
+        injected = torch.index_copy(injected, 0, torch.tensor([3, 4]), fixed)
+        injected.square().sum().backward()
+
+        self.assertIsNotNone(local.grad)
+        self.assertGreater(float(local.grad.abs().sum()), 0.0)
+        self.assertIsNotNone(fixed.grad)
+        self.assertGreater(float(fixed.grad.abs().sum()), 0.0)
+
 
 
 class LossAndScheduleTests(unittest.TestCase):
@@ -362,21 +381,27 @@ class ObjectiveCheckpointAuditTests(unittest.TestCase):
             "epoch": 1,
             "global_step": 10,
             "reproduction_meta": {
-                "objective": "answer_nll_plus_coherent_binary_state_ce_v2",
-                "objective_version": 2,
+                "objective": "answer_nll_plus_coherent_binary_state_ce_v3",
+                "objective_version": 3,
                 "seed": 72,
                 "counterfactual_index_version": COUNTERFACTUAL_INDEX_VERSION,
                 "beta_target": 0.2,
                 "beta_warmup_ratio": 0.1,
                 "gradient_clip": 1.0,
-                "fixed_hint_state_gradient": False,
+                "fixed_hint_state_gradient": True,
                 "fixed_hint_answer_gradient": True,
+                "state_prompt_independent": True,
+                "state_pairing": "factual_counterfactual_same_step",
+                "state_logits_source": "frozen_lm_head_next_token_two_class",
+                "state_label_policy": "strict_single_token_numeric_0_1",
+                "state_verbalizer_selection": "prefer_space_prefixed_then_bare_numeric",
+                "soft_embedding_injection": "non_inplace_index_copy",
                 "state_verbalizers": {
-                    "normal_text": " N",
-                    "anomalous_text": " A",
+                    "normal_text": " 0",
+                    "anomalous_text": " 1",
                     "normal_id": 10,
                     "anomalous_id": 11,
-                    "question": "Classify.\nState:",
+                    "question": "Classify.\nLabel:",
                 },
                 "optimizer_groups": {
                     "local_continuous": {"lr": 5e-5, "parameters": 1},
@@ -397,7 +422,7 @@ class ObjectiveCheckpointAuditTests(unittest.TestCase):
             },
         }
 
-    def test_accepts_only_v2_objective_metadata(self):
+    def test_accepts_only_v3_objective_metadata(self):
         result = audit_loss_objective_checkpoint(self._payload(), expected_donor_top_m=8)
         self.assertTrue(result["ok"])
         with self.assertRaises(ValueError):
@@ -406,5 +431,15 @@ class ObjectiveCheckpointAuditTests(unittest.TestCase):
         broken["reproduction_meta"]["margin"] = math.log(2.0)
         with self.assertRaises(ValueError):
             audit_loss_objective_checkpoint(broken)
+        old_objective = self._payload()
+        old_objective["reproduction_meta"]["objective_version"] = 2
+        with self.assertRaises(ValueError):
+            audit_loss_objective_checkpoint(old_objective)
+
+        detached_fixed = self._payload()
+        detached_fixed["reproduction_meta"]["fixed_hint_state_gradient"] = False
+        with self.assertRaises(ValueError):
+            audit_loss_objective_checkpoint(detached_fixed)
+
 if __name__ == "__main__":
     unittest.main()

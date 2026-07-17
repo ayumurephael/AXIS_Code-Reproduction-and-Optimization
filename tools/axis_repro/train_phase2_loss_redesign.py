@@ -148,7 +148,7 @@ def _axis_consistent_state_forward(
             state_question,
             int(normal_id),
             int(anomalous_id),
-            fixed_hint_frozen=True,
+            fixed_hint_frozen=False,
         )
         state_loss_sum = F.cross_entropy(logits.float(), paired_targets, reduction="sum")
         state_rows = paired_targets.numel()
@@ -357,8 +357,8 @@ def main() -> None:
     run_start = time.perf_counter()
     timed_start = None
     metadata = {
-        "objective": "answer_nll_plus_coherent_binary_state_ce_v2",
-        "objective_version": 2,
+        "objective": "answer_nll_plus_coherent_binary_state_ce_v3",
+        "objective_version": 3,
         "phase1": str(Path(args.phase1).resolve()),
         "phase1_sha256": phase1_sha,
         "counterfactual_index": str(Path(args.counterfactual_index).resolve()),
@@ -374,8 +374,14 @@ def main() -> None:
         "gradient_clip": args.gradient_clip,
         "optimizer_groups": optimizer_metadata,
         "state_verbalizers": verbalizers.to_metadata(),
-        "fixed_hint_state_gradient": False,
+        "fixed_hint_state_gradient": True,
         "fixed_hint_answer_gradient": True,
+        "state_prompt_independent": True,
+        "state_pairing": "factual_counterfactual_same_step",
+        "state_logits_source": "frozen_lm_head_next_token_two_class",
+        "state_label_policy": "strict_single_token_numeric_0_1",
+        "state_verbalizer_selection": "prefer_space_prefixed_then_bare_numeric",
+        "soft_embedding_injection": "non_inplace_index_copy",
         "trainable_parameters": trainable,
         "train_series": len(dataset),
         "steps_per_rank_epoch": len(loader),

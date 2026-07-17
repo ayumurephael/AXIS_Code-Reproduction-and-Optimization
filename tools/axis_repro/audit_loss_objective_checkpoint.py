@@ -8,7 +8,7 @@ from pathlib import Path
 import torch
 
 
-EXPECTED_OBJECTIVE = "answer_nll_plus_coherent_binary_state_ce_v2"
+EXPECTED_OBJECTIVE = "answer_nll_plus_coherent_binary_state_ce_v3"
 EXPECTED_COUNTERFACTUAL_INDEX_VERSION = 3
 EXPECTED_GROUP_LRS = {
     "local_continuous": 5e-5,
@@ -25,8 +25,8 @@ def audit_loss_objective_checkpoint(
     metadata = payload.get("reproduction_meta")
     if not isinstance(metadata, dict):
         raise ValueError("checkpoint is missing reproduction metadata")
-    if metadata.get("objective") != EXPECTED_OBJECTIVE or int(metadata.get("objective_version", 0)) != 2:
-        raise ValueError("checkpoint does not use coherent binary state objective v2")
+    if metadata.get("objective") != EXPECTED_OBJECTIVE or int(metadata.get("objective_version", 0)) != 3:
+        raise ValueError("checkpoint does not use coherent binary state objective v3")
     if int(metadata.get("counterfactual_index_version", 0)) != EXPECTED_COUNTERFACTUAL_INDEX_VERSION:
         raise ValueError("checkpoint was not trained with coherent counterfactual index v3")
     if abs(float(metadata.get("beta_target", -1.0)) - 0.2) > 1e-12:
@@ -35,10 +35,22 @@ def audit_loss_objective_checkpoint(
         raise ValueError("checkpoint beta warmup ratio is not 0.1")
     if abs(float(metadata.get("gradient_clip", -1.0)) - 1.0) > 1e-12:
         raise ValueError("checkpoint gradient clipping is not 1.0")
-    if metadata.get("fixed_hint_state_gradient") is not False:
-        raise ValueError("state loss must not update Fixed/task-prompt parameters")
+    if metadata.get("fixed_hint_state_gradient") is not True:
+        raise ValueError("state loss must update the shared Fixed/task-prompt parameters")
     if metadata.get("fixed_hint_answer_gradient") is not True:
         raise ValueError("answer loss must train Fixed/task-prompt parameters")
+    if metadata.get("state_prompt_independent") is not True:
+        raise ValueError("state classification must use an independent prompt sequence")
+    if metadata.get("state_pairing") != "factual_counterfactual_same_step":
+        raise ValueError("factual and counterfactual states were not paired in one step")
+    if metadata.get("state_logits_source") != "frozen_lm_head_next_token_two_class":
+        raise ValueError("state logits were not selected from the frozen LM head")
+    if metadata.get("state_label_policy") != "strict_single_token_numeric_0_1":
+        raise ValueError("state labels do not follow the strict numeric 0/1 policy")
+    if metadata.get("state_verbalizer_selection") != "prefer_space_prefixed_then_bare_numeric":
+        raise ValueError("state verbalizer selection does not follow the tokenizer-adaptive numeric policy")
+    if metadata.get("soft_embedding_injection") != "non_inplace_index_copy":
+        raise ValueError("soft-token injection is not the documented non-inplace path")
     if "margin" in metadata or "modes" in metadata:
         raise ValueError("checkpoint contains obsolete SLR metadata")
 
@@ -47,7 +59,13 @@ def audit_loss_objective_checkpoint(
     anomalous_id = verbalizers.get("anomalous_id")
     if not isinstance(normal_id, int) or not isinstance(anomalous_id, int) or normal_id == anomalous_id:
         raise ValueError("checkpoint has invalid one-token state verbalizers")
-    if not str(verbalizers.get("question", "")).rstrip().endswith("State:"):
+    verbalizer_texts = (
+        verbalizers.get("normal_text"),
+        verbalizers.get("anomalous_text"),
+    )
+    if verbalizer_texts not in {(" 0", " 1"), ("0", "1")}:
+        raise ValueError("checkpoint does not use numeric 0/1 state verbalizers")
+    if not str(verbalizers.get("question", "")).rstrip().endswith("Label:"):
         raise ValueError("checkpoint state prompt does not end at the classification position")
 
     optimizer_groups = metadata.get("optimizer_groups", {})
