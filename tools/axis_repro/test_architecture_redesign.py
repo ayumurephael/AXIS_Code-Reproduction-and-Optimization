@@ -179,6 +179,25 @@ class PerceiverRedesignTests(unittest.TestCase):
         actual = module.process_local_embeddings(local, source, 0, 2)
         torch.testing.assert_close(actual, expected.squeeze(0))
 
+    def test_continuous_bypass_accepts_encoder_singleton_feature_axis(self) -> None:
+        module = self._full_perceiver()
+        local = torch.randn(3, 1, 4)
+        source = torch.randn(1, 3, 4)
+        actual = module.process_local_embeddings(local, source, 0, 3)
+        expected = module.process_local_embeddings(local.squeeze(1), source, 0, 3)
+        self.assertEqual(tuple(actual.shape), (3, 4))
+        torch.testing.assert_close(actual, expected)
+
+    def test_continuous_bypass_rejects_ambiguous_feature_axis(self) -> None:
+        module = self._full_perceiver()
+        with self.assertRaisesRegex(ValueError, "singleton feature dimension"):
+            module.process_local_embeddings(
+                torch.randn(3, 2, 4),
+                torch.randn(1, 3, 4),
+                0,
+                3,
+            )
+
     def test_full_variant_has_no_unused_trainable_parameters(self) -> None:
         module = self._full_perceiver()
         source = module.get_source_embeddings(torch.randn(6, 4))

@@ -217,7 +217,14 @@ class Perceiver(nn.Module):
                                 source_embeddings: torch.Tensor,
                                 start_idx: int,
                                 end_idx: int) -> torch.Tensor:
-        local_ts_embeddings = local_embeddings[start_idx:end_idx, :].unsqueeze(0)
+        local_window = local_embeddings[start_idx:end_idx]
+        if local_window.ndim == 3:
+            if local_window.shape[1] != 1:
+                raise ValueError("Local encoder states require a singleton feature dimension")
+            local_window = local_window.squeeze(1)
+        elif local_window.ndim != 2:
+            raise ValueError("Local encoder states must have shape [T, D] or [T, 1, D]")
+        local_ts_embeddings = local_window.unsqueeze(0)
         semantic = self.local_attention(
             self.local_word_proj(local_ts_embeddings),
             source_embeddings,
