@@ -1,0 +1,19 @@
+{
+  "ok": true,
+  "errors": [],
+  "prediction_rows": 140,
+  "score_rows": 335,
+  "unique_score_keys": 335,
+  "probability_rows": 330,
+  "fallback_rows": 5,
+  "pending_journal_rows": 5,
+  "model": "deepseek-v4-pro",
+  "judge_max_tokens": 4096,
+  "sha256": {
+    "predictions.jsonl": "ee47657792d88a02b173e92a4fecaed4af763921b2ab6260f8e653f5ddd96e10",
+    "geval.jsonl": "c4e7aa22c6b20db724293fa0e515b47952c7227c8bc7f5a0f5bb8067a86cbf90",
+    "table1.json": "215695705119eef330f23060a2498df9259538589d4bf34f48c46fd44b62cd6d",
+    "table1.md": "47f1df6257c822f4ebde83740a61b98ff39af40315fde40e6ca7d89c7548763b",
+    "audit_results.json": "d0545a2a6549e7f1d9cde4749462ca63dcfcbb5df9fe72771159633c85068dfa"
+  }
+}

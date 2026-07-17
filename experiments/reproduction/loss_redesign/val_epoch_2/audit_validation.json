@@ -1,0 +1,8 @@
+{
+  "rows": 3000,
+  "series": 1500,
+  "expected_series": 1500,
+  "records_per_series": 2,
+  "errors": [],
+  "ok": true
+}

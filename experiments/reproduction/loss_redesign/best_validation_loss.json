@@ -1,0 +1,49 @@
+{
+  "selection_metric": "minimum full-validation mean teacher-forced loss",
+  "candidates": [
+    {
+      "predictions": "experiments/reproduction/loss_redesign/val_epoch_1/predictions.jsonl",
+      "rows": 3000,
+      "mean_loss": 0.9011898744205634,
+      "median_loss": 0.8884270489215851,
+      "mean_loss_by_question_type": {
+        "multiple_choice": 0.8431974817713729,
+        "open_ended": 1.0105572054713756,
+        "true_false": 0.8499650990894992
+      }
+    },
+    {
+      "predictions": "experiments/reproduction/loss_redesign/val_epoch_2/predictions.jsonl",
+      "rows": 3000,
+      "mean_loss": 0.8708214485943317,
+      "median_loss": 0.8568755686283112,
+      "mean_loss_by_question_type": {
+        "multiple_choice": 0.8184239934546212,
+        "open_ended": 0.9783685984259981,
+        "true_false": 0.8162639119552568
+      }
+    },
+    {
+      "predictions": "experiments/reproduction/loss_redesign/val_epoch_3/predictions.jsonl",
+      "rows": 3000,
+      "mean_loss": 0.8556907533208529,
+      "median_loss": 0.8392971456050873,
+      "mean_loss_by_question_type": {
+        "multiple_choice": 0.8039412626019287,
+        "open_ended": 0.9591840921995513,
+        "true_false": 0.8043893339402776
+      }
+    }
+  ],
+  "best": {
+    "predictions": "experiments/reproduction/loss_redesign/val_epoch_3/predictions.jsonl",
+    "rows": 3000,
+    "mean_loss": 0.8556907533208529,
+    "median_loss": 0.8392971456050873,
+    "mean_loss_by_question_type": {
+      "multiple_choice": 0.8039412626019287,
+      "open_ended": 0.9591840921995513,
+      "true_false": 0.8043893339402776
+    }
+  }
+}

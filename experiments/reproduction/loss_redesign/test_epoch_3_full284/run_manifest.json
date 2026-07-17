@@ -1,0 +1,10 @@
+{
+  "checkpoint": "/home2/xuhaijie/axis_repro/loss_resesign/experiments/reproduction/loss_redesign/phase2/epoch_3_inference.pth",
+  "checkpoint_sha256": "787e143355160fb5e40b5a969dbb9c92d699eddbd6ac012d99a05fc6e47efcf9",
+  "subset": "full",
+  "world_size": 3,
+  "modes": [
+    "base"
+  ],
+  "rows": 284
+}

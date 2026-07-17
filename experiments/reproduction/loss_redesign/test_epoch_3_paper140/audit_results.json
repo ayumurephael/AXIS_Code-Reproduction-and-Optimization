@@ -1,0 +1,14 @@
+{
+  "prediction_rows": 140,
+  "records": 140,
+  "prediction_modes": {
+    "base": 140
+  },
+  "score_rows": 335,
+  "score_methods": {
+    "final_score_top_logprobs": 330,
+    "exact_sample_mean_20": 5
+  },
+  "errors": [],
+  "ok": true
+}
