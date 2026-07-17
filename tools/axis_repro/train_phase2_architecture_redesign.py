@@ -1,4 +1,4 @@
-"""Full AXIS architecture runner using coherent counterfactual state objective v2."""
+"""Full AXIS architecture runner using coherent counterfactual state objective v3."""
 from .train_phase2_loss_redesign import main
 
 

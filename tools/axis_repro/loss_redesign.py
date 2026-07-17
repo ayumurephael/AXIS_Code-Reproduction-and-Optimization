@@ -17,9 +17,8 @@ from src.models.AXIS.dataset import AXISAnomalyQADataset
 
 COUNTERFACTUAL_INDEX_VERSION = 3
 STATE_VERBALIZER_CANDIDATES = (
-    (" normal", " anomalous"),
-    (" N", " A"),
     (" 0", " 1"),
+    ("0", "1"),
 )
 
 
@@ -39,7 +38,7 @@ def build_state_question(normal_text: str, anomalous_text: str) -> str:
     normal_label = normal_text.strip()
     anomalous_label = anomalous_text.strip()
     lines = [
-        "Classify only the target time-series window.",
+        "Classify the target interval using only the time-series evidence above.",
         "",
         "NORMAL means that the target window contains no anomaly.",
         "ANOMALOUS means that the target window contains an anomaly.",
@@ -49,28 +48,31 @@ def build_state_question(normal_text: str, anomalous_text: str) -> str:
         lines.append("Return exactly one label: NORMAL or ANOMALOUS.")
     else:
         lines.extend([
-            "Return exactly one token using this mapping:",
-            f"{normal_label} = NORMAL",
-            f"{anomalous_label} = ANOMALOUS",
+            "Output exactly one label:",
+            f"{normal_label} = normal",
+            f"{anomalous_label} = anomalous",
         ])
-    lines.append("State:")
+    lines.append("Label:")
     return "\n".join(lines)
 
 
 def select_state_verbalizers(tokenizer) -> StateVerbalizers:
-    """Select two distinct one-token labels in the documented priority order."""
+    """Select the first distinct numeric 0/1 pair that is one token for this tokenizer."""
     for normal_text, anomalous_text in STATE_VERBALIZER_CANDIDATES:
         normal_ids = tokenizer.encode(normal_text, add_special_tokens=False)
         anomalous_ids = tokenizer.encode(anomalous_text, add_special_tokens=False)
         if len(normal_ids) == 1 and len(anomalous_ids) == 1 and normal_ids[0] != anomalous_ids[0]:
-            return StateVerbalizers(
+            selected = StateVerbalizers(
                 normal_text=normal_text,
                 anomalous_text=anomalous_text,
                 normal_id=int(normal_ids[0]),
                 anomalous_id=int(anomalous_ids[0]),
                 question=build_state_question(normal_text, anomalous_text),
             )
-    raise RuntimeError("No distinct one-token state verbalizers found")
+            if (normal_text.strip(), anomalous_text.strip()) != ("0", "1"):
+                raise RuntimeError("The formal objective requires numeric 0/1 labels")
+            return selected
+    raise RuntimeError("Neither space-prefixed nor bare numeric 0/1 labels are distinct single tokens")
 
 
 def format_axis_question_prompt(
