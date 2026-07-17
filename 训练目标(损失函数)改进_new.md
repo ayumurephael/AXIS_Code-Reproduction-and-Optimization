@@ -320,7 +320,196 @@ $$
 
 
 
+更稳妥的候选集合是：
+$$
+\boxed{
+\begin{aligned}
+\mathcal A_i^{\mathrm{res}}
+=
+\{j:\quad
+&z_j=1,\\
+&K_j=K_i,\\
+&a_W(j)>\gamma_W,\\
+&c_W(j)/a_W(j)\le\tau_c,\\
+&d_W(i,j)/a_W(j)\le\tau_b,\\
+&\operatorname{Valid}(x_i+\delta_j)=1
+\}.
+\end{aligned}
+}
+$$
+其中：
+$$
+d_W(i,j)
+=
+\operatorname{RMS}
+\left(
+q(x_i)-q(n_j)
+\right).
+$$
+这里保留 $d_W$ 的目的已经不是消除 $n_j-x_i$——残差移植已经消除了它——而是：
 
+> 检查 donor 异常残差产生时的正常背景，与 anchor 背景是否处于相近的数据尺度和形态。
+
+
+
+#### 如何从候选集合里选出 $j^*$
+
+**最保守版本：选择最近的 donor**
+$$
+\boxed{
+j^*
+=
+\arg\min_{j\in\mathcal A_i^{\mathrm{res}}}
+d_W(i,j)
+}
+$$
+优点：
+
+- 最简单；
+- 可复现；
+- 背景兼容性最高。
+
+缺点：
+
+- 某些 donor 可能被重复使用很多次；
+- 异常多样性不足。
+
+
+
+
+
+
+
+**推荐版本：Top-M 随机采样**
+
+先找：
+$$
+\operatorname{TopM}_i
+=
+\text{按 }d_W(i,j)\text{ 最小排序的前 }M\text{ 个 donor}.
+$$
+然后：
+$$
+\boxed{
+j^*
+\sim
+\operatorname{Uniform}
+(\operatorname{TopM}_i)
+}
+$$
+推荐：
+$$
+M=8
+\quad\text{或}\quad
+M=16.
+$$
+优点：
+
+- 仍然保证背景兼容；
+- 增加异常类型和形态多样性；
+- 防止单个 donor 成为“万能 donor”。
+
+
+
+# 十二、完整样本构造步骤
+
+对正常 anchor $i$：
+
+## 步骤 1：确认 anchor 可靠正常
+
+要求：
+$$
+z_i=0,
+\qquad
+\texttt{anomaly\_descriptions}_i=[].
+$$
+还可检查：
+$$
+\operatorname{RMS}
+\left(
+q(x_i)-q(n_i)
+\right)
+\le\gamma_{\rm normal}.
+$$
+如果标注正常窗口与自己的 normal_series 差异很大，先排除。
+
+## 步骤 2：确定窗口长度
+
+$$
+K_i=e_i-s_i.
+$$
+
+只在：
+$$
+K_j=K_i
+$$
+的 donor 桶中选择。
+
+## 步骤 3：选择异常 donor
+
+从可靠 donor 池中寻找：
+$$
+j^*\in\mathcal A_i^{\mathrm{res}}.
+$$
+第一版使用：
+$$
+j^*=\arg\min d_W(i,j).
+$$
+
+## 步骤 4：计算异常残差
+
+$$
+\boxed{
+\delta_{j^*}
+=
+x_{j^*}-n_{j^*}
+}
+$$
+
+## 步骤 5：构造异常窗口
+
+$$
+\boxed{
+x_i^-
+=
+x_i+\delta_{j^*}
+}
+$$
+
+## 步骤 6：构造完整反事实序列
+
+$$
+\boxed{
+X_i^-=
+\operatorname{Patch}
+(X_i,I_i,x_i^-)
+}
+$$
+
+## 步骤 7：重新产生 Window 和 Local
+
+$$
+\boxed{
+W_i^-=
+\operatorname{Fmt}(x_i^-)
+}
+$$
+
+## 步骤 8：赋予明确状态标签
+
+原始状态样本：
+$$
+(Q^z,L_i,W_i,\bar F)
+\longrightarrow
+\texttt{NORMAL}.
+$$
+反事实状态样本：
+$$
+(Q^z,L_i^-,W_i^-,\bar F)
+\longrightarrow
+\texttt{ANOMALOUS}.
+$$
+注意：不再使用原始自然语言答案 $Y_i$ 监督反事实上下文。
 
 
 
@@ -707,25 +896,3 @@ LLM LR: 0
 TS Encoder LR: 0
 gradient clipping: 1.0
 ```
-
-
-
-------
-
-# 最终推荐的第一版方案
-
-建议精确实现：
-$$
-\begin{gather*}
-X_i^- = \text{Patch}(X_i,I_i,N_i[I_i]),\qquad z_i = 1 \\
-W_i^- = \text{Fmt}(X_i^-[I_i])\qquad L_i^- = E_0(X_i^-)[I_i] \\
- \mathcal { L } = \mathcal { L } _ { \mathrm { a n s w e r } } + \beta \frac { 1 } { 2 } \left[ \mathrm { C E } _ { 2 } ( z _ { i } \mid Q ^ { z } , L _ { i } , W _ { i } , \bar { F } ) + \mathrm { C E } _ { 2 } ( 1 - z _ { i } \mid Q ^ { z } , L _ { i } ^ { - } , W _ { i } ^ { - } , \bar { F } ) \right] 
-\end{gather*}
-$$
-
-
-这版最简单，却已经修复了当前方案最核心的三个问题：
-
-1. Local/Window 不再互相冲突；
-2. 反事实拥有明确正确目标；
-3. 不再通过极强的第一句监督破坏完整解释生成。

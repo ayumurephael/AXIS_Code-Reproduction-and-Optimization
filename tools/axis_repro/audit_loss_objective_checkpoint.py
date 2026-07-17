@@ -9,6 +9,7 @@ import torch
 
 
 EXPECTED_OBJECTIVE = "answer_nll_plus_coherent_binary_state_ce_v2"
+EXPECTED_COUNTERFACTUAL_INDEX_VERSION = 3
 EXPECTED_GROUP_LRS = {
     "local_continuous": 5e-5,
     "prototype_attention": 2e-5,
@@ -22,8 +23,8 @@ def audit_loss_objective_checkpoint(payload: dict) -> dict:
         raise ValueError("checkpoint is missing reproduction metadata")
     if metadata.get("objective") != EXPECTED_OBJECTIVE or int(metadata.get("objective_version", 0)) != 2:
         raise ValueError("checkpoint does not use coherent binary state objective v2")
-    if int(metadata.get("counterfactual_index_version", 0)) != 2:
-        raise ValueError("checkpoint was not trained with coherent counterfactual index v2")
+    if int(metadata.get("counterfactual_index_version", 0)) != EXPECTED_COUNTERFACTUAL_INDEX_VERSION:
+        raise ValueError("checkpoint was not trained with coherent counterfactual index v3")
     if abs(float(metadata.get("beta_target", -1.0)) - 0.2) > 1e-12:
         raise ValueError("checkpoint beta target is not 0.2")
     if abs(float(metadata.get("beta_warmup_ratio", -1.0)) - 0.1) > 1e-12:
@@ -57,6 +58,16 @@ def audit_loss_objective_checkpoint(payload: dict) -> dict:
         raise ValueError("checkpoint counterfactual policy used a phase fallback")
     if policy.get("post_patch_dual_source_validation") is not True:
         raise ValueError("checkpoint counterfactual policy skipped dual-source validation")
+    if policy.get("donor_selection") != "uniform_top_m_by_window_distance":
+        raise ValueError("checkpoint did not use uniform Top-M donor sampling")
+    if int(policy.get("donor_top_m", 0)) != 8:
+        raise ValueError("checkpoint donor Top-M is not 8")
+    if policy.get("donor_sampling_key") != "sha256(seed:anchor_key)":
+        raise ValueError("checkpoint donor sampling is not deterministically keyed")
+    if policy.get("replacement_across_anchors") is not True:
+        raise ValueError("checkpoint donor sampling replacement policy is missing")
+    if int(policy.get("donor_sampling_seed", -1)) != int(metadata.get("seed", -2)):
+        raise ValueError("checkpoint donor sampling seed does not match training seed")
     if not float(policy.get("gamma_window", 0.0)) > 0.0 or not float(policy.get("gamma_local", 0.0)) > 0.0:
         raise ValueError("checkpoint counterfactual thresholds are not positive")
 

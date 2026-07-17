@@ -6,7 +6,7 @@ import json
 import math
 import random
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +14,11 @@ import torch
 
 from experiments.configs.axis_config import default_config
 from src.models.AXIS.Pretrain_ts_encoder import TimeSeriesPretrainModel
-from .loss_redesign import COUNTERFACTUAL_INDEX_VERSION, retrieve_consistent_donors
+from .loss_redesign import (
+    COUNTERFACTUAL_INDEX_VERSION,
+    retrieve_consistent_donors,
+    stable_uniform_from_key,
+)
 from .model_utils import sha256_file
 
 
@@ -91,6 +95,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=72)
     parser.add_argument("--train-ratio", type=float, default=0.95)
     parser.add_argument("--tau", type=float, default=0.25)
+    parser.add_argument("--donor-top-m", type=int, default=8)
     parser.add_argument("--gamma-percentile", type=float, default=5.0)
     parser.add_argument("--encode-batch-size", type=int, default=32)
     parser.add_argument("--anchor-chunk-size", type=int, default=128)
@@ -103,7 +108,8 @@ def main() -> None:
         raise ValueError("gamma percentile must be in [0, 100]")
     if args.tau <= 0.0:
         raise ValueError("tau must be positive")
-
+    if args.donor_top_m <= 0:
+        raise ValueError("donor top-M must be positive")
     started = time.perf_counter()
     data_root = Path(args.data)
     series_dir = data_root / "series"
@@ -276,6 +282,8 @@ def main() -> None:
 
     matches: dict[int, int] = {}
     match_ratios: dict[int, float] = {}
+    sampled_ranks: dict[int, int] = {}
+    eligible_counts: dict[int, int] = {}
     for length, anchors in anchors_by_length.items():
         donors = donors_by_length[length]
         if not donors:
@@ -286,21 +294,34 @@ def main() -> None:
         for start in range(0, len(anchors), args.anchor_chunk_size):
             chunk = anchors[start:start + args.anchor_chunk_size]
             anchor_values = torch.stack([records[index]["window_current"] for index in chunk]).to(device)
-            best, found, ratios = retrieve_consistent_donors(
+            random_values = torch.tensor(
+                [stable_uniform_from_key(args.seed, records[index]["key"]) for index in chunk],
+                dtype=torch.float64,
+                device=device,
+            )
+            best, found, ratios, ranks, counts = retrieve_consistent_donors(
                 anchor_values,
                 donor_normal,
                 donor_abnormal,
                 valid_tensor,
                 tau=args.tau,
+                top_m=args.donor_top_m,
+                random_values=random_values,
             )
             for row, anchor_index in enumerate(chunk):
                 if bool(found[row]):
                     matches[anchor_index] = donors[int(best[row])]
                     match_ratios[anchor_index] = float(ratios[row])
-
+                    sampled_ranks[anchor_index] = int(ranks[row])
+                    eligible_counts[anchor_index] = int(counts[row])
     matched_normal_indices = sorted(matches)
     accepted_normal = 0
     rejected_post_patch = 0
+    accepted_donor_usage: Counter[str] = Counter()
+    accepted_sampled_ranks: list[int] = []
+    accepted_pool_sizes: list[int] = []
+    accepted_eligible_counts: list[int] = []
+    accepted_match_ratios: list[float] = []
     for batch_start in range(0, len(matched_normal_indices), args.encode_batch_size):
         chunk = matched_normal_indices[batch_start:batch_start + args.encode_batch_size]
         patched_sequences = []
@@ -341,10 +362,18 @@ def main() -> None:
                     "donor_window_index": donor["window_index"],
                     "donor_key": donor["key"],
                     "match_ratio": match_ratios[anchor_index],
+                    "donor_sample_rank": sampled_ranks[anchor_index],
+                    "eligible_donor_count": eligible_counts[anchor_index],
+                    "top_m_pool_size": min(args.donor_top_m, eligible_counts[anchor_index]),
                     "window_effect": window_effect,
                     "local_effect": local_effect,
                 }
                 accepted_normal += 1
+                accepted_donor_usage[donor["key"]] += 1
+                accepted_sampled_ranks.append(sampled_ranks[anchor_index])
+                accepted_pool_sizes.append(min(args.donor_top_m, eligible_counts[anchor_index]))
+                accepted_eligible_counts.append(eligible_counts[anchor_index])
+                accepted_match_ratios.append(match_ratios[anchor_index])
             else:
                 output_records[anchor["key"]] = _invalid_reference(False, "post_patch_effect_below_gamma")
                 rejected_post_patch += 1
@@ -359,6 +388,18 @@ def main() -> None:
     torch.cuda.empty_cache()
     valid_abnormal = sum(donor_valid.values())
     valid_total = valid_abnormal + accepted_normal
+    reuse_counts = np.asarray(list(accepted_donor_usage.values()), dtype=np.float64)
+    if reuse_counts.size:
+        reuse_probabilities = reuse_counts / reuse_counts.sum()
+        effective_donors = float(np.exp(-(reuse_probabilities * np.log(reuse_probabilities)).sum()))
+        max_donor_reuse = int(reuse_counts.max())
+        p95_donor_reuse = float(np.percentile(reuse_counts, 95, method="linear"))
+        top_donor_share = float(reuse_counts.max() / reuse_counts.sum())
+    else:
+        effective_donors = 0.0
+        max_donor_reuse = 0
+        p95_donor_reuse = 0.0
+        top_donor_share = 0.0
     stats = {
         "series": len(payloads),
         "qa": len(records),
@@ -368,6 +409,17 @@ def main() -> None:
         "valid_anomaly_deletions": valid_abnormal,
         "normal_matches_before_post_patch": len(matches),
         "valid_residual_transplants": accepted_normal,
+        "donor_top_m": args.donor_top_m,
+        "unique_residual_donors": len(accepted_donor_usage),
+        "max_residual_donor_reuse": max_donor_reuse,
+        "p95_residual_donor_reuse": p95_donor_reuse,
+        "top_residual_donor_share": top_donor_share,
+        "effective_residual_donors": effective_donors,
+        "mean_sampled_donor_rank": float(np.mean(accepted_sampled_ranks)) if accepted_sampled_ranks else 0.0,
+        "mean_top_m_pool_size": float(np.mean(accepted_pool_sizes)) if accepted_pool_sizes else 0.0,
+        "mean_eligible_donor_count": float(np.mean(accepted_eligible_counts)) if accepted_eligible_counts else 0.0,
+        "mean_match_ratio": float(np.mean(accepted_match_ratios)) if accepted_match_ratios else 0.0,
+        "p95_match_ratio": float(np.percentile(accepted_match_ratios, 95, method="linear")) if accepted_match_ratios else 0.0,
         "rejected_after_post_patch": rejected_post_patch,
         "valid_pairs": valid_total,
         "valid_pair_rate": valid_total / max(1, len(records)),
@@ -393,6 +445,11 @@ def main() -> None:
             "window_distance_space": "round(value*100)",
             "local_effect_space": "frozen_phase1_encoder",
             "normal_anchor_method": "paired_anomaly_residual_transplant",
+            "donor_selection": "uniform_top_m_by_window_distance",
+            "donor_top_m": args.donor_top_m,
+            "donor_sampling_seed": args.seed,
+            "donor_sampling_key": "sha256(seed:anchor_key)",
+            "replacement_across_anchors": True,
             "anomalous_anchor_method": "anchor_coordinate_self_normal_patch",
             "control_gap": "max_paired_gap_over_normal_windows",
             "same_length_required": True,

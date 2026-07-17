@@ -19,6 +19,7 @@ from .loss_redesign import (
     memory_safe_token_nll_sums,
     retrieve_consistent_donors,
     scheduled_beta,
+    stable_uniform_from_key,
     select_state_verbalizers,
 )
 from .audit_counterfactual_index import audit_index
@@ -110,27 +111,63 @@ class RetrievalTests(unittest.TestCase):
         anchors = torch.tensor([[0.0, 0.0]])
         donor_normal = torch.tensor([[0.0, 0.0], [0.1, 0.1]])
         donor_abnormal = torch.tensor([[4.0, 0.0], [4.1, 0.1]])
-        best, found, ratio = retrieve_consistent_donors(
+        best, found, ratio, rank, eligible = retrieve_consistent_donors(
             anchors,
             donor_normal,
             donor_abnormal,
             torch.tensor([False, True]),
             tau=0.25,
+            top_m=8,
+            random_values=torch.tensor([0.75]),
         )
         self.assertTrue(bool(found[0]))
         self.assertEqual(int(best[0]), 1)
+        self.assertEqual(int(rank[0]), 0)
+        self.assertEqual(int(eligible[0]), 1)
         self.assertLessEqual(float(ratio[0]), 0.25)
 
+    def test_uniform_sampling_selects_only_from_nearest_top_m(self):
+        anchors = torch.tensor([[0.0, 0.0], [0.0, 0.0]])
+        donor_normal = torch.tensor([[0.0, 0.0], [0.1, 0.1], [0.2, 0.2]])
+        donor_abnormal = donor_normal + torch.tensor([[4.0, 0.0]])
+        best, found, _ratio, rank, eligible = retrieve_consistent_donors(
+            anchors,
+            donor_normal,
+            donor_abnormal,
+            torch.tensor([True, True, True]),
+            tau=0.25,
+            top_m=2,
+            random_values=torch.tensor([0.0, 0.999]),
+        )
+        self.assertTrue(bool(found.all()))
+        self.assertTrue(torch.equal(best, torch.tensor([0, 1])))
+        self.assertTrue(torch.equal(rank, torch.tensor([0, 1])))
+        self.assertTrue(torch.equal(eligible, torch.tensor([3, 3])))
+        self.assertNotIn(2, best.tolist())
+
+    def test_keyed_uniform_is_deterministic_and_bounded(self):
+        first = stable_uniform_from_key(72, "series_000001.json:0")
+        second = stable_uniform_from_key(72, "series_000001.json:0")
+        other = stable_uniform_from_key(72, "series_000001.json:1")
+        self.assertEqual(first, second)
+        self.assertNotEqual(first, other)
+        self.assertGreaterEqual(first, 0.0)
+        self.assertLess(first, 1.0)
+
     def test_retrieval_rejects_baseline_mismatch(self):
-        best, found, ratio = retrieve_consistent_donors(
+        _best, found, ratio, rank, eligible = retrieve_consistent_donors(
             torch.tensor([[0.0, 0.0]]),
             torch.tensor([[10.0, 10.0]]),
             torch.tensor([[11.0, 10.0]]),
             torch.tensor([True]),
             tau=0.25,
+            top_m=8,
+            random_values=torch.tensor([0.5]),
         )
         self.assertFalse(bool(found[0]))
         self.assertTrue(math.isinf(float(ratio[0])))
+        self.assertEqual(int(rank[0]), -1)
+        self.assertEqual(int(eligible[0]), 0)
 
 
 class CounterfactualDatasetTests(unittest.TestCase):
@@ -171,11 +208,22 @@ class CounterfactualDatasetTests(unittest.TestCase):
                     "gamma_window": 0.1,
                     "gamma_local": 0.1,
                     "tau": 0.25,
+                    "donor_selection": "uniform_top_m_by_window_distance",
+                    "donor_top_m": 8,
+                    "donor_sampling_seed": 0,
+                    "donor_sampling_key": "sha256(seed:anchor_key)",
+                    "replacement_across_anchors": True,
                 },
                 "stats": {
                     "valid_pairs": 2,
                     "valid_residual_transplants": 1,
                     "valid_anomaly_deletions": 1,
+                    "donor_top_m": 8,
+                    "unique_residual_donors": 1,
+                    "max_residual_donor_reuse": 1,
+                    "p95_residual_donor_reuse": 1.0,
+                    "top_residual_donor_share": 1.0,
+                    "effective_residual_donors": 1.0,
                 },
                 "records": {
                     "series_000000.json:0": {"has_anomaly": True, "valid": True, "kind": "self_normal_patch", "target_state": 0},
@@ -186,6 +234,11 @@ class CounterfactualDatasetTests(unittest.TestCase):
                         "target_state": 1,
                         "donor_series_file": "series_000001.json",
                         "donor_window_index": 0,
+                        "donor_key": "series_000001.json:0",
+                        "donor_sample_rank": 0,
+                        "eligible_donor_count": 1,
+                        "top_m_pool_size": 1,
+                        "match_ratio": 0.0,
                     },
                     "series_000001.json:0": {
                         "has_anomaly": True,
@@ -308,7 +361,8 @@ class ObjectiveCheckpointAuditTests(unittest.TestCase):
             "reproduction_meta": {
                 "objective": "answer_nll_plus_coherent_binary_state_ce_v2",
                 "objective_version": 2,
-                "counterfactual_index_version": 2,
+                "seed": 72,
+                "counterfactual_index_version": COUNTERFACTUAL_INDEX_VERSION,
                 "beta_target": 0.2,
                 "beta_warmup_ratio": 0.1,
                 "gradient_clip": 1.0,
@@ -329,6 +383,11 @@ class ObjectiveCheckpointAuditTests(unittest.TestCase):
                 "counterfactual_policy": {
                     "phase_fallback": False,
                     "post_patch_dual_source_validation": True,
+                    "donor_selection": "uniform_top_m_by_window_distance",
+                    "donor_top_m": 8,
+                    "donor_sampling_key": "sha256(seed:anchor_key)",
+                    "donor_sampling_seed": 72,
+                    "replacement_across_anchors": True,
                     "gamma_window": 0.1,
                     "gamma_local": 0.1,
                 },

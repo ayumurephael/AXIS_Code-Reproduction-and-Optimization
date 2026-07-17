@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import asdict, dataclass
@@ -14,7 +15,7 @@ from torch.utils.checkpoint import checkpoint
 from src.models.AXIS.dataset import AXISAnomalyQADataset
 
 
-COUNTERFACTUAL_INDEX_VERSION = 2
+COUNTERFACTUAL_INDEX_VERSION = 3
 STATE_VERBALIZER_CANDIDATES = (
     (" normal", " anomalous"),
     (" N", " A"),
@@ -173,6 +174,12 @@ def memory_safe_token_nll_sums(
 
 
 @torch.no_grad()
+def stable_uniform_from_key(seed: int, key: str) -> float:
+    """Return a deterministic U[0,1) variate independent of batching and device."""
+    digest = hashlib.sha256(f"{int(seed)}:{key}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big") / float(1 << 64)
+
+
 def retrieve_consistent_donors(
     anchors: torch.Tensor,
     donor_normal: torch.Tensor,
@@ -180,16 +187,33 @@ def retrieve_consistent_donors(
     donor_valid: torch.Tensor,
     *,
     tau: float = 0.25,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Match normal anchors to paired anomalous donors under the ratio constraint."""
+    top_m: int = 8,
+    random_values: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Uniformly sample a donor from the nearest compatible Top-M candidates.
+
+    Returns selected donor indices, found flags, selected compatibility ratios,
+    zero-based sampled ranks, and the number of all compatible donors per anchor.
+    """
     anchors = anchors.float()
     donor_normal = donor_normal.float()
     donor_abnormal = donor_abnormal.float()
     donor_valid = donor_valid.bool()
+    if top_m <= 0:
+        raise ValueError("top_m must be positive")
     if anchors.ndim != 2 or donor_normal.shape != donor_abnormal.shape:
         raise ValueError("retrieval tensors must be flattened matrices")
     if donor_normal.shape[1] != anchors.shape[1] or donor_valid.numel() != donor_normal.shape[0]:
         raise ValueError("retrieval tensors have incompatible shapes")
+    if donor_normal.shape[0] == 0:
+        raise ValueError("at least one donor is required")
+    random_values = random_values.to(device=anchors.device, dtype=torch.float64)
+    if random_values.shape != anchors.shape[:1]:
+        raise ValueError("random_values must have shape [num_anchors]")
+    if not bool(torch.isfinite(random_values).all()) or not bool(
+        ((random_values >= 0.0) & (random_values < 1.0)).all()
+    ):
+        raise ValueError("random_values must be finite values in [0, 1)")
     dimensions = anchors.shape[1]
     distance2 = (
         anchors.square().sum(dim=1, keepdim=True)
@@ -202,13 +226,24 @@ def retrieve_consistent_donors(
         & effect2.gt(0).unsqueeze(0)
         & (distance2 <= tau**2 * effect2.unsqueeze(0))
     )
+    eligible_count = pair_valid.sum(dim=1)
+    pool_size = eligible_count.clamp(max=min(top_m, donor_normal.shape[0]))
+    found = pool_size.gt(0)
     cost = distance2.masked_fill(~pair_valid, float("inf"))
-    best_cost, best_index = cost.min(dim=1)
-    found = torch.isfinite(best_cost)
-    safe_index = best_index.clamp(0, max(0, effect2.numel() - 1))
-    ratio = torch.sqrt(best_cost / effect2[safe_index].clamp_min(torch.finfo(effect2.dtype).tiny))
+    # Stable sorting makes exact-distance ties deterministic by donor order.
+    _sorted_cost, sorted_index = torch.sort(cost, dim=1, stable=True)
+    top_index = sorted_index[:, :min(top_m, donor_normal.shape[0])]
+    sampled_rank = torch.floor(random_values * pool_size.clamp_min(1).to(torch.float64)).long()
+    sampled_rank = torch.minimum(sampled_rank, pool_size.clamp_min(1) - 1)
+    selected_index = top_index.gather(1, sampled_rank.unsqueeze(1)).squeeze(1)
+    selected_cost = distance2.gather(1, selected_index.unsqueeze(1)).squeeze(1)
+    selected_effect = effect2[selected_index]
+    ratio = torch.sqrt(
+        selected_cost / selected_effect.clamp_min(torch.finfo(effect2.dtype).tiny)
+    )
     ratio = ratio.masked_fill(~found, float("inf"))
-    return best_index, found, ratio
+    sampled_rank = sampled_rank.masked_fill(~found, -1)
+    return selected_index, found, ratio, sampled_rank, eligible_count
 
 
 class CounterfactualAXISDataset(AXISAnomalyQADataset):
