@@ -222,7 +222,15 @@ def numeric_f1(prediction: str, reference: str) -> Optional[float]:
 def score_prediction(row: Dict[str, Any]) -> Dict[str, Any]:
     qtype = row.get("question_type", "unknown")
     expected = row.get("expected_answer") or row.get("answer") or ""
-    generated = row.get("generated_response") or row.get("prediction") or ""
+    # Inference runners in this repository persist generated text under
+    # ``response``. Keep accepting the two historical evaluator aliases, but
+    # do not silently score a valid inference row as an empty answer.
+    generated = (
+        row.get("generated_response")
+        or row.get("prediction")
+        or row.get("response")
+        or ""
+    )
     scores: Dict[str, Any] = {
         "record_id": row.get("record_id"),
         "question_type": qtype,
