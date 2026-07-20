@@ -61,16 +61,35 @@ def validate_checkpoint_architecture(payload: dict, llm_config) -> None:
             f"checkpoint gate bias {actual_gate_bias} != requested {expected_gate_bias}"
         )
 
-def load_axis_checkpoint(model, path: str | Path, strict: bool = True) -> Dict[str, Any]:
-    payload = torch.load(path, map_location="cpu", weights_only=False)
+def load_axis_payload(model, payload: dict, strict: bool = True) -> Dict[str, Any]:
+    """Load an already-materialized AXIS checkpoint payload into ``model``."""
     validate_checkpoint_architecture(payload, model.axis.config.llm_config)
     state = payload.get("model_state_dict", payload)
     if "ts_pretrain_model" in state and "moirai_trainable" in state:
         model.ts_pretrain_model.load_state_dict(state["ts_pretrain_model"], strict=strict)
-        model.axis.perceiver.load_state_dict(state["moirai_trainable"], strict=strict)
+        perceiver_state = state["moirai_trainable"]
+        # Author Accelerate checkpoints were saved from the enclosing Moirai
+        # module and prefix every perceiver key with ``perceiver.``. Formal
+        # reproduction checkpoints save the perceiver state_dict directly.
+        # Normalize only if all keys have the prefix so mixed/corrupt inputs
+        # continue to fail closed under strict loading.
+        legacy_prefix = "perceiver."
+        if perceiver_state and all(
+            key.startswith(legacy_prefix) for key in perceiver_state
+        ):
+            perceiver_state = {
+                key[len(legacy_prefix):]: value
+                for key, value in perceiver_state.items()
+            }
+        model.axis.perceiver.load_state_dict(perceiver_state, strict=strict)
     else:
         model.load_state_dict(state, strict=strict)
     return payload
+
+
+def load_axis_checkpoint(model, path: str | Path, strict: bool = True) -> Dict[str, Any]:
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return load_axis_payload(model, payload, strict=strict)
 
 
 def load_phase1_fresh_hint(model, path: str | Path) -> Dict[str, Any]:

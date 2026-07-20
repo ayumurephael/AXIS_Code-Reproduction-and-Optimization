@@ -13,75 +13,77 @@ evaluates every released test QA (142 series / 284 QA). The formal Table 1 row i
 
 - Runtime: PyTorch 2.5.1, Transformers 4.45.2, NumPy 1.26.4. PyTorch 2.1/2.2 diagnostics are
   excluded because their generation behavior is not equivalent.
-- Phase II: released Phase-I encoder, fresh Hint Tuner, frozen encoder/LLM, 95/5 series split,
-  seed 72, AdamW, LR `1e-4`, weight decay `1e-5`, three epochs.
-- Formal training used `train_phase2_memory_safe_v3` on 3 x A100 40GB. It processed 28,500
+- Historical low-budget Phase II used the released Phase-I encoder, fresh Hint Tuner,
+  frozen encoder/LLM, a 95/5 series split, seed 72, AdamW, LR 1e-4, weight decay
+  1e-5, and three epochs. Author-compatible training should explicitly cover up to
+  35 epochs with seed 42 and select only by full-validation loss; see
+  AUTHOR_COMPATIBLE_TRAINING.md.
+- Historical training used `train_phase2_memory_safe_v3` on 3 x A100 40GB. It processed 28,500
   synchronized training steps in 20,497.7 s (5.694 h).
-- All three checkpoints were inferred on the same 1,500-series validation set (3,000 QA).
+- The three historical checkpoints were inferred on the same 1,500-series validation set (3,000 QA).
   Checkpoint selection is fail-closed and uses minimum mean teacher-forced validation loss.
   Epoch 3 is best overall and separately on MC, OE, and TF.
-- Generation matches the released per-record path: beam size 5 and `max_new_tokens=1000`.
-  Series-batched generation is diagnostic only because it changes responses.
-- The formal checkpoint is `epoch_3_inference.pth`, SHA-256
+- Formal test generation matches the author's released AXIS_test.py: series-batched,
+  beam size 5, max_new_tokens=1000, and no teacher-forced loss. Per-record generation
+  is retained only as a controlled diagnostic and for validation-loss workflows.
+- The historical checkpoint is `epoch_3_inference.pth`, SHA-256
   `8d562f8ff22c6709caaa2f7ba8208f3631a652d1932f001f39fa75ff8700fa4b`.
-- G-Eval uses the exact Appendix E.4 output format and Appendix E.2 dimensions/weights with the
-  requested `deepseek-v4-pro` judge, high thinking, temperature 0, and `top_logprobs=20`.
-  The score is the probability-weighted mean over 1-5 at the final score position. If all five
-  score tokens are unavailable, exactly 20 valid temperature-1 samples are averaged.
-- Formal judge calls use `max_tokens=4096`. The earlier 1,200-token limit often truncated high
-  thinking before `**Score:**`; those truncated calls are diagnostic and are never interpreted as
-  a need for 20-sample fallback.
+- Formal author-compatible G-Eval uses Gemini 2.5 Pro with the exact author prompt,
+  rubrics, dimensions, and weights. PackyAPI currently returns no logprobs for this
+  model, so the reproducible author-code path is one temperature-0 integer score.
+  Strict 20-sample means are calibration diagnostics and are never mixed into the
+  formal table.
 - Training, inference, free metrics, and API/G-Eval are executed on GPU servers. A local process
   may provide a loopback-only SSH proxy and file transfer, but it does not run evaluation.
 - Credentials are read into process scope from a protected file and are never stored in commands,
   manifests, predictions, scores, or documentation.
 
-The paper used Gemini-2.5, while this reproduction uses DeepSeek-v4-pro. Score differences are
-therefore not evidence of model non-reproduction by themselves; generations and checkpoint hashes
-are reported separately from judge scores.
+The historical table used DeepSeek-v4-pro and remains preserved as a judge-control
+artifact. The author-compatible table uses Gemini 2.5 Pro. Judge scores, generations,
+checkpoint hashes, prompt hashes, and the logprobs-availability flag are reported
+separately.
 
 ## Core commands
 
 Run these commands from `AXIS/baseline` on the GPU server.
 
 ```bash
-# Formal 3-GPU Phase-II training
+# Author-compatible long-budget Phase-II training
 torchrun --standalone --nproc_per_node=3 \
   -m tools.axis_repro.train_phase2_memory_safe_v3 \
   --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-  --output experiments/reproduction/phase2_torch251
+  --output experiments/reproduction/phase2_author_compatible_seed42 \
+  --epochs 35 --seed 42 --lr 1e-4 --weight-decay 1e-5
 
-# Select the checkpoint from the three complete validation prediction files
+# Historical three-epoch checkpoint-selection example
 python -m tools.axis_repro.select_best_loss \
   experiments/reproduction/val_epoch_1/predictions.jsonl \
   experiments/reproduction/val_epoch_2/predictions.jsonl \
   experiments/reproduction/val_epoch_3/predictions.jsonl \
   --output experiments/reproduction/phase2_torch251_transfer/best_validation_loss.json
 
-# Per-record test generation with the selected trained checkpoint
-torchrun --standalone --nproc_per_node=2 \
+# Author-compatible test generation with the validation-selected checkpoint
+torchrun --standalone --nproc_per_node=3 \
   -m tools.axis_repro.run_inference_cli \
-  --checkpoint experiments/reproduction/phase2_torch251/epoch_3_inference.pth \
-  --data data/AXIS_qa_test --subset full --modes base \
-  --output experiments/reproduction/test_epoch_3_full284
+  --checkpoint <validation-selected-checkpoint.pth> \
+  --data data/AXIS_qa_test --subset paper140 --modes base \
+  --batching series --skip-loss \
+  --output experiments/reproduction/test_author_compatible_paper140
 
-# Strict Appendix-E G-Eval on the paper140 file
-python -m tools.axis_repro.run_with_secret \
-  --credential-file /secure/path/credential.md \
-  python -m tools.axis_repro.geval_resilient \
-  --predictions experiments/reproduction/test_epoch_3_paper140/predictions.jsonl \
-  --output experiments/reproduction/test_epoch_3_paper140/geval.jsonl \
-  --model deepseek-v4-pro --fallback-samples 20 --max-tokens 4096 \
-  --primary-workers 8 --fallback-workers 1
+# Author-compatible Gemini scoring (key is supplied only via environment)
+python -m tools.axis_repro.geval_gemini \
+  --predictions experiments/reproduction/test_author_compatible_paper140/predictions.jsonl \
+  --output experiments/reproduction/test_author_compatible_paper140/geval_gemini25pro.jsonl \
+  --model gemini-2.5-pro --prompt-template author --scoring-mode author
 
 # Fail-closed integrity check and Table 1 aggregation
 python -m tools.axis_repro.audit_results \
-  --predictions experiments/reproduction/test_epoch_3_paper140/predictions.jsonl \
-  --scores experiments/reproduction/test_epoch_3_paper140/geval.jsonl \
+  --predictions experiments/reproduction/test_author_compatible_paper140/predictions.jsonl \
+  --scores experiments/reproduction/test_author_compatible_paper140/geval_gemini25pro.jsonl \
   --manifest experiments/reproduction/manifests/paper140.json --modes base
 python -m tools.axis_repro.table_runner \
-  --scores experiments/reproduction/test_epoch_3_paper140/geval.jsonl \
-  --output-prefix experiments/reproduction/test_epoch_3_paper140/table1
+  --scores experiments/reproduction/test_author_compatible_paper140/geval_gemini25pro.jsonl \
+  --output-prefix experiments/reproduction/test_author_compatible_paper140/table1
 ```
 
 Final numerical results, hashes, audits, and paper-vs-reproduction deltas are recorded in

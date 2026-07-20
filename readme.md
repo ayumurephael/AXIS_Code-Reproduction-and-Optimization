@@ -414,7 +414,7 @@ epoch 3 在 MC、OE、TF 三类上也都最低，因此选 `epoch_3_inference.pt
 
 ### 5.6 最佳新模型 Table 1
 
-本次最佳权重固定为 epoch 3。先在 full284 上做 per-record base 推理，再按 paper140 manifest
+历史三轮实验的最佳权重为 epoch 3；以下 full284/per-record 命令只用于复核既有结果。作者兼容正式结果应按第 11 节直接运行 paper140/series。历史流程曾按 paper140 manifest
 过滤，保证正式子集来自同一次生成：
 
 ```bash
@@ -496,7 +496,7 @@ baseline_new/
 
 以下历史文件未复制到 `baseline_new`，也不应用于最终表：
 
-- `run_inference_series*.py`：series batching 会改变正式 per-record response。
+- 旧版未审计的 `run_inference_series*.py` 不进入正式表；本轮受控实现已集成为 `--batching series --skip-loss`，并由 `run_inference_series_legacy.py` 独立核验。
 - `train_phase2_memory_safe.py`、`*_v2.py`：中间调试版本。
 - `geval_two_stage.py`、`geval_parallel*.py`、`geval_correct_async.py`：早期 runner；
   网络中断时不如 `geval_resilient.py` 安全。
@@ -635,7 +635,7 @@ paper140/base 共 335 个 dimension：本次 8 个 primary worker 完成 333 个
 
 - 固定 seed：训练/验证 split 使用 72；paper140 的作者测试抽样使用 42。
 - 训练 split 必须按 series，不可把同一 series 的 QA 拆到 train/val 两边。
-- 正式推理必须 per-record；不要使用 series-batched 诊断脚本。
+- 论文/作者兼容的正式测试推理必须使用 `--batching series --skip-loss`；`per_record` 仅保留为受控诊断基线。
 - 正式生成固定 beam=5、`max_new_tokens=1000`，不要为提速偷偷缩短。
 - checkpoint 选择只看完整 validation teacher-forced loss；test 与 Table 1 judge 分数不参与选 epoch。
 - 所有输出先审计，再建表；审计失败时不得手工补数。
@@ -714,3 +714,48 @@ epoch-3 的正式基线。改架构前应先在 epoch 3 上重跑同一诊断，
 必要性、label-changing counterfactual consistency 和 explanation grounding 明显增强，且 fixed
 控制与位置先验减弱。否则很可能只是换了一种捷径。
 
+## 11. 作者兼容推理与 Gemini 2.5 Pro 评分
+
+作者 `AXIS_test.py` 会把同一时间序列的 QA 项组成一个 batch，再调用 beam search 生成；测试路径不先计算 teacher-forced loss。正式作者兼容推理使用：
+
+```bash
+python -m torch.distributed.run --nproc-per-node=3 -m tools.axis_repro.run_inference_cli \
+  --checkpoint <checkpoint.pth> \
+  --data data/AXIS_qa_test \
+  --subset paper140 \
+  --modes base \
+  --output <prediction_dir> \
+  --batching series \
+  --skip-loss
+```
+
+作者兼容能力已集成到 `tools.axis_repro.run_inference_cli`。`tools.axis_repro.run_inference_series_legacy` 保留为独立核验入口：它默认 `--batching series`、默认不计算 loss，并内置作者旧权重前缀兼容。两条入口在作者候选权重上已做逐题对照。
+
+`tools.axis_repro.model_utils` 会兼容两类 Phase-II 权重：本仓库直接保存的 perceiver keys，以及作者 Accelerate 权重中统一带 `perceiver.` 前缀的 keys。只在全部 keys 都具有该前缀时才归一化；混合或损坏的权重仍按 strict loading 失败。
+
+Gemini judge 从环境变量读取密钥，不得把密钥写入命令、日志或代码：
+
+```bash
+export GEMINI_API_KEY='<set outside the repository>'
+python -m tools.axis_repro.geval_gemini \
+  --predictions <prediction_dir>/predictions.jsonl \
+  --output <new_result_dir>/geval_gemini25pro.jsonl \
+  --model gemini-2.5-pro \
+  --prompt-template author \
+  --scoring-mode author
+```
+
+当前 PackyAPI 中转已实测能返回 Gemini 2.5 Pro 文本，但 OpenAI-compatible 响应不含 `choices[].logprobs`，原生接口也拒绝为该模型启用 logprobs。因此：
+
+- `--scoring-mode author` 复现作者补充代码可实际执行的回退语义：`temperature=0` 单次整数分；
+- `--scoring-mode strict` 在缺少最终 score token 分布时做多次采样均值，用于不确定性校准；
+- 两种结果必须分目录保存，不能把采样均值伪装成服务端 top-logprobs；
+- Gemini 服务端与中转层仍可能非确定，同一 prompt 应做小规模重复校准，并保留 `prompt_sha256`、method、usage 和 endpoint host。
+
+可用 `tools.axis_repro.compare_inference_protocols` 对两份预测做 key 对齐、逐题文本变化、题型分层和答案抽取代理指标审计。最终结论仍以同一 Gemini 协议的完整 335 维 G-Eval 为准。
+
+## 12. 训练充分度与三分支公平协议
+
+三轮 validation loss 在 epoch 3 仍下降，且作者候选 epoch-33 在同一 Gemini 协议下显著优于当前 epoch-3。因此三轮训练只保留为低预算历史基线；它不足以证明已经达到作者训练充分度。
+
+建议显式训练到最多 35 epoch，以完整 validation loss 在预先声明的 checkpoint 中选模；作者接近型单次基线使用 seed 42，三分支公平比较则必须共享完全相同的 seed、manifest、global batch、优化器、最大训练轮数和选模规则。不能用 paper140 或 Gemini 分数选 epoch。完整命令、成本和多 seed 规则见 AUTHOR_COMPATIBLE_TRAINING.md。
