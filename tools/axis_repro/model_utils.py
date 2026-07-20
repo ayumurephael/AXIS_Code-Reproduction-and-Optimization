@@ -23,16 +23,35 @@ def build_model():
     return AXISCombinedModel(default_config)
 
 
-def load_axis_checkpoint(model, path: str | Path, strict: bool = True) -> Dict[str, Any]:
-    payload = torch.load(path, map_location="cpu", weights_only=False)
+def load_axis_payload(model, payload: dict, strict: bool = True) -> Dict[str, Any]:
+    """Load a materialized AXIS checkpoint, including author legacy keys."""
     state = payload.get("model_state_dict", payload)
     if "ts_pretrain_model" in state and "moirai_trainable" in state:
-        model.ts_pretrain_model.load_state_dict(state["ts_pretrain_model"], strict=strict)
-        model.axis.perceiver.load_state_dict(state["moirai_trainable"], strict=strict)
+        model.ts_pretrain_model.load_state_dict(
+            state["ts_pretrain_model"], strict=strict
+        )
+        perceiver_state = state["moirai_trainable"]
+        # Author Accelerate checkpoints were saved from the enclosing Moirai
+        # module, so every Perceiver key is prefixed with perceiver.
+        # Normalize only a uniformly prefixed mapping; mixed/corrupt inputs
+        # still fail closed under strict loading.
+        legacy_prefix = "perceiver."
+        if perceiver_state and all(
+            key.startswith(legacy_prefix) for key in perceiver_state
+        ):
+            perceiver_state = {
+                key[len(legacy_prefix):]: value
+                for key, value in perceiver_state.items()
+            }
+        model.axis.perceiver.load_state_dict(perceiver_state, strict=strict)
     else:
         model.load_state_dict(state, strict=strict)
     return payload
 
+
+def load_axis_checkpoint(model, path: str | Path, strict: bool = True) -> Dict[str, Any]:
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    return load_axis_payload(model, payload, strict=strict)
 
 def load_phase1_fresh_hint(model, path: str | Path) -> Dict[str, Any]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
