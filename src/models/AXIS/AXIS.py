@@ -5,7 +5,10 @@ import math
 from typing import Tuple, List, Optional, Dict, Any, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaTokenizer
 from src.models.AXIS.Pretrain_ts_encoder import TimeSeriesPretrainModel
-from tools.axis_repro.loss_redesign import format_axis_question_prompt
+from tools.axis_repro.loss_redesign import (
+    format_axis_question_prompt,
+    memory_safe_token_nll_sums,
+)
 
 class MultiheadAttention(nn.Module):
     """Standard Multi-head Attention module, non-causal by default.
@@ -558,6 +561,214 @@ class AXIS(nn.Module):
         if self.model.lm_head.bias is not None:
             selected_bias = self.model.lm_head.bias[label_ids]
         return F.linear(final_hidden, selected_weight, bias=selected_bias)
+
+    def generate_tf_input_ids(
+        self,
+        questions: List[str],
+        time_series: torch.Tensor,
+        start_indices: List[int],
+        end_indices: List[int],
+        window_values_override: Optional[List[torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        batch_size = len(questions)
+        if time_series.shape[0] != batch_size:
+            raise ValueError("TF time-series batch size mismatch")
+        prompts = []
+        for index, question in enumerate(questions):
+            values = (
+                time_series[index, start_indices[index]:end_indices[index]]
+                if window_values_override is None
+                else window_values_override[index]
+            )
+            prompt = format_axis_question_prompt(
+                question=question,
+                start_index=start_indices[index],
+                end_index=end_indices[index],
+                window_values=values,
+                num_fixed_tokens=self.num_fixed_tokens,
+                include_local=True,
+                include_window=True,
+                include_fixed=True,
+            ).rstrip()
+            prompts.append(prompt + "\n\nAnswer:")
+        previous_padding_side = self.tokenizer.padding_side
+        try:
+            self.tokenizer.padding_side = "right"
+            encoded = self.tokenizer(
+                prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                add_special_tokens=True,
+            )
+        finally:
+            self.tokenizer.padding_side = previous_padding_side
+        return encoded["input_ids"], encoded["attention_mask"]
+
+    def tf_logits(
+        self,
+        local_embeddings: torch.Tensor,
+        time_series: torch.Tensor,
+        questions: List[str],
+        start_indices: List[int],
+        end_indices: List[int],
+        window_values_override: List[torch.Tensor],
+        false_id: int,
+        true_id: int,
+        *,
+        fixed_hint_frozen: bool = True,
+    ) -> torch.Tensor:
+        input_ids, attention_mask = self.generate_tf_input_ids(
+            questions,
+            time_series,
+            start_indices,
+            end_indices,
+            window_values_override=window_values_override,
+        )
+        if attention_mask.shape[1] > 1 and bool(
+            (attention_mask[:, 1:] > attention_mask[:, :-1]).any()
+        ):
+            raise ValueError("TF tokenization did not produce right-side padding")
+        device = self.get_device()
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+        embeds = self.get_hint_embeddings(
+            input_ids,
+            local_embeddings,
+            start_indices,
+            end_indices,
+            detach_fixed_hint=fixed_hint_frozen,
+        )
+        hidden = self.model.model(
+            inputs_embeds=embeds,
+            attention_mask=attention_mask,
+            use_cache=False,
+            return_dict=True,
+        ).last_hidden_state
+        last_index = attention_mask.sum(dim=1) - 1
+        batch_index = torch.arange(hidden.shape[0], device=device)
+        final_hidden = hidden[batch_index, last_index]
+        label_ids = torch.tensor([false_id, true_id], device=device)
+        selected_weight = self.model.lm_head.weight[label_ids]
+        selected_bias = None
+        if self.model.lm_head.bias is not None:
+            selected_bias = self.model.lm_head.bias[label_ids]
+        return F.linear(final_hidden, selected_weight, bias=selected_bias)
+
+    def generate_oe_answer_score_batch(
+        self,
+        questions: List[str],
+        answers: List[str],
+        time_series: torch.Tensor,
+        start_indices: List[int],
+        end_indices: List[int],
+        window_values_override: Optional[List[torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if not getattr(self.tokenizer, "is_fast", False):
+            raise RuntimeError("OE answer-content masking requires a fast tokenizer")
+        id_rows = []
+        label_rows = []
+        for index, (question, answer, start, end) in enumerate(
+            zip(questions, answers, start_indices, end_indices)
+        ):
+            values = (
+                time_series[index, start:end]
+                if window_values_override is None
+                else window_values_override[index]
+            )
+            question_text = format_axis_question_prompt(
+                question=question,
+                start_index=start,
+                end_index=end,
+                window_values=values,
+                num_fixed_tokens=self.num_fixed_tokens,
+                include_local=True,
+                include_window=True,
+                include_fixed=True,
+            )
+            question_ids = self.tokenizer(
+                question_text,
+                add_special_tokens=True,
+                truncation=False,
+            )["input_ids"]
+            answer_text = f"Answer: {answer}"
+            answer_encoding = self.tokenizer(
+                answer_text,
+                add_special_tokens=True,
+                truncation=False,
+                return_offsets_mapping=True,
+            )
+            answer_ids = answer_encoding["input_ids"]
+            boundary = len("Answer: ")
+            answer_labels = [
+                token_id if char_end > boundary and char_end > char_start else -100
+                for token_id, (char_start, char_end) in zip(
+                    answer_ids, answer_encoding["offset_mapping"]
+                )
+            ]
+            row_ids = question_ids + [self.tokenizer.eos_token_id] + answer_ids + [self.tokenizer.eos_token_id]
+            row_labels = [-100] * (len(question_ids) + 1) + answer_labels + [-100]
+            if not any(label != -100 for label in row_labels):
+                raise ValueError(f"OE sample {index} has no answer-content tokens")
+            id_rows.append(torch.tensor(row_ids, dtype=torch.long))
+            label_rows.append(torch.tensor(row_labels, dtype=torch.long))
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            id_rows, batch_first=True, padding_value=self.tokenizer.pad_token_id
+        )
+        labels = torch.nn.utils.rnn.pad_sequence(
+            label_rows, batch_first=True, padding_value=-100
+        )
+        lengths = torch.tensor([len(row) for row in id_rows], dtype=torch.long)
+        positions = torch.arange(input_ids.shape[1]).unsqueeze(0)
+        attention_mask = positions.lt(lengths.unsqueeze(1))
+        return input_ids, attention_mask, labels
+
+    def oe_answer_scores(
+        self,
+        local_embeddings: torch.Tensor,
+        time_series: torch.Tensor,
+        questions: List[str],
+        answers: List[str],
+        start_indices: List[int],
+        end_indices: List[int],
+        window_values_override: List[torch.Tensor],
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        input_ids, attention_mask, labels = self.generate_oe_answer_score_batch(
+            questions,
+            answers,
+            time_series,
+            start_indices,
+            end_indices,
+            window_values_override=window_values_override,
+        )
+        device = self.get_device()
+        input_ids = input_ids.to(device)
+        attention_mask = attention_mask.to(device)
+        labels = labels.to(device)
+        embeds = self.get_hint_embeddings(
+            input_ids,
+            local_embeddings,
+            start_indices,
+            end_indices,
+            detach_fixed_hint=True,
+        )
+        hidden = self.model.model(
+            inputs_embeds=embeds,
+            attention_mask=attention_mask,
+            use_cache=False,
+            return_dict=True,
+        ).last_hidden_state[:, :-1]
+        nll_sums, token_counts = memory_safe_token_nll_sums(
+            self.model.lm_head,
+            hidden,
+            labels[:, 1:],
+            chunk_size=64,
+            checkpoint_chunks=True,
+        )
+        if bool(token_counts.eq(0).any()):
+            raise RuntimeError("OE answer score contains an empty target")
+        return -nll_sums / token_counts.float(), token_counts
+
     def forward(self, 
                 local_embeddings: torch.Tensor, 
                 time_series: torch.Tensor, 
@@ -628,7 +839,8 @@ class AXIS(nn.Module):
                  answers: List[str],
                  start_indices: List[int],
                  end_indices: List[int],
-                 ablation_mode: Optional[str] = None) -> List[str]:
+                 ablation_mode: Optional[str] = None,
+                 max_new_tokens: int = 1000) -> List[str]:
         input_ids, attention_mask, labels, question_length = self.generate_input_ids_and_labels(
             questions=questions,
             answers=answers,
@@ -660,7 +872,7 @@ class AXIS(nn.Module):
         outputs = self.model.generate(
             inputs_embeds=input_embeddings[:, :question_length, :],
             attention_mask=attention_mask[:, :question_length],
-            max_new_tokens=1000,
+            max_new_tokens=max_new_tokens,
             # bad_words_ids=[[think_token_id]],
             **generate_kwargs
         )

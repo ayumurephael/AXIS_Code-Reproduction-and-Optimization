@@ -13,6 +13,10 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.checkpoint import checkpoint
 
 from src.models.AXIS.dataset import AXISAnomalyQADataset
+from .question_type_objectives import (
+    SUPERVISION_CACHE_VERSION,
+    canonical_question_type,
+)
 
 
 COUNTERFACTUAL_INDEX_VERSION = 3
@@ -260,6 +264,7 @@ class CounterfactualAXISDataset(AXISAnomalyQADataset):
         train_ratio: float = 0.95,
         seed: int = 72,
         cache_size: int = 1000,
+        supervision_cache: str | None = None,
     ) -> None:
         super().__init__(dataset_dir, split=split, train_ratio=train_ratio, seed=seed, cache_size=cache_size)
         self.counterfactual_index_path = Path(counterfactual_index)
@@ -273,6 +278,24 @@ class CounterfactualAXISDataset(AXISAnomalyQADataset):
             raise ValueError("counterfactual index train-series manifest does not match dataset")
         self.counterfactual_records = payload["records"]
         self.index_metadata = payload
+        self.supervision_cache_path = Path(supervision_cache) if supervision_cache else None
+        self.supervision_metadata: dict[str, Any] | None = None
+        self.supervision_records: dict[str, dict[str, Any]] | None = None
+        if self.supervision_cache_path is not None:
+            supervision = json.loads(self.supervision_cache_path.read_text(encoding="utf-8"))
+            if int(supervision.get("version", 0)) != SUPERVISION_CACHE_VERSION:
+                raise ValueError("question-type supervision cache version mismatch")
+            if int(supervision.get("seed", -1)) != seed:
+                raise ValueError("question-type supervision seed mismatch")
+            if float(supervision.get("train_ratio", -1.0)) != train_ratio:
+                raise ValueError("question-type supervision split mismatch")
+            if supervision.get("train_series") != expected_files:
+                raise ValueError("question-type supervision series manifest mismatch")
+            digest = hashlib.sha256(self.counterfactual_index_path.read_bytes()).hexdigest()
+            if supervision.get("counterfactual_index_sha256") != digest:
+                raise ValueError("question-type supervision was built for another counterfactual index")
+            self.supervision_metadata = supervision
+            self.supervision_records = supervision["records"]
 
     def _materialize_counterfactual(self, reference: dict, anchor_data: dict, anchor_window: dict) -> dict:
         start = int(anchor_window["window_range"]["start"])
@@ -324,17 +347,31 @@ class CounterfactualAXISDataset(AXISAnomalyQADataset):
         file_path = self.series_files[idx]
         data = self._load_series(file_path)
         counterfactuals = []
+        supervisions = []
         for window_index, window in enumerate(data["windows"]):
             key = f"{file_path.name}:{window_index}"
             reference = self.counterfactual_records.get(key, {"valid": False, "kind": "invalid"})
             if bool(reference.get("has_anomaly", window["has_anomaly"])) != bool(window["has_anomaly"]):
                 raise ValueError(f"counterfactual label mismatch for {key}")
             counterfactuals.append(self._materialize_counterfactual(reference, data, window))
+            if self.supervision_records is not None:
+                if key not in self.supervision_records:
+                    raise ValueError(f"question-type supervision is missing {key}")
+                supervisions.append(self.supervision_records[key])
+            else:
+                supervisions.append({
+                    "question_type": canonical_question_type(window.get("question_type", "unknown")),
+                    "mc_pair_valid": False,
+                    "tf_pair_valid": False,
+                    "tf_target": None,
+                    "oe_pair_valid": False,
+                })
         return {
             "time_series": torch.tensor(data["original_data"]["time_series"], dtype=torch.float32),
             "analysis_data": data["windows"],
             "series_file": file_path.name,
             "counterfactuals": counterfactuals,
+            "supervisions": supervisions,
         }
 
 
@@ -355,8 +392,10 @@ def counterfactual_collate_fn(batch: list[dict]) -> dict:
     counterfactual_window_values: list[torch.Tensor] = []
     questions, answers, starts, ends, question_types = [], [], [], [], []
     states, valid, record_ids, kinds = [], [], [], []
+    mc_valid, tf_valid, tf_targets, oe_valid = [], [], [], []
     for item in batch:
-        for window_index, (window, counterfactual) in enumerate(zip(item["analysis_data"], item["counterfactuals"])):
+        rows = zip(item["analysis_data"], item["counterfactuals"], item["supervisions"])
+        for window_index, (window, counterfactual, supervision) in enumerate(rows):
             start = int(window["window_range"]["start"])
             end = int(window["window_range"]["end"])
             positive_sequences.append(item["time_series"])
@@ -367,11 +406,19 @@ def counterfactual_collate_fn(batch: list[dict]) -> dict:
             answers.append(window["answer"])
             starts.append(start)
             ends.append(end)
-            question_types.append(window.get("question_type", "unknown"))
+            question_type = canonical_question_type(window.get("question_type", "unknown"))
+            if supervision.get("question_type") != question_type:
+                raise ValueError("question-type supervision disagrees with source data")
+            question_types.append(question_type)
             states.append(int(bool(window["has_anomaly"])))
             valid.append(bool(counterfactual["valid"]))
             record_ids.append(f'{item["series_file"]}:{window_index}')
             kinds.append(counterfactual["kind"])
+            mc_valid.append(bool(supervision.get("mc_pair_valid", False)))
+            tf_valid.append(bool(supervision.get("tf_pair_valid", False)))
+            tf_target = supervision.get("tf_target")
+            tf_targets.append(-1 if tf_target is None else int(tf_target))
+            oe_valid.append(bool(supervision.get("oe_pair_valid", False)))
     positive_padded, positive_masks = _pad_with_mask(positive_sequences)
     counterfactual_padded, counterfactual_masks = _pad_with_mask(counterfactual_sequences)
     if positive_padded.shape != counterfactual_padded.shape:
@@ -392,4 +439,36 @@ def counterfactual_collate_fn(batch: list[dict]) -> dict:
         "counterfactual_valid": torch.tensor(valid, dtype=torch.bool),
         "record_ids": record_ids,
         "counterfactual_kinds": kinds,
+        "mc_pair_valid": torch.tensor(mc_valid, dtype=torch.bool),
+        "tf_pair_valid": torch.tensor(tf_valid, dtype=torch.bool),
+        "tf_targets": torch.tensor(tf_targets, dtype=torch.long),
+        "oe_pair_valid": torch.tensor(oe_valid, dtype=torch.bool),
+    }
+
+
+
+def answer_collate_fn(batch: list[dict]) -> dict:
+    """Collate factual Phase-II rows without materializing counterfactual data."""
+    if not batch:
+        raise ValueError("empty answer-only batch")
+    sequences: list[torch.Tensor] = []
+    questions, answers, starts, ends, question_types = [], [], [], [], []
+    for item in batch:
+        sequence = torch.as_tensor(item["time_series"], dtype=torch.float32)
+        for window in item["analysis_data"]:
+            sequences.append(sequence)
+            questions.append(window["question"])
+            answers.append(window["answer"])
+            starts.append(int(window["window_range"]["start"]))
+            ends.append(int(window["window_range"]["end"]))
+            question_types.append(canonical_question_type(window.get("question_type", "unknown")))
+    padded, masks = _pad_with_mask(sequences)
+    return {
+        "padded_sequences": padded,
+        "attention_masks": masks,
+        "questions": questions,
+        "answers": answers,
+        "start_indices": starts,
+        "end_indices": ends,
+        "question_types": question_types,
     }

@@ -134,12 +134,24 @@ def _matches_any(patterns: Iterable[re.Pattern[str]], text: str) -> bool:
     return any(pattern.search(text) is not None for pattern in patterns)
 
 
+def _mask_matches(patterns: Iterable[re.Pattern[str]], text: str) -> str:
+    """Blank matched spans so a negated assertion is not also read as positive."""
+    characters = list(text)
+    for pattern in patterns:
+        for match in pattern.finditer(text):
+            characters[match.start():match.end()] = " " * (match.end() - match.start())
+    return "".join(characters)
+
+
 def parse_tf_state_predicate(question: str) -> int | None:
     text = str(question).lower()
     if any(re.search(rf"\b{re.escape(word)}\b", text) for word in _TF_ATTRIBUTE_WORDS):
         return None
     negative = _matches_any(_TF_NEGATIVE_PREDICATES, text)
-    positive = _matches_any(_TF_POSITIVE_PREDICATES, text)
+    positive = _matches_any(
+        _TF_POSITIVE_PREDICATES,
+        _mask_matches(_TF_NEGATIVE_PREDICATES, text),
+    )
     if negative == positive:
         return None
     return 0 if negative else 1
@@ -157,7 +169,10 @@ def parse_oe_answer_state(answer: str) -> int | None:
     if not text:
         return None
     negative = _matches_any(_NEGATIVE_STATE_PATTERNS, text)
-    positive = _matches_any(_POSITIVE_STATE_PATTERNS, text)
+    positive = _matches_any(
+        _POSITIVE_STATE_PATTERNS,
+        _mask_matches(_NEGATIVE_STATE_PATTERNS, text),
+    )
     if negative == positive:
         return None
     return 0 if negative else 1
