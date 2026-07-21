@@ -45,11 +45,12 @@ _POSITIVE_STATE_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
         r"\bthere\s+(?:is|are)\b[^.!?]{0,45}\banomal(?:y|ies)\b",
-        r"\b(?:an\s+)?anomal(?:y|ies)\s+(?:is|are)\s+present\b",
+        r"\b(?:an\s+)?anomal(?:y|ies)\s+(?:is|are)\s+(?:clearly\s+)?present\b",
         r"\b(?:an\s+)?anomal(?:y|ies)\s+(?:is|are)\s+(?:clearly\s+)?evident\b",
-        r"\b(?:demonstrates?|displays?|represents?|constitutes?|suggests?)\b[^.!?]{0,80}\b(?:an\s+)?anomal(?:y|ies)\b",
-        r"\b(?:supports?|indicat(?:e|es|ing))\b[^.!?]{0,80}\bpresence\s+of\s+(?:an\s+)?anomal",
-        r"\b(?:contains?|shows?|exhibits?|indicates?|reveals?)\b[^.!?]{0,45}\banomal(?:y|ies|ous)\b",
+        r"\b(?:demonstrates?|displays?|represents?|constitutes?|suggests?|forms?)\b[^.!?]{0,80}\b(?:an\s+)?anomal(?:y|ies)\b",
+        r"\b(?:support(?:s|ing)?|indicat(?:e|es|ing))\b[^.!?]{0,80}\bpresence\s+of\s+(?:an\s+)?anomal",
+        r"\b(?:contains?|shows?|exhibits?|indicat(?:e|es|ing)|reveals?)\b[^.!?]{0,45}\banomal(?:y|ies|ous)\b",
+        r"\bcharacteristic\s+of\s+(?:an\s+)?anomal",
         r"\bevidence\s+of\s+(?:an\s+)?anomal",
         r"\banomal(?:y|ies)\s+(?:is|are|was|were)\s+detected\b",
         r"\bdetected\s+(?:an\s+)?anomal",
@@ -69,6 +70,9 @@ _OE_POSITIVE_CONTRAST_PATTERNS = tuple(
         r"\b(?:rather\s+than|as\s+opposed\s+to)\s+(?:a\s+)?(?:normal|natural|typical)\s+fluctuation",
         r"\bnot\s+(?:part\s+of|consistent\s+with)\s+(?:the\s+)?(?:normal|natural|typical)\s+fluctuations?",
         r"\b(?:atypical|uncharacteristic)\s+of\s+(?:normal|natural|typical)\s+fluctuations?",
+        r"\bnot\s+part\s+of\b[^.!?]{0,120}\b(?:indicat(?:e|es|ing)|but)\b[^.!?]{0,80}\banomal",
+        r"\bnot\s+consistent\s+with\s+(?:the\s+)?(?:otherwise\s+)?(?:gradual|surrounding|preceding|overall|stable)\b",
+        r"\b(?:deeper|sharper|larger|more\s+abrupt|more\s+sustained)\b[^.!?]{0,60}\bthan\s+(?:normal|natural|typical)\s+fluctuations?",
     )
 )
 
