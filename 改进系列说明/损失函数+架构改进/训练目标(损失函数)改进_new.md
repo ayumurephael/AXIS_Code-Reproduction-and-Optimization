@@ -2,7 +2,7 @@
 
 # 先把核心思想说清楚
 
-“完整一致反事实 + 显式 normal/anomalous 目标”不是把旧 SLR 换一个名字，而是同时修正两个根本问题：
+“完整一致反事实 + 显式 normal/anomalous 目标”同时修正两个根本问题：
 
 1. **反事实输入必须自洽**：反事实 Local 和反事实 Window 必须来自同一条反事实时间序列，不能一个表示异常、另一个仍表示正常。
 2. **反事实监督必须有明确方向**：不能只要求“原答案概率降低”，而要明确告诉模型反事实窗口究竟是 `NORMAL` 还是 `ANOMALOUS`。
@@ -550,50 +550,6 @@ State:
 
 ------
 
-# 状态标签最好使用两个单 token verbalizer
-
-直接输出完整的 `NORMAL` 和 `ANOMALOUS` 可能存在 token 数不同的问题。
-
-启动时检查：
-
-```
-pairs = [
-    (" normal", " anomalous"),
-    (" N", " A"),
-    (" 0", " 1"),
-]
-
-for normal_text, anomaly_text in pairs:
-    normal_ids = tokenizer.encode(
-        normal_text,
-        add_special_tokens=False
-    )
-    anomaly_ids = tokenizer.encode(
-        anomaly_text,
-        add_special_tokens=False
-    )
-
-    if len(normal_ids) == 1 and len(anomaly_ids) == 1:
-        normal_id = normal_ids[0]
-        anomaly_id = anomaly_ids[0]
-        break
-else:
-    raise RuntimeError("No one-token state verbalizers found")
-```
-
-如果使用 `0/1`，prompt 明确定义：
-
-```
-0 = NORMAL
-1 = ANOMALOUS
-Return exactly one token.
-State:
-```
-
-语义仍然是显式的，只是输出 token 更容易处理。
-
-------
-
 # 二分类概率如何从冻结 LLM 中得到
 
 设状态 prompt 最后一个位置的隐藏状态为：
@@ -730,172 +686,6 @@ $$
 
 
 
-
-# 具体 batch 构造
-
-假设一个 batch 中有 $B$ 个有效 anchor。
-
-需要准备：
-
-```
-positive_local       # [B, K, d]
-counterfactual_local # [B, K, d]
-
-positive_window       # list length B
-counterfactual_window # list length B
-
-z                     # [B], 0 or 1
-```
-
-把两个状态上下文合并：
-
-```
-state_local = torch.cat(
-    [positive_local, counterfactual_local],
-    dim=0,
-)
-
-state_window = (
-    positive_window
-    + counterfactual_window
-)
-
-state_targets = torch.cat(
-    [z, 1 - z],
-    dim=0,
-)
-```
-
-这里：
-
-- 前 $B$ 行是原始上下文；
-- 后 $B$ 行是反事实上下文；
-- 每个 pair 的两个状态都参与同一次 CE。
-
-训练伪代码：
-
-```
-answer_loss = model.answer_nll(
-    questions=Q,
-    answers=Y,
-    local_embeddings=positive_local,
-    window_values=positive_window,
-    fixed_hint=True,
-)
-
-state_logits = model.state_logits(
-    question=Q_state,
-    local_embeddings=state_local,
-    window_values=state_window,
-    fixed_hint_frozen=True,
-)
-
-state_loss = F.cross_entropy(
-    state_logits,
-    state_targets,
-)
-
-loss = answer_loss + beta * state_loss
-```
-
-不再需要：
-
-```
-mode = random.choice(...)
-```
-
-也不再需要：
-
-- `active_hinges`
-- `margin`
-- answer-head mask
-- 正负 head NLL
-- 每个 rank 随机不同模式
-
-------
-
-# `state_logits()` 的高效实现
-
-不需要生成完整词表在所有时间位置上的 logits。
-
-```
-def state_logits(
-    axis,
-    input_ids,
-    attention_mask,
-    local_embeddings,
-    starts,
-    ends,
-    normal_id,
-    anomalous_id,
-):
-    embeds = axis.get_hint_embeddings(
-        input_ids=input_ids,
-        local_embeddings=local_embeddings,
-        start_indices=starts,
-        end_indices=ends,
-    )
-
-    hidden = axis.model.model(
-        inputs_embeds=embeds,
-        attention_mask=attention_mask,
-        use_cache=False,
-        return_dict=True,
-    ).last_hidden_state
-
-    # 适用于右侧 padding
-    last_index = attention_mask.sum(dim=1) - 1
-    batch_index = torch.arange(
-        hidden.shape[0],
-        device=hidden.device,
-    )
-
-    final_hidden = hidden[batch_index, last_index]
-
-    selected_weight = axis.model.lm_head.weight[
-        [normal_id, anomalous_id]
-    ]
-
-    logits = F.linear(
-        final_hidden,
-        selected_weight,
-    )
-
-    return logits
-```
-
-输出形状为：
-
-```
-[B, 2]
-```
-
-注意：
-
-- LLM 参数可以 `requires_grad=False`；
-- 但不能把整个 LLM forward 放进 `torch.no_grad()`；
-- 否则梯度无法从状态损失传回 Local Perceiver；
-- TS Encoder $E_0$ 可以并且应该在 `no_grad()` 中运行。
-
-
-
-------
-
-# 训练参数建议
-
-当前状态损失是标准二分类 CE，尺度已经比旧 answer-head SLR 清楚很多。
-
-建议 warm-start baseline 时：
-
-```
-beta: 0 → 0.1，前 10% steps 线性增长
-local_word_proj LR: 5e-5
-local_attention LR: 2e-5
-Fixed branch LR: 0
-LLM LR: 0
-TS Encoder LR: 0
-gradient clipping: 1.0
-```
 
 
 
@@ -1508,266 +1298,9 @@ s_1-s_0
 $$
 变大。
 
-------
-
-## 一个非常重要的代码问题
-
-正确冻结方式：
-
-```
-for p in llm.parameters():
-    p.requires_grad_(False)
-
-llm.eval()
-```
-
-但训练 Hint Tuner 时不能这样做：
-
-```
-with torch.no_grad():
-    outputs = llm(inputs_embeds=inputs_embeds)
-```
-
-后者会切断 LLM 输出到 Local/Fixed soft embedding 的梯度。
-
-所以：
-
-> 冻结参数不等于使用 `torch.no_grad()` 包裹 LLM 前向传播。
-
-时间序列编码器可以放在 `no_grad()` 中，因为它前面通常没有可训练模块：
-
-```
-with torch.no_grad():
-    H = ts_encoder(X)
-```
-
-但 Hint Tuner 和 LLM 前向必须保留计算图：
-
-```
-local_soft = hint_tuner(H)
-outputs = llm(inputs_embeds=inputs_embeds)
-```
-
-------
-
-# 八、具体 PyTorch 实现
-
-下面给出单样本版本，比较适合 AXIS 当前常见的 batch size 1 设置。
-
-```
-import torch
-import torch.nn.functional as Fnn
 
 
-def get_one_token_id(tokenizer, text):
-    ids = tokenizer.encode(
-        text,
-        add_special_tokens=False,
-    )
-    if len(ids) != 1:
-        raise ValueError(
-            f"{text!r} is tokenized into {ids}, "
-            "please use another verbalizer."
-        )
-    return ids[0]
 
-
-# Prompt 的 Label: 后面输出一个带空格的数字
-normal_token_id = get_one_token_id(tokenizer, " 0")
-anomaly_token_id = get_one_token_id(tokenizer, " 1")
-```
-
-不要直接写：
-
-```
-tokenizer.convert_tokens_to_ids("0")
-```
-
-因为 BPE/SentencePiece 中，`"0"` 与 `" 0"` 可能对应不同 token。
-
-------
-
-## 1. 将 soft embedding 写入 placeholder 位置
-
-```
-def inject_soft_tokens(
-    base_embeddings,     # [1, S, D]
-    input_ids,           # [1, S]
-    placeholder_id,
-    soft_embeddings,     # [K, D]
-):
-    B, S, D = base_embeddings.shape
-    assert B == 1
-
-    positions = (
-        input_ids[0] == placeholder_id
-    ).nonzero(as_tuple=False).flatten()
-
-    if positions.numel() != soft_embeddings.shape[0]:
-        raise ValueError(
-            f"Found {positions.numel()} placeholders, "
-            f"but got {soft_embeddings.shape[0]} soft embeddings."
-        )
-
-    # 使用非原地 index_copy，保留到 soft_embeddings 的梯度
-    flat = base_embeddings.reshape(S, D)
-    flat = torch.index_copy(
-        flat,
-        dim=0,
-        index=positions,
-        source=soft_embeddings,
-    )
-
-    return flat.unsqueeze(0)
-```
-
-------
-
-## 2. 从冻结 LLM 中取得两个 logits
-
-```
-def get_state_binary_logits(
-    llm,
-    input_ids,           # [1, S]
-    attention_mask,      # [1, S]
-    local_soft,          # [K_local, D]
-    fixed_soft,          # [K_fixed, D]
-    local_placeholder_id,
-    fixed_placeholder_id,
-    normal_token_id,
-    anomaly_token_id,
-):
-    # 普通文本 token 的 embedding 来自冻结 LLM
-    inputs_embeds = llm.get_input_embeddings()(input_ids)
-
-    # 替换 Local placeholder
-    inputs_embeds = inject_soft_tokens(
-        inputs_embeds,
-        input_ids,
-        local_placeholder_id,
-        local_soft,
-    )
-
-    # 替换 Fixed placeholder
-    inputs_embeds = inject_soft_tokens(
-        inputs_embeds,
-        input_ids,
-        fixed_placeholder_id,
-        fixed_soft,
-    )
-
-    # 至少 Local/Fixed 中一条路径应当可训练
-    assert inputs_embeds.requires_grad
-
-    # 注意：这里不能使用 torch.no_grad()
-    outputs = llm(
-        inputs_embeds=inputs_embeds,
-        attention_mask=attention_mask,
-        use_cache=False,
-    )
-
-    # 找到最后一个非 padding prompt token
-    positions = torch.arange(
-        attention_mask.shape[1],
-        device=attention_mask.device,
-    ).unsqueeze(0)
-
-    decision_position = (
-        positions * attention_mask
-    ).amax(dim=1)[0]
-
-    # 该位置的 logits 用来预测下一个 token
-    vocabulary_logits = outputs.logits[
-        0, decision_position, :
-    ]
-
-    binary_logits = vocabulary_logits[
-        [normal_token_id, anomaly_token_id]
-    ]
-
-    # binary_logits[0] = normal logit
-    # binary_logits[1] = anomalous logit
-    return binary_logits
-```
-
-------
-
-## 3. 计算真实和反事实状态损失
-
-```
-real_logits = get_state_binary_logits(
-    llm=llm,
-    input_ids=real_state_input_ids,
-    attention_mask=real_state_attention_mask,
-    local_soft=real_local_soft,
-    fixed_soft=fixed_soft,
-    local_placeholder_id=local_placeholder_id,
-    fixed_placeholder_id=fixed_placeholder_id,
-    normal_token_id=normal_token_id,
-    anomaly_token_id=anomaly_token_id,
-)
-
-counterfactual_logits = get_state_binary_logits(
-    llm=llm,
-    input_ids=cf_state_input_ids,
-    attention_mask=cf_state_attention_mask,
-    local_soft=cf_local_soft,
-    fixed_soft=fixed_soft,
-    local_placeholder_id=local_placeholder_id,
-    fixed_placeholder_id=fixed_placeholder_id,
-    normal_token_id=normal_token_id,
-    anomaly_token_id=anomaly_token_id,
-)
-
-z = torch.tensor(
-    [z_i],
-    dtype=torch.long,
-    device=real_logits.device,
-)
-
-z_cf = 1 - z
-
-loss_real = Fnn.cross_entropy(
-    real_logits.unsqueeze(0),
-    z,
-)
-
-loss_cf = Fnn.cross_entropy(
-    counterfactual_logits.unsqueeze(0),
-    z_cf,
-)
-
-loss_state = 0.5 * (loss_real + loss_cf)
-
-loss = loss_answer + beta * loss_state
-
-optimizer.zero_grad()
-loss.backward()
-optimizer.step()
-```
-
-得到概率：
-
-```
-real_probs = torch.softmax(real_logits, dim=-1)
-
-p_normal = real_probs[0]
-p_anomalous = real_probs[1]
-```
-
-训练阶段不需要调用：
-
-```
-llm.generate(...)
-```
-
-因为：
-
-- `generate()` 包含离散采样或贪心选择；
-- 不适合直接反向传播；
-- 我们只需要一次普通 forward 得到 logits。
-
-------
 
 # 九、完整反事实怎样接入状态分类？
 
@@ -1913,3 +1446,344 @@ $$
 状态 prompt 与原 AXIS prompt 的关系则是：
 
 > 共用 AXIS 的证据模板、soft-token 注入方式和冻结 LLM；但用固定状态问题 $Q^z$ 替换原始问题 $Q_i$，形成独立前向序列，而不是把两个问题和答案拼在同一条 prompt 中。
+
+
+
+注意：
+
+# Fixed hint 应怎样处理
+
+定义：
+$$
+\bar F=\operatorname{stopgrad}(F).
+$$
+它表示：
+
+- state forward 中可以保留 Fixed 的数值；
+- 但 state loss 不允许更新 Fixed 分支。
+
+为什么不是直接删除 F？
+
+因为 baseline 的 Fixed soft prompt 可能已经成为冻结 LLM 的任务接口。保留它能维持模型工作状态，但必须防止辅助损失继续把状态监督写进 Fixed。
+
+不过仅仅对 Fixed 输出 `.detach()` 还不够，因为当前 AXIS 中 Local 和 Fixed 共用 `local_attention` 和 `mapping_layer`。共享参数更新后，下一步 Fixed 的实际数值仍会变化。
+
+更可靠的最小改造是：
+
+1. 从 baseline checkpoint 加载 Perceiver；
+2. 将当前 shared attention 复制为两份：
+
+```
+self.local_attention = copy.deepcopy(old_attention)
+self.fixed_attention = copy.deepcopy(old_attention)
+```
+
+1. Local 使用 `local_attention`；
+2. Fixed 使用 `fixed_attention`；
+3. 冻结：
+   - `fixed_attention`
+   - `fix_prompt_embeddings`
+   - `mapping_layer`，初期先冻结；
+4. 训练：
+   - `local_word_proj`
+   - `local_attention`
+
+这样 state loss 的主要可训练路径是 Local，而 Fixed 保持 baseline 状态。
+
+建议先从 baseline Phase-II checkpoint warm start，而不是再次从随机 Perceiver 开始。这样更容易判断：
+
+> 新状态目标是否能够增加 grounding，同时保留原有解释能力。
+
+正式论文比较时，再补充相同 Phase-I 初始化下的完整训练。
+
+
+
+# 补充说明：
+
+对任意来源 $S$，定义：
+- $B_i^S$：anchor 的正常来源表示；
+- $B_j^S$：donor 正常版本的来源表示；
+- $A_j^S$：donor 异常版本的来源表示。
+
+对于 `has_anomaly=True` 的 TS 窗口，默认
+$$
+X_j[I_j] - N_j[I_j]
+$$
+表示“注入的异常成分”。
+
+把 【donor $j$ 的异常来源】 换给 anchor  $i$ 后，实际输入变化是：
+$$
+A_j^S - B_i^S
+$$
+在其中加减 $B_j^S$：
+$$
+\boxed{
+A_j^S-B_i^S
+=
+\underbrace{A_j^S-B_j^S}_{\text{希望注入的异常效应}}
++
+\underbrace{B_j^S-B_i^S}_{\text{不希望出现的基线混杂}}
+}
+$$
+从上式分解中可以立刻看出：最理想的情况是让
+$$
+B_j^S - B_i^S =0 .
+$$
+**这就是整个问题的核心。** 因此不需要猜测什么统计特征重要。只需要分别计算：
+$$
+\boxed{
+d_S(i,j)=\operatorname{RMS}(B_i^S-B_j^S)
+}
+$$
+和：
+$$
+\boxed{
+a_S(j)=\operatorname{RMS}(A_j^S-B_j^S)
+}
+$$
+其中
+$$
+\operatorname{RMS}(v)
+=
+\sqrt{\frac{1}{D}\sum_{r=1}^{D}v_r^2},
+$$
+$D$ 是向量元素数。
+于是：
+$$
+A_j^S - B_i^S \implies a_S(j) - d_S(i,j)
+$$
+- $d_S$：donor 正常基线与 anchor 正常基线有多不一样；
+- $a_S$：donor 的异常版本相对于自己的正常版本，实际改变了多少。
+对于：
+$$
+A_j^S-B_i^S
+=
+\underbrace{A_j^S-B_j^S}_{\text{希望注入的异常效应}}
++
+\underbrace{B_j^S-B_i^S}_{\text{不希望出现的基线混杂}}
+$$
+现在问你：**我们【不想要的基线混杂 $d_S(i,j)$】相对于【想要注入的异常信号 $a_S(j)$】有多大？**
+
+最后定义：
+$$
+\begin{gather*}
+\boxed{
+\rho_S(i,j) = \frac{d_S(i,j)}{a_S(j) + \varepsilon}
+}
+\end{gather*}
+$$
+因为：
+$$
+\frac{
+\left\|
+(A_j^S-B_i^S)-(A_j^S-B_j^S)
+\right\|
+}{
+\left\|A_j^S-B_j^S\right\|
+}
+=
+\frac{\|B_j^S-B_i^S\|}
+{\|A_j^S-B_j^S\|}
+=
+\rho_S(i,j).
+$$
+所以如果：
+$$
+\rho_S(i,j)\le 0.25, \implies a_S(j) \geq 4 \cdot d_S(i,j)
+$$
+它具有明确含义：
+
+> donor 替换相对于“纯异常干预”的误差，不超过异常效应大小的 25%。
+
+这不是一个调出来的特征权重，而是可以直接解释的反事实误差上限。
+
+<font color="green" size="4">利用数据集“一异常窗口  + 一正常窗口”的结构检查 donor 是否可靠</font>
+在数据集 30000 个样本中，有 20719个样本具有：**一个异常 QA + 1个正常 QA**.
+也就是说：
+><font color="red">在同一条时间序列中，既有异常窗口（anomaly window），也有正常窗口（normal window）</font>
+
+因此，对几乎每个异常 donor $j$，都可以找到同一条序列里的正常控制窗口 $I_j^0$。
+
+```
+序列 X_j 的完整结构：
+├── 窗口 A：[s_A, e_A)  —— 标注为"异常"（has_anomaly=True）
+│   ├── time_series: x_j = X_j[A]  ← 含有异常
+│   └── normal_series: n_j = N_j[A] ← 理想的正常反事实
+│
+└── 窗口 B：[s_B, e_B)  —— 标注为"正常"（has_anomaly=False）
+    ├── time_series: X_j[B]
+    └── normal_series: N_j[B]
+```
+核心观察：
+- 如果 `normal_series` 真的是 正常基线，那么在 标注为正常的窗口 B 位置，`time_series`  和 `normal_series` 应该几乎相同。
+- 而如果在窗口 B 的位置两者差异就很大，说明 `normal_series` 这个正常基线本身就有问题。
+
+---
+$a_S(j)$ ：定义为 donor $j$ 在其 **异常窗口** $I_j$ 位置，`time_series` 与 `normal_series` 的差异。
+$$a_S(j) = \text{RMS}(A_j^S - B_j^S)$$
+>[!WARNING]
+>**直观理解**：$a_S(j)$ 测量的是：这个 donor 的异常有多明显。$a_S(j)$ 越大，异常窗口和正常窗口的差异越显著。
+
+**Window 版本：**
+$$
+a_W(j) = \text{RMS}(q(X_j[I_j]) - q(N_j[I_j])) = \sqrt{\frac{1}{K}\sum_{t=1}^K[q(x_{j,t}) - q(n_{j,t})]^2}
+$$
+其中 $q(u) = \text{round}(100 \cdot u)$，即模型实际看到的整数数值。
+
+**Local 版本**：
+$$
+a_L(j) = \sqrt{\frac{1}{Kd} \lVert E_0(X_j)[I_j] - E_0(N_j)[I_j]\rVert_F^2}
+$$
+---
+$c_S(j)$：定义为 donor $j$ 在其 **同序列正常窗口 $I_j^0$** 位置，`time_series` 与 `normal_series` 的差异。
+
+>[!WARNING]
+>注：理想情况下，$c_S(j) \approx 0$
+
+$$
+\begin{gather*}
+c_W(j) = \text{RMS} \left(q(X_j[I_j^0]) - q(N_j[I_j^0]) \right),\\
+c_L(j) = \text{RMS}(E_0(X_j)[I_j^0] - E_0(N_j)[I_j^0]).
+\end{gather*}
+$$
+其中 $I_j^0$ 是同一条序列 $X_j$ 中，标注为 `has_anomaly = False` 的那个窗口。
+
+一个可靠 donor 应满足：
+$$
+\boxed{
+a_S(j)>0,\qquad
+\frac{c_S(j)}{a_S(j)+\varepsilon}\le0.25.
+}
+$$
+含义是：
+> `time_series-normal_series` 在标注正常区域产生的差异，最多是异常窗口差异的四分之一。
+
+
+
+
+#### 优化目标与约束条件
+目标函数：
+$$
+j_S^* = \arg \min_{j} d_S(i,j)
+$$
+约束条件为：
+$$
+\begin{cases}
+z_j = 1, \\
+K_i = K_j, \\
+\frac{d_S(i,j)}{a_S(j)} \le \tau \\
+\frac{c_S(j)}{a_S(j)} \leq \tau.
+\end{cases}
+$$
+取  $\tau = 0.25$，则有：
+$$
+\implies a_S(j) \ge  4 \cdot d_S(i,j),\quad  a_S(j) \geq 4\cdot c_S(j)
+$$
+注意：不能直接最小化 $\rho_S(i,j) = \frac{d_S(i,j)}{a_S(j)}$.
+原因是：如果最小化 $\rho = \frac{d}{a}$，极端大的异常 $a$ 就会把比例压得非常小，从而 **异常极端大的时间窗就会成为所有 anchor 的万能 donor**。
+
+
+#### Window 距离 $d_W(x_i,n_j)$ 只应该在“模型真正看到的数值”上计算
+AXIS 原论文并没有把原始浮点数直接给 LLM，而是会先将原始数值乘 100 后再取整，再拼成文本。
+
+因此需要先定义：
+$$
+q(u)_t = \text{round}(100 u_t)
+$$
+于是：
+$$
+B_i^W = q(x_i),\quad B_j^W = q(n_j),\quad A_j^W = q(x_j)
+$$
+最简单且正确的 Window 距离是：
+$$
+\boxed{
+d_W(i,j)
+=
+\sqrt{
+\frac1K
+\sum_{t=1}^{K}
+\left[q(x_i)_t-q(n_j)_t\right]^2
+}
+}
+$$
+donor 的异常可见强度是：
+$$
+\boxed{
+a_W(j)
+=
+\sqrt{
+\frac1K
+\sum_{t=1}^{K}
+\left[q(x_j)_t-q(n_j)_t\right]^2
+}
+}
+$$
+污染率：
+$$
+\boxed{
+\rho_W(i,j)=\frac{d_W(i,j)}{a_W(j)+\varepsilon}
+}
+$$
+这三个量已经足够。
+
+
+
+#### Local 距离 $d_L$ 也只需要一个 RMS，但要在正确的表示空间计算
+Local 的实际来源是整条序列经过 TS Encoder 后再切片。TS Encoder 会进行 patching、Transformer 全局编码和位置编码，因此不能只比较原始局部窗口。
+
+定义一个冻结的检索编码器：$E_0(\cdot)$，它应当是 Phase-1 的 TS Encoder checkpoint，满足：
+```python
+E0.eval()
+for p in E0.parameters():
+    p.requires_grad_(False)
+```
+
+定义：
+$$
+\begin{align*}
+H_i &= E_0(X_i) [I_i] \in \mathbb{R}^{K \times d}, \\
+H_j^0 &= E_0(N_j)[I_j] \in \mathbb{R}^{K\times d}, \\
+H_j^1 &= E_0(X_j)[I_j] \in \mathbb{R}^{K\times d}
+\end{align*}
+$$
+
+注意 anchor 使用的是 $E_0(X_i)$，不是 $E_0(N_i)$，因为正样本实际输入就是 $X_i$。
+Local 距离直接定义为：
+$$
+\boxed{
+d_L(i,j)
+=
+\sqrt{
+\frac{1}{Kd}
+\left\|H_i-H_j^0\right\|_F^2
+}
+}
+$$
+其中 $\|\cdot\|_F$ 是把 $K\times d$ 矩阵所有元素平方求和再开方。
+
+donor 的 Local 异常效应：
+$$
+\boxed{
+a_L(j)
+=
+\sqrt{
+\frac{1}{Kd}
+\left\|H_j^1-H_j^0\right\|_F^2
+}
+}
+$$
+Local 污染率：
+$$
+\boxed{
+\rho_L(i,j)
+=
+\frac{d_L(i,j)}{a_L(j)+\varepsilon}
+}
+$$
+不需要再加“位置距离”“上下文距离”“趋势距离”：
+
+- 绝对/相对位置对 TS Encoder 的影响已经进入 $H$；
+- 整条序列上下文的影响已经进入 $H$；
+- 局部形状、幅度和变化速度也已经进入 $H$。
+
+再额外手工添加这些量，相当于重复约束。
