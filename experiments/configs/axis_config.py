@@ -46,6 +46,12 @@ class LLMConfig:
     num_fixed_tokens: int = 30
     num_prototype: int = 1000
     num_heads: int = 8
+    architecture_variant: str = "loss_only"
+    qk_norm: bool = False
+    qk_norm_seq_len: Optional[int] = None
+    continuous_bypass: bool = False
+    direct_task_prompt: bool = False
+    gate_bias: float = -2.0
 
 
 

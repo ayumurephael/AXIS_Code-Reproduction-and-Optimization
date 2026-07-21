@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import math
 
-from .geval_gemini import author_distribution, author_prompt_for
+from .geval_deepseek import RUBRICS
+from .geval_gemini import AUTHOR_RUBRICS, author_distribution, author_prompt_for
 
 
 def test_author_integer_fallback_without_logprobs():
@@ -50,3 +51,12 @@ def test_author_prompt_has_exact_score_prefix_and_layout():
     assert "Score 5: excellent" in prompt
     assert "**Evaluation Criterion: correctness**" in prompt
     assert "Control the Maximum Length to 500 words." in prompt
+
+
+def test_author_and_deepseek_rubrics_share_dimensions_and_weights():
+    assert AUTHOR_RUBRICS.keys() == RUBRICS.keys()
+    for question_type, dimensions in AUTHOR_RUBRICS.items():
+        assert dimensions.keys() == RUBRICS[question_type].keys()
+        for dimension, author_spec in dimensions.items():
+            deepseek_spec = RUBRICS[question_type][dimension]
+            assert author_spec[0] == deepseek_spec[0]

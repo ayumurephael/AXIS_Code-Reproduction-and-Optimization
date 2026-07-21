@@ -15,26 +15,64 @@ def sha256_file(path: str | Path) -> str:
     return h.hexdigest()
 
 
-def build_model():
+def build_model(
+    architecture_variant: str = "loss_only",
+    qk_norm_seq_len: int | None = None,
+    gate_bias: float = -2.0,
+):
+    import copy
+
     from experiments.configs.axis_config import default_config
     from src.models.AXIS.AXIS import AXISCombinedModel
+    from tools.axis_repro.architecture_redesign import configure_llm_architecture
 
-    default_config.enable_ts_train = False
-    return AXISCombinedModel(default_config)
+    config = copy.deepcopy(default_config)
+    config.enable_ts_train = False
+    configure_llm_architecture(
+        config.llm_config,
+        variant=architecture_variant,
+        qk_norm_seq_len=qk_norm_seq_len,
+        gate_bias=gate_bias,
+    )
+    return AXISCombinedModel(config)
 
+
+def validate_checkpoint_architecture(payload: dict, llm_config) -> None:
+    """Fail closed when checkpoint provenance and instantiated architecture differ."""
+    expected_variant = getattr(llm_config, "architecture_variant", "loss_only")
+    actual = payload.get("reproduction_meta", {}).get("architecture")
+    if not actual:
+        if expected_variant != "loss_only":
+            raise ValueError("architecture checkpoint is missing reproduction metadata")
+        return
+    if actual.get("variant") != expected_variant:
+        raise ValueError(
+            f"checkpoint architecture {actual.get('variant')} != requested {expected_variant}"
+        )
+    expected_length = getattr(llm_config, "qk_norm_seq_len", None)
+    if actual.get("qk_norm_seq_len") != expected_length:
+        raise ValueError(
+            f"checkpoint QK length {actual.get('qk_norm_seq_len')} != requested {expected_length}"
+        )
+    expected_gate_bias = float(getattr(llm_config, "gate_bias", -2.0))
+    actual_gate_bias = float(actual.get("gate_bias", expected_gate_bias))
+    if abs(actual_gate_bias - expected_gate_bias) > 1e-12:
+        raise ValueError(
+            f"checkpoint gate bias {actual_gate_bias} != requested {expected_gate_bias}"
+        )
 
 def load_axis_payload(model, payload: dict, strict: bool = True) -> Dict[str, Any]:
-    """Load a materialized AXIS checkpoint, including author legacy keys."""
+    """Load an already-materialized AXIS checkpoint payload into ``model``."""
+    validate_checkpoint_architecture(payload, model.axis.config.llm_config)
     state = payload.get("model_state_dict", payload)
     if "ts_pretrain_model" in state and "moirai_trainable" in state:
-        model.ts_pretrain_model.load_state_dict(
-            state["ts_pretrain_model"], strict=strict
-        )
+        model.ts_pretrain_model.load_state_dict(state["ts_pretrain_model"], strict=strict)
         perceiver_state = state["moirai_trainable"]
         # Author Accelerate checkpoints were saved from the enclosing Moirai
-        # module, so every Perceiver key is prefixed with perceiver.
-        # Normalize only a uniformly prefixed mapping; mixed/corrupt inputs
-        # still fail closed under strict loading.
+        # module and prefix every perceiver key with ``perceiver.``. Formal
+        # reproduction checkpoints save the perceiver state_dict directly.
+        # Normalize only if all keys have the prefix so mixed/corrupt inputs
+        # continue to fail closed under strict loading.
         legacy_prefix = "perceiver."
         if perceiver_state and all(
             key.startswith(legacy_prefix) for key in perceiver_state
@@ -52,6 +90,7 @@ def load_axis_payload(model, payload: dict, strict: bool = True) -> Dict[str, An
 def load_axis_checkpoint(model, path: str | Path, strict: bool = True) -> Dict[str, Any]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
     return load_axis_payload(model, payload, strict=strict)
+
 
 def load_phase1_fresh_hint(model, path: str | Path) -> Dict[str, Any]:
     payload = torch.load(path, map_location="cpu", weights_only=False)
