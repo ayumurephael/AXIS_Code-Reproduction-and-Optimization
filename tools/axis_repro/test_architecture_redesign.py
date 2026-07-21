@@ -30,7 +30,7 @@ if "einops" not in sys.modules:
     sys.modules["einops"] = einops
 
 
-from src.models.AXIS.AXIS import MultiheadAttention, Perceiver
+from src.models.AXIS.AXIS import AXIS, MultiheadAttention, Perceiver
 from tools.axis_repro import architecture_redesign as architecture
 from tools.axis_repro import model_utils, strip_checkpoints
 
@@ -207,6 +207,109 @@ class PerceiverRedesignTests(unittest.TestCase):
         missing = [name for name, parameter in module.named_parameters() if parameter.requires_grad and parameter.grad is None]
         self.assertEqual(missing, [])
 
+    def test_state_only_gradient_isolated_from_task_prompt(self) -> None:
+        module = self._full_perceiver()
+        source = module.get_source_embeddings(torch.randn(6, 4))
+        local_output = module.process_local_embeddings(
+            torch.randn(3, 4),
+            source,
+            0,
+            3,
+        )
+        frozen_task_output = module.process_fixed_embeddings(source, 2).detach()
+        probe = torch.arange(
+            1,
+            local_output.numel() + 1,
+            dtype=local_output.dtype,
+        ).reshape_as(local_output)
+        state_loss = (local_output * probe).sum() + frozen_task_output.square().sum()
+        state_loss.backward()
+
+        self.assertIsNone(module.task_prompt_embeddings.grad)
+        for prefix in ("mapping_layer.", "local_attention.", "continuous_proj."):
+            gradients = [
+                parameter.grad
+                for name, parameter in module.named_parameters()
+                if name.startswith(prefix)
+            ]
+            self.assertTrue(gradients, prefix)
+            self.assertTrue(
+                any(
+                    gradient is not None and float(gradient.abs().sum()) > 0.0
+                    for gradient in gradients
+                ),
+                prefix,
+            )
+
+    def test_answer_only_gradient_updates_task_prompt(self) -> None:
+        module = self._full_perceiver()
+        source = module.get_source_embeddings(torch.randn(6, 4))
+        local_output = module.process_local_embeddings(
+            torch.randn(3, 4),
+            source,
+            0,
+            3,
+        )
+        task_output = module.process_fixed_embeddings(source, 2)
+        answer_loss = local_output.square().mean() + task_output.square().mean()
+        answer_loss.backward()
+
+        gradient = module.task_prompt_embeddings.grad
+        self.assertIsNotNone(gradient)
+        self.assertGreater(float(gradient.abs().sum()), 0.0)
+
+    def test_axis_hint_injection_enforces_state_only_prompt_stop_gradient(self) -> None:
+        class TinyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.embedding = torch.nn.Embedding(6, 4)
+
+            def get_input_embeddings(self):
+                return self.embedding
+
+        def make_axis():
+            axis = AXIS.__new__(AXIS)
+            torch.nn.Module.__init__(axis)
+            axis.model = TinyModel()
+            axis.perceiver = self._full_perceiver()
+            axis.local_hint_token_id = 4
+            axis.fixed_hint_token_id = 5
+            return axis
+
+        input_ids = torch.tensor([[0, 4, 5, 5]])
+        local = torch.randn(1, 1, 4)
+
+        state_axis = make_axis()
+        state_embeds = state_axis.get_hint_embeddings(
+            input_ids,
+            local,
+            [0],
+            [1],
+            detach_fixed_hint=True,
+        )
+        state_embeds.mul(
+            torch.arange(1, state_embeds.numel() + 1).reshape_as(state_embeds)
+        ).sum().backward()
+        self.assertIsNone(state_axis.perceiver.task_prompt_embeddings.grad)
+        self.assertTrue(any(
+            parameter.grad is not None and float(parameter.grad.abs().sum()) > 0.0
+            for name, parameter in state_axis.perceiver.named_parameters()
+            if name.startswith(("mapping_layer.", "local_attention.", "continuous_proj."))
+        ))
+
+        answer_axis = make_axis()
+        answer_embeds = answer_axis.get_hint_embeddings(
+            input_ids,
+            local,
+            [0],
+            [1],
+            detach_fixed_hint=False,
+        )
+        answer_embeds.square().sum().backward()
+        prompt_gradient = answer_axis.perceiver.task_prompt_embeddings.grad
+        self.assertIsNotNone(prompt_gradient)
+        self.assertGreater(float(prompt_gradient.abs().sum()), 0.0)
+
     def test_checkpoint_audit_matches_full_state_and_fails_on_missing_gate(self) -> None:
         self.assertTrue(hasattr(architecture, "audit_architecture_checkpoint"))
         module = self._full_perceiver()
@@ -290,10 +393,11 @@ class PipelineCompatibilityTests(unittest.TestCase):
         self.assertEqual(parsed.architecture_variant, "full")
         self.assertIsNone(parsed.qk_norm_seq_len)
         self.assertEqual(parsed.gate_bias, -2.0)
-        self.assertEqual(parsed.beta, 0.2)
+        self.assertEqual(parsed.epochs, 6)
+        self.assertEqual(parsed.beta, 0.1)
         self.assertEqual(parsed.beta_warmup_ratio, 0.1)
         self.assertEqual(parsed.local_lr, 5e-5)
-        self.assertEqual(parsed.attention_lr, 2e-5)
+        self.assertEqual(parsed.attention_lr, 1e-4)
         self.assertEqual(parsed.prompt_lr, 5e-5)
         self.assertFalse(hasattr(parsed, "margin"))
 

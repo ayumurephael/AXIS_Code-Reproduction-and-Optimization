@@ -115,7 +115,7 @@ def scheduled_beta(
     step: int,
     total_steps: int,
     *,
-    target_beta: float = 0.2,
+    target_beta: float = 0.1,
     warmup_ratio: float = 0.1,
 ) -> float:
     """Linearly increase beta from zero over the first warmup_ratio of updates."""
@@ -265,7 +265,7 @@ class CounterfactualAXISDataset(AXISAnomalyQADataset):
         self.counterfactual_index_path = Path(counterfactual_index)
         payload = json.loads(self.counterfactual_index_path.read_text(encoding="utf-8"))
         if int(payload.get("version", 0)) != COUNTERFACTUAL_INDEX_VERSION:
-            raise ValueError("counterfactual index is not the coherent-pair v2 format")
+            raise ValueError("counterfactual index is not the coherent-pair v3 format")
         if int(payload["seed"]) != seed or float(payload["train_ratio"]) != train_ratio:
             raise ValueError("counterfactual index split does not match dataset split")
         expected_files = [path.name for path in self.series_files]

@@ -12,7 +12,7 @@ EXPECTED_OBJECTIVE = "answer_nll_plus_coherent_binary_state_ce_v3"
 EXPECTED_COUNTERFACTUAL_INDEX_VERSION = 3
 EXPECTED_GROUP_LRS = {
     "local_continuous": 5e-5,
-    "prototype_attention": 2e-5,
+    "prototype_attention": 1e-4,
     "task_prompt": 5e-5,
 }
 
@@ -29,16 +29,20 @@ def audit_loss_objective_checkpoint(
         raise ValueError("checkpoint does not use coherent binary state objective v3")
     if int(metadata.get("counterfactual_index_version", 0)) != EXPECTED_COUNTERFACTUAL_INDEX_VERSION:
         raise ValueError("checkpoint was not trained with coherent counterfactual index v3")
-    if abs(float(metadata.get("beta_target", -1.0)) - 0.2) > 1e-12:
-        raise ValueError("checkpoint beta target is not 0.2")
+    if abs(float(metadata.get("beta_target", -1.0)) - 0.1) > 1e-12:
+        raise ValueError("checkpoint beta target is not 0.1")
     if abs(float(metadata.get("beta_warmup_ratio", -1.0)) - 0.1) > 1e-12:
         raise ValueError("checkpoint beta warmup ratio is not 0.1")
     if abs(float(metadata.get("gradient_clip", -1.0)) - 1.0) > 1e-12:
         raise ValueError("checkpoint gradient clipping is not 1.0")
-    if metadata.get("fixed_hint_state_gradient") is not True:
-        raise ValueError("state loss must update the shared Fixed/task-prompt parameters")
+    if metadata.get("fixed_hint_state_gradient") is not False:
+        raise ValueError("state loss must not update Fixed/task-prompt parameters")
     if metadata.get("fixed_hint_answer_gradient") is not True:
         raise ValueError("answer loss must train Fixed/task-prompt parameters")
+    if metadata.get("fixed_hint_freeze_scope") != "state_loss_only":
+        raise ValueError("checkpoint does not declare state-only Fixed/task-prompt freezing")
+    if metadata.get("fixed_hint_state_isolation") != "direct_task_prompt_output_stop_gradient":
+        raise ValueError("checkpoint does not use the audited direct-prompt stop-gradient path")
     if metadata.get("state_prompt_independent") is not True:
         raise ValueError("state classification must use an independent prompt sequence")
     if metadata.get("state_pairing") != "factual_counterfactual_same_step":
@@ -104,6 +108,10 @@ def audit_loss_objective_checkpoint(
         "beta_target": metadata["beta_target"],
         "beta_warmup_ratio": metadata["beta_warmup_ratio"],
         "gradient_clip": metadata["gradient_clip"],
+        "fixed_hint_state_gradient": metadata["fixed_hint_state_gradient"],
+        "fixed_hint_answer_gradient": metadata["fixed_hint_answer_gradient"],
+        "fixed_hint_freeze_scope": metadata["fixed_hint_freeze_scope"],
+        "fixed_hint_state_isolation": metadata["fixed_hint_state_isolation"],
         "state_verbalizers": {
             "normal_text": verbalizers.get("normal_text"),
             "anomalous_text": verbalizers.get("anomalous_text"),

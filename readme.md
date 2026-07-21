@@ -6,15 +6,16 @@
 
 ## 分支
 
-远端仅维护三个分支：
+远端维护四个实验分支：
 
 | 分支 | 用途 | 允许相对 `main` 改变的因素 |
 |---|---|---|
 | `main` | 论文 AXIS 基线复现 | 无 |
 | `loss_resesign` | 损失函数改进 | 仅声明的损失与反事实训练目标 |
 | `architecture_redesign` | 架构改进 | 声明的架构因素；需要时包含与该架构配套的训练目标 |
+| `architecture_redesign_fixedhint_frozen` | Fixed-Hint 冻结架构改进 | `architecture_redesign` 全架构，并阻断状态损失到 task prompt 的梯度 |
 
-当前分支的精确定义见 `BRANCH_PROFILE.md`。三分支比较必须共用数据 manifest、Phase-I 权重、训练预算、选模规则、生成协议和 judge 配置。
+当前分支的精确定义见 `BRANCH_PROFILE.md`。跨分支比较必须共用数据 manifest、Phase-I 权重、训练预算、选模规则、生成协议和 judge 配置。
 
 ## 从哪里开始
 

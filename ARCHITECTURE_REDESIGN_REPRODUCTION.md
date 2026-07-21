@@ -1,114 +1,162 @@
-# AXIS 架构改进分支复现协议
+# AXIS Fixed-Hint 冻结架构分支复现协议
 
-本分支在 coherent counterfactual state objective 上实现三个独立架构因素。正式 bundle 使用 `full`；因子归因必须用相同目标下的 2×2×2 变体，而不是直接把 `full` 与 `main` 的原始目标比较。
+本文件是 `architecture_redesign_fixedhint_frozen` 的分支专用执行协议；与共享 `REPRODUCTION.md` 冲突时，以本文件对本轮实验的明确覆盖项为准。设计说明不是可直接执行的命令。
 
-## 正式架构
+## 1. 已冻结的正式实验身份
 
-1. **Prototype cross-attention QK-Norm**：Q/K 按 head 维 L2 归一化，V 不归一化；每个 attention 拥有可学习 scale。训练 split 上的 Local hint 长度统计决定初始化序列长度，并写入 checkpoint metadata。
-2. **Continuous bypass + prototype sidecar**：encoder state 的连续投影作为主路径，prototype attention 作为门控残差 sidecar；gate bias 默认 `-2`。
-3. **Direct task prompt**：30 个 fixed/task 位置由直接可学习的 `[1,30,d_llm]` 参数填充，不实例化旧 fixed-query prototype attention。
+本轮只训练和评测完整架构，不进行消融；启动后不得根据测试或 Judge 分数回改配置。
 
-LLM 和 Phase-I encoder 冻结。训练目标同时包含真实上下文 answer NLL 与 factual/counterfactual state CE。
+| 项目 | 固定值 |
+|---|---|
+| architecture variant | `full` |
+| seed / epochs | 72 / 6 |
+| world size / micro batch / global batch | 3 / 每卡 1 series / 3 series |
+| GPU | 3 张 H100，当前物理卡 2、3、4 |
+| Phase-I SHA-256 | `2f1507fcc3c3232d375dcb0c18bfcd11f2ec9e184dcb1cc9fb603f0f38c94a2e` |
+| counterfactual index | objective-v3、schema v3、Top-M=1 |
+| index SHA-256 | `cc0944f9e5bcd70b6b72fdfb398abf8ef439734ed5aa7693ddda337bee1b38d0` |
+| optimizer | AdamW |
+| local / attention / task-prompt LR | `5e-5` / `1e-4` / `5e-5` |
+| weight decay / gradient clip | `1e-5` / `1.0` |
+| state-loss beta | 前 10% synchronized steps从 0 线性升至 `0.1` |
+| precision | BF16 autocast |
+| checkpoint schedule | epoch 1–6 全部候选 |
+| selection metric | 完整 1500-series / 3000-QA validation 的 mean answer NLL 最小 |
+| formal generation | `paper140 + batching=series + skip-loss` |
+| formal Judge | Gemini 2.5 Pro，author prompt + author scoring |
 
-## 变体
+历史 schema-v1 索引即使 seed 与 Phase-I hash 相同也不得用于本轮训练。索引、数据 split、训练 seed 必须同时为 72。虽然服务器还有更多空闲 H100，但本轮保持 world size 3 和 global batch 3，以免改变优化轨迹；其余 GPU 只用于不改变模型状态的验证/推理并行任务。
 
-| `--architecture-variant` | QK-Norm | bypass/sidecar | direct task prompt |
-|---|---:|---:|---:|
-| `loss_only` | 0 | 0 | 0 |
-| `qk_only` | 1 | 0 | 0 |
-| `bypass_only` | 0 | 1 | 0 |
-| `task_prompt_only` | 0 | 0 | 1 |
-| `qk_bypass` | 1 | 1 | 0 |
-| `qk_task_prompt` | 1 | 0 | 1 |
-| `bypass_task_prompt` | 0 | 1 | 1 |
-| `full` | 1 | 1 | 1 |
+## 2. Fixed/task-prompt 梯度契约
 
-## 1. 构造并审计 counterfactual index
+完整架构包含 QK-Norm、continuous bypass + prototype sidecar，以及直接学习的 30-token task prompt。LLM 和 Phase-I encoder 冻结。
 
-必须与 `loss_resesign` 复用同一个 seed-42 index 文件和 SHA-256；不要在分支间分别生成不同 donor 集：
+- `L_state` 必须通过 `detach_fixed_hint=True` 把 task-prompt 输出视为常量，不得更新 `task_prompt_embeddings`。
+- `L_state` 仍更新 mapping/local attention、continuous projection、gate/fusion 等局部证据模块。
+- `L_answer` 使用非 detach task-prompt 路径，继续更新 `task_prompt_embeddings`。
+- checkpoint 必须记录 `fixed_hint_state_gradient=false`、`fixed_hint_answer_gradient=true`、`fixed_hint_freeze_scope=state_loss_only`、`fixed_hint_state_isolation=direct_task_prompt_output_stop_gradient`。
+- objective audit 对这些字段 fail closed。CPU 回归同时覆盖 state-only 和 answer-only 的实际 hint-injection 梯度路径。
+
+## 3. 输入资产审计
 
 ```bash
-export CUDA_VISIBLE_DEVICES=0
-python -m tools.axis_repro.build_counterfactual_index \
-  --data data/anomaly_llava_training_dataset \
-  --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-  --output experiments/reproduction/shared_author42/counterfactual_index.json \
-  --seed 42 --train-ratio 0.95 --tau 0.25 \
-  --donor-top-m 1 --gamma-percentile 5
+RUN_ROOT=experiments/reproduction/architecture_redesign_fixedhint_frozen_seed72
+INDEX=$RUN_ROOT/index/counterfactual_index.json
+PHASE1=experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth
 
+sha256sum "$PHASE1" "$INDEX"
 python -m tools.axis_repro.audit_counterfactual_index \
-  --data data/anomaly_llava_training_dataset \
-  --index experiments/reproduction/shared_author42/counterfactual_index.json \
-  --seed 42 --train-ratio 0.95 --expected-donor-top-m 1 \
-  --output experiments/reproduction/shared_author42/counterfactual_index_audit.json
+  --data data/anomaly_llava_training_dataset --index "$INDEX" \
+  --seed 72 --train-ratio 0.95 --expected-donor-top-m 1 \
+  --output "$RUN_ROOT/index/counterfactual_index_audit.json"
 ```
 
-审计通过后冻结 index 与 Phase-I hash。
+索引审计必须得到 `version=3`、57,000 records、28,500 train series、`ok=true`，且索引中的 Phase-I hash 与实算值一致。复用上述精确索引，不重新抽 donor。
 
-## 2. 多卡 smoke
-
-```bash
-export CUDA_VISIBLE_DEVICES=0,1,2
-
-torchrun --standalone --nproc_per_node=3 \
-  -m tools.axis_repro.train_phase2_architecture_redesign \
-  --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-  --counterfactual-index experiments/reproduction/shared_author42/counterfactual_index.json \
-  --data data/anomaly_llava_training_dataset \
-  --output experiments/reproduction/architecture_redesign/full/smoke \
-  --architecture-variant full \
-  --epochs 1 --max-steps 2 --save-every 0 --seed 42
-```
-
-检查三 rank、finite loss/gradient、只更新声明参数、index/checkpoint metadata 一致。smoke 产物不能用于评分。
-
-## 3. 正式长预算训练
+## 4. 三卡 smoke
 
 ```bash
-export CUDA_VISIBLE_DEVICES=0,1,2
-
+export CUDA_VISIBLE_DEVICES=2,3,4
 torchrun --standalone --nproc_per_node=3 \
   -m tools.axis_repro.train_phase2_architecture_redesign \
-  --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-  --counterfactual-index experiments/reproduction/shared_author42/counterfactual_index.json \
+  --phase1 "$PHASE1" --counterfactual-index "$INDEX" \
   --data data/anomaly_llava_training_dataset \
-  --output experiments/reproduction/architecture_redesign/full/phase2_author42 \
-  --architecture-variant full \
-  --epochs 35 --seed 42 \
-  --local-lr 5e-5 --attention-lr 2e-5 --prompt-lr 5e-5 \
+  --output "$RUN_ROOT/smoke" --architecture-variant full \
+  --epochs 1 --max-steps 2 --save-every 0 --seed 72 \
+  --local-lr 5e-5 --attention-lr 1e-4 --prompt-lr 5e-5 \
   --weight-decay 1e-5 --gradient-clip 1.0 \
-  --beta 0.2 --beta-warmup-ratio 0.1 \
+  --beta 0.1 --beta-warmup-ratio 0.1 --num-workers 2
+```
+
+smoke 必须确认三 rank 同步、loss/gradient 有限、BF16 可用、索引和 Phase-I hash 一致。smoke 产物不能参与选模或评分。
+
+## 5. 正式 6-epoch Phase-II
+
+```bash
+export CUDA_VISIBLE_DEVICES=2,3,4
+torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.train_phase2_architecture_redesign \
+  --phase1 "$PHASE1" --counterfactual-index "$INDEX" \
+  --data data/anomaly_llava_training_dataset \
+  --output "$RUN_ROOT/formal" --architecture-variant full \
+  --epochs 6 --seed 72 \
+  --local-lr 5e-5 --attention-lr 1e-4 --prompt-lr 5e-5 \
+  --weight-decay 1e-5 --gradient-clip 1.0 \
+  --beta 0.1 --beta-warmup-ratio 0.1 \
   --num-workers 2 --save-every 5000
 ```
 
-训练时不传 `--qk-norm-seq-len`，由固定 training split 计算并写入 `reproduction_meta.architecture.qk_norm_seq_len`。
+不传 `--qk-norm-seq-len`；程序使用固定 training split 的 Local 长度 p97.5 初始化并写入 checkpoint。保存日志、runtime、每轮 inference checkpoint、周期 checkpoint、commit、环境和 GPU 身份。正式训练启动后以稳定窗口的实测 synchronized steps/s 计算 ETA。
 
-## 4. checkpoint 审计、验证和选模
+## 6. 双重审计、逐轮 validation 与选模
 
-每个预先声明的候选先运行：
+对 epoch 1–6 的每个 inference checkpoint 先执行：
 
 ```bash
 python -m tools.axis_repro.audit_architecture_checkpoint \
-  --checkpoint <checkpoint.pth> --expected-variant full
-
+  --checkpoint <epoch_N_inference.pth> --expected-variant full
 python -m tools.axis_repro.audit_loss_objective_checkpoint \
-  --checkpoint <checkpoint.pth> --expected-donor-top-m 1
+  --checkpoint <epoch_N_inference.pth> --expected-donor-top-m 1
 ```
 
-随后按 `REPRODUCTION.md` 在同一 1500-series 验证集上计算完整 loss。推理命令必须额外传入：
+从 checkpoint metadata 读取精确 `qk_norm_seq_len`，再运行：
 
-```text
---architecture-variant full
---qk-norm-seq-len <checkpoint metadata 中的精确整数>
---gate-bias -2
+```bash
+export CUDA_VISIBLE_DEVICES=2,3,4
+torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.run_inference_cli \
+  --checkpoint <epoch_N_inference.pth> \
+  --data data/anomaly_llava_training_dataset --subset full \
+  --series-split-manifest experiments/reproduction/manifests/phase2_split.json \
+  --series-split-key val_series --modes base \
+  --architecture-variant full \
+  --qk-norm-seq-len <checkpoint metadata integer> --gate-bias -2 \
+  --output "$RUN_ROOT/validation/epoch_N"
+
+python -m tools.axis_repro.audit_validation \
+  --predictions "$RUN_ROOT/validation/epoch_N/predictions.jsonl" \
+  --series-manifest experiments/reproduction/manifests/phase2_split.json \
+  --series-keys val_series
 ```
 
-只按预先声明的完整 validation 指标选择 checkpoint，不能用 test/judge score。
+每轮必须为 3,000 rows、1,500 series、每 series 2 QA、无错误且 `ok=true`。将六个 predictions 文件一次性传给 `select_best_loss`，只按 mean answer NLL 的 argmin 选择唯一 checkpoint。state accuracy、测试输出和 Judge 分数只作事后诊断。
 
-## 5. 正式生成与评测
+## 7. paper140 正式生成与 Gemini 评分
 
-对验证选出的唯一 checkpoint 运行 `paper140 + batching=series + skip-loss`，并传入同一组 architecture 参数。日常使用 DeepSeek v4-pro，最终正式使用 Gemini 2.5 Pro author mode。命令、审计和 335 维完整度要求见 `REPRODUCTION.md` 与 `EVALUATION_PROTOCOL.md`。
+仅对 validation 选出的 checkpoint：
 
-## 因子归因
+```bash
+export CUDA_VISIBLE_DEVICES=2,3,4
+torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.run_inference_cli \
+  --checkpoint <selected_inference_checkpoint.pth> \
+  --data data/AXIS_qa_test --subset paper140 --modes base \
+  --batching series --skip-loss \
+  --architecture-variant full \
+  --qk-norm-seq-len <checkpoint metadata integer> --gate-bias -2 \
+  --output "$RUN_ROOT/test_selected_paper140"
 
-若研究问题是“架构是否有效”，至少共同训练 `loss_only` 与 `full`；严谨定位三个因素则运行预先声明的 2×2×2 设计。所有变体复用同一 index、初始化、seed、预算和选模日程。不要把 bundle 相对 `main` 的差异全部归因于某一个架构模块。
+python -m tools.axis_repro.audit_results \
+  --predictions "$RUN_ROOT/test_selected_paper140/predictions.jsonl" \
+  --manifest experiments/reproduction/manifests/paper140.json --modes base
+```
+
+预测审计通过后才可调用正式 Judge：
+
+```bash
+python -m tools.axis_repro.geval_gemini \
+  --predictions "$RUN_ROOT/test_selected_paper140/predictions.jsonl" \
+  --output "$RUN_ROOT/test_selected_paper140/geval_gemini25pro_author.jsonl" \
+  --model gemini-2.5-pro --prompt-template author --scoring-mode author \
+  --primary-workers 3
+```
+
+PackyAPI 没有可用 score-token logprobs 时，author mode 按作者代码的可执行回退语义使用 temperature=0 单次整数分。必须保留 `logprobs_requested`、`logprobs_returned`、`method`、usage、prompt hash、模型和 endpoint host；不得混入 DeepSeek 分数。
+
+最终 `audit_results` 与 `table_runner` 必须证明 140 predictions、335 dimension scores、无重复/缺失/非法值、`ok=true`。
+
+## 8. 报告与停止规则
+
+报告必须包含 Table 1 十项 Gemini 指标及 Baseline 差值/相对变化、六轮训练与 validation、选模依据、answer/state 指标、valid-pair 覆盖、梯度与吞吐、全部超参数和参数量、QK/gate 配置、环境、所有关键 SHA-256、全部审计以及 Gemini logprobs/fallback/usage。
+
+若最佳 validation 点落在 epoch 6，必须报告“在当前预算上限仍可能未收敛”；不得借测试或 Gemini 分数追加定向调参。

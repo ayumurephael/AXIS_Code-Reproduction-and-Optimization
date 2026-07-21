@@ -520,7 +520,7 @@ class AXIS(nn.Module):
         normal_id: int,
         anomalous_id: int,
         *,
-        fixed_hint_frozen: bool = False,
+        fixed_hint_frozen: bool = True,
     ) -> torch.Tensor:
         input_ids, attention_mask = self.generate_state_input_ids(
             state_question,
@@ -725,7 +725,7 @@ class AXISCombinedModel(nn.Module):
         state_question: Optional[str] = None,
         normal_id: Optional[int] = None,
         anomalous_id: Optional[int] = None,
-        beta: float = 0.2,
+        beta: float = 0.1,
     ) -> torch.Tensor:
         if not self.config.enable_ts_train:
             with torch.no_grad():

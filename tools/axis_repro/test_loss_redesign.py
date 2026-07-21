@@ -91,12 +91,12 @@ class PromptTests(unittest.TestCase):
         self.assertIn("0 = normal", prompt)
         self.assertIn("1 = anomalous", prompt)
 
-    def test_state_forward_uses_noninplace_shared_fixed_path(self):
+    def test_state_forward_uses_noninplace_frozen_fixed_path(self):
         source = Path("src/models/AXIS/AXIS.py").read_text(encoding="utf-8")
         train_source = Path("tools/axis_repro/train_phase2_loss_redesign.py").read_text(encoding="utf-8")
         self.assertIn("torch.index_copy(", source)
-        self.assertIn("fixed_hint_frozen: bool = False", source)
-        self.assertNotIn("fixed_hint_frozen=True", train_source)
+        self.assertIn("fixed_hint_frozen: bool = True", source)
+        self.assertIn("fixed_hint_frozen=True", train_source)
         self.assertIn("previous_padding_side = self.tokenizer.padding_side", source)
         self.assertIn("self.tokenizer.padding_side = previous_padding_side", source)
         self.assertIn("state tokenization did not produce right-side padding", source)
@@ -364,7 +364,7 @@ class OptimizerGroupingTests(unittest.TestCase):
     def test_recommended_learning_rates_cover_every_parameter_once(self):
         module = self.TinyPerceiver()
         groups, metadata = phase2_parameter_groups(module)
-        self.assertEqual(metadata["prototype_attention"]["lr"], 2e-5)
+        self.assertEqual(metadata["prototype_attention"]["lr"], 1e-4)
         self.assertEqual(metadata["local_continuous"]["lr"], 5e-5)
         self.assertEqual(metadata["task_prompt"]["lr"], 5e-5)
         parameter_ids = [id(parameter) for group in groups for parameter in group["params"]]
@@ -385,11 +385,13 @@ class ObjectiveCheckpointAuditTests(unittest.TestCase):
                 "objective_version": 3,
                 "seed": 72,
                 "counterfactual_index_version": COUNTERFACTUAL_INDEX_VERSION,
-                "beta_target": 0.2,
+                "beta_target": 0.1,
                 "beta_warmup_ratio": 0.1,
                 "gradient_clip": 1.0,
-                "fixed_hint_state_gradient": True,
+                "fixed_hint_state_gradient": False,
                 "fixed_hint_answer_gradient": True,
+                "fixed_hint_freeze_scope": "state_loss_only",
+                "fixed_hint_state_isolation": "direct_task_prompt_output_stop_gradient",
                 "state_prompt_independent": True,
                 "state_pairing": "factual_counterfactual_same_step",
                 "state_logits_source": "frozen_lm_head_next_token_two_class",
@@ -405,7 +407,7 @@ class ObjectiveCheckpointAuditTests(unittest.TestCase):
                 },
                 "optimizer_groups": {
                     "local_continuous": {"lr": 5e-5, "parameters": 1},
-                    "prototype_attention": {"lr": 2e-5, "parameters": 1},
+                    "prototype_attention": {"lr": 1e-4, "parameters": 1},
                     "task_prompt": {"lr": 5e-5, "parameters": 1},
                 },
                 "counterfactual_policy": {
@@ -436,10 +438,10 @@ class ObjectiveCheckpointAuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             audit_loss_objective_checkpoint(old_objective)
 
-        detached_fixed = self._payload()
-        detached_fixed["reproduction_meta"]["fixed_hint_state_gradient"] = False
+        leaking_fixed = self._payload()
+        leaking_fixed["reproduction_meta"]["fixed_hint_state_gradient"] = True
         with self.assertRaises(ValueError):
-            audit_loss_objective_checkpoint(detached_fixed)
+            audit_loss_objective_checkpoint(leaking_fixed)
 
 if __name__ == "__main__":
     unittest.main()

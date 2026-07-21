@@ -91,7 +91,7 @@ def _axis_consistent_state_forward(
     state_question=None,
     normal_id=None,
     anomalous_id=None,
-    beta=0.2,
+    beta=0.1,
 ):
     if return_logits:
         raise ValueError("state-supervised training does not materialize full logits")
@@ -154,7 +154,7 @@ def _axis_consistent_state_forward(
             state_question,
             int(normal_id),
             int(anomalous_id),
-            fixed_hint_frozen=False,
+            fixed_hint_frozen=True,
         )
         state_loss_sum = F.cross_entropy(logits.float(), paired_targets, reduction="sum")
         state_rows = paired_targets.numel()
@@ -208,7 +208,7 @@ def phase2_parameter_groups(
     perceiver,
     *,
     local_lr: float = 5e-5,
-    attention_lr: float = 2e-5,
+    attention_lr: float = 1e-4,
     prompt_lr: float = 5e-5,
     weight_decay: float = 1e-5,
 ) -> tuple[list[dict], dict[str, dict[str, float | int]]]:
@@ -301,9 +301,9 @@ def build_parser(default_architecture_variant: str = "loss_only") -> argparse.Ar
     parser.add_argument("--counterfactual-index", required=True)
     parser.add_argument("--data", default="data/anomaly_llava_training_dataset")
     parser.add_argument("--output", default="experiments/reproduction/phase2_consistent_state")
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=6)
     parser.add_argument("--local-lr", type=float, default=5e-5)
-    parser.add_argument("--attention-lr", type=float, default=2e-5)
+    parser.add_argument("--attention-lr", type=float, default=1e-4)
     parser.add_argument("--prompt-lr", type=float, default=5e-5)
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--gradient-clip", type=float, default=1.0)
@@ -311,7 +311,7 @@ def build_parser(default_architecture_variant: str = "loss_only") -> argparse.Ar
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--save-every", type=int, default=5000)
     parser.add_argument("--max-steps", type=int)
-    parser.add_argument("--beta", type=float, default=0.2)
+    parser.add_argument("--beta", type=float, default=0.1)
     parser.add_argument("--beta-warmup-ratio", type=float, default=0.1)
     add_architecture_arguments(parser, default_variant=default_architecture_variant)
     return parser
@@ -366,6 +366,11 @@ def main(default_architecture_variant: str = "loss_only") -> None:
         "gate_bias": args.gate_bias,
         "task_prompt_tokens": 30,
     }
+    fixed_hint_state_isolation = (
+        "direct_task_prompt_output_stop_gradient"
+        if architecture_flags["direct_task_prompt"]
+        else "processed_fixed_output_stop_gradient_shared_processor"
+    )
     model = build_model(
         architecture_variant=args.architecture_variant,
         qk_norm_seq_len=qk_norm_seq_len,
@@ -416,8 +421,10 @@ def main(default_architecture_variant: str = "loss_only") -> None:
         "gradient_clip": args.gradient_clip,
         "optimizer_groups": optimizer_metadata,
         "state_verbalizers": verbalizers.to_metadata(),
-        "fixed_hint_state_gradient": True,
+        "fixed_hint_state_gradient": False,
         "fixed_hint_answer_gradient": True,
+        "fixed_hint_freeze_scope": "state_loss_only",
+        "fixed_hint_state_isolation": fixed_hint_state_isolation,
         "state_prompt_independent": True,
         "state_pairing": "factual_counterfactual_same_step",
         "state_logits_source": "frozen_lm_head_next_token_two_class",
