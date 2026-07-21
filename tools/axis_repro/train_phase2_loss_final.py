@@ -673,6 +673,9 @@ def main(default_architecture_variant: str = "full") -> None:
 
     stop = False
     for epoch in range(1, args.epochs + 1):
+        epoch_totals = torch.zeros(20, dtype=torch.float64, device=local)
+        epoch_steps = 0
+        epoch_start = time.perf_counter()
         sampler.set_epoch(epoch)
         ddp.train()
         ddp.module.ts_pretrain_model.eval()
@@ -753,6 +756,20 @@ def main(default_architecture_variant: str = "full") -> None:
             )
             if not bool(torch.isfinite(grad_norm.detach())):
                 raise FloatingPointError(f"non-finite gradient norm at step {global_step}")
+            answer_stats = component_stats["answer"]
+            mc_stats = component_stats.get("mc", _empty_component_stats(grad_norm))
+            tf_stats = component_stats.get("tf", _empty_component_stats(grad_norm))
+            oe_stats = component_stats.get("oe", _empty_component_stats(grad_norm))
+            epoch_totals += torch.stack([
+                answer_stats["loss_sum"], answer_stats["count"],
+                mc_stats["loss_sum"], mc_stats["count"], mc_stats["pairs"], mc_stats["correct"],
+                mc_stats["factual_correct"], mc_stats["counterfactual_correct"],
+                tf_stats["loss_sum"], tf_stats["count"], tf_stats["pairs"], tf_stats["correct"],
+                tf_stats["factual_correct"], tf_stats["counterfactual_correct"],
+                oe_stats["loss_sum"], oe_stats["count"], oe_stats["pairs"],
+                oe_stats["delta_sum"], oe_stats["positive_delta"], grad_norm.detach().float(),
+            ]).to(device=local, dtype=torch.float64)
+            epoch_steps += 1
             optimizer.step()
             global_step += 1
             if global_step == 10:
@@ -778,6 +795,44 @@ def main(default_architecture_variant: str = "full") -> None:
             if args.max_steps and global_step >= args.max_steps:
                 stop = True
                 break
+        torch.distributed.all_reduce(epoch_totals, op=torch.distributed.ReduceOp.SUM)
+        if rank == 0:
+            values = epoch_totals.tolist()
+            def epoch_mean(sum_index, count_index):
+                return values[sum_index] / values[count_index] if values[count_index] else 0.0
+            answer_epoch_loss = epoch_mean(0, 1)
+            mc_epoch_loss = epoch_mean(2, 3)
+            tf_epoch_loss = epoch_mean(8, 9)
+            oe_epoch_loss = epoch_mean(14, 15)
+            epoch_summary = {
+                "event": "epoch_summary",
+                "stage": args.stage,
+                "epoch": epoch,
+                "global_step": global_step,
+                "answer_loss": answer_epoch_loss,
+                "mc_state_loss": mc_epoch_loss,
+                "tf_q_loss": tf_epoch_loss,
+                "oe_qcar_loss": oe_epoch_loss,
+                "loss_at_epoch_end_beta": (
+                    answer_epoch_loss
+                    + betas["mc"] * mc_epoch_loss
+                    + betas["tf"] * tf_epoch_loss
+                    + betas["oe"] * oe_epoch_loss
+                ),
+                "mc_pairs": int(values[4]),
+                "tf_pairs": int(values[10]),
+                "oe_pairs": int(values[16]),
+                "mc_accuracy": values[5] / values[3] if values[3] else 0.0,
+                "tf_accuracy": values[11] / values[9] if values[9] else 0.0,
+                "oe_mean_delta": values[17] / values[16] if values[16] else 0.0,
+                "oe_positive_delta_rate": values[18] / values[16] if values[16] else 0.0,
+                "beta_mc_end": betas["mc"],
+                "beta_tf_end": betas["tf"],
+                "beta_oe_end": betas["oe"],
+                "grad_norm_mean": values[19] / (max(1, epoch_steps) * world),
+                "epoch_wall_seconds": time.perf_counter() - epoch_start,
+            }
+            print(json.dumps(epoch_summary), flush=True)
         torch.distributed.barrier()
         if rank == 0:
             save_atomic(
