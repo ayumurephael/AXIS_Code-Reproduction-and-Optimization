@@ -1,79 +1,90 @@
-# AXIS 作者兼容训练与公平架构比较协议
+# AXIS 作者兼容训练与公平比较协议
 
-## 结论先行
+## 结论
 
-当前默认的 3-epoch Phase-II 训练应视为低预算复现基线，不应再视为已经匹配作者训练充分度的最终基线。证据是：
+3-epoch Phase-II checkpoint 是低预算回归基线，不是训练充分的正式基线。其完整 validation loss 在 epoch 1/2/3 持续下降；作者候选 epoch-33 在相同 Gemini 协议下显著优于本仓库 epoch-3，并能在作者兼容生成下接近论文。
 
-- epoch 1/2/3 的完整 validation loss 为 0.818750、0.773748、0.761679，第三轮仍在下降；
-- 当前 epoch-3 与服务器作者候选 epoch-33 使用相同 Gemini 协议时，335 个评分维度的配对均分差为 +0.176，95% bootstrap CI 约为 [+0.033, +0.316]；
-- 作者候选 epoch-33 配合 series 推理和 Gemini 得到 4.27/2.97/3.74，接近论文 4.19/3.02/3.65。
+这支持增加训练预算，但不能反推论文一定训练了 33 或 35 epoch。最大 35 epoch 仅用于覆盖已观察到的候选状态，最终 checkpoint 必须由验证集选择。
 
-这支持“3 epoch 很可能训练不足”，但不能反推“论文一定训练了 33 epoch”。作者补充脚本的最大 epoch、实际早停、有效 batch 和验证逻辑彼此存在冲突；候选 checkpoint 的 avg_loss 也不是当前完整 validation loss，不能直接横向比较。
+## 作者接近型基线
 
-## 推荐的作者接近型训练
+`main` 推荐三卡命令：
 
-在 3×A100 40GB 上显式运行，不改变当前已经对齐的优化器参数：
+```bash
+export CUDA_VISIBLE_DEVICES=0,1,2
 
-    torchrun --standalone --nproc_per_node=3 \
-      -m tools.axis_repro.train_phase2_memory_safe_v3 \
-      --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-      --data data/anomaly_llava_training_dataset \
-      --output experiments/reproduction/phase2_author_compatible_seed42 \
-      --epochs 35 \
-      --seed 42 \
-      --lr 1e-4 \
-      --weight-decay 1e-5
+torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.train_phase2_memory_safe_v3 \
+  --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
+  --data data/anomaly_llava_training_dataset \
+  --output experiments/reproduction/phase2_author_seed42 \
+  --epochs 35 \
+  --seed 42 \
+  --lr 1e-4 \
+  --weight-decay 1e-5 \
+  --num-workers 2 \
+  --save-every 5000
+```
 
-选择 35 只是为了覆盖已发现的 epoch-33 候选状态，并不是声称 35 是论文真实轮数。按已有 3-epoch 实测速度线性估算，35 epoch 约需 66 小时；实际提交前应重新估算。
+已有三轮训练在 3×A100 40GB 上约 5.7 小时。按线性比例估算 35 epoch 约 66 小时；实际时间取决于节点、I/O 和验证频率，提交前应做短时 benchmark。
 
-建议对 epoch 3、8、15、20、25、30、33、35 做同一完整 validation 集的 teacher-forced loss。只有 validation loss 可以选 checkpoint；paper140、Gemini 或任何测试分数均不得参与选模。如果最佳点早于 35，应报告实际最佳 epoch，不应为了接近论文表格而选择 epoch 33。
+## 预先声明的选模日程
 
-## 哪些参数先保持不变
+建议在 epoch `3, 8, 15, 20, 25, 30, 33, 35` 上运行同一完整验证集。若训练成本允许，可每 epoch 验证，但三分支必须使用完全相同日程。
 
-- backbone、Phase-I encoder 和 Hint Tuner 初始化逻辑；
-- AdamW；
-- learning rate 1e-4；
-- weight decay 1e-5；
-- 每卡 1 个 series、3 卡 global batch 3；
-- BF16、同一数据版本和同一 generation 配置；
-- beam=5、max_new_tokens=1000；
-- 正式测试使用 series batching + skip-loss；
-- Gemini 使用作者 prompt/rubric，并明确记录中转无 logprobs 时的整数回退。
+唯一主选模指标是完整 1500-series / 3000-QA validation mean teacher-forced loss。同步报告 MC/OE/TF 分层 loss 和免费代理指标，用于发现题型退化，但不得用 paper140、DeepSeek 或 Gemini test score 选 checkpoint。
 
-在没有新的 validation 证据前，不建议同时改 learning rate、batch、seed、epoch 和初始化。那样即使结果接近，也无法判断是哪一个因素产生作用。
+若最佳 validation loss 位于 epoch 35：
 
-## Seed 的两种用途
+- 报告尚未观察到收敛；
+- 在三分支共同扩大上限前，不单独给某一分支追加预算；
+- 不能因为某个较早 checkpoint 更接近论文表格就选择它。
 
-作者补充数据集的实际默认 seed 更接近 42；原三轮复现显式使用 72。因此：
+## 首轮保持不变的参数
 
-1. 作者接近型基线：使用 seed 42，目的是提高与作者运行路径的可比性；
-2. 架构公平比较：baseline 和每个改进分支必须使用完全相同的 split manifest 和 seed；
-3. 稳健性结论：至少运行 3 个预先声明的 seed，且应包含 42 和 72，报告 paired mean 与置信区间。
+- 同一 backbone、Phase-I encoder checkpoint 和初始化逻辑；
+- AdamW、LR `1e-4`、weight decay `1e-5`；
+- 每卡 1 series、三卡 global batch 3、gradient accumulation 1；
+- BF16、同一数据版本和 manifest；
+- beam 5、`max_new_tokens=1000`；
+- 正式测试 `paper140 + batching=series + skip-loss`；
+- 同一 judge prompt、model、endpoint 语义和评分脚本 commit。
 
-不能在看到 test/Gemini 分数后挑选 seed。
+不要在一次实验中同时改变学习率、batch、seed、epoch 上限和初始化；否则无法归因。
 
-## 三分支公平比较
+## Seed
 
-main、architecture_redesign 和 loss_resesign 必须共同固定：
+- 作者接近型单次基线使用 seed 42，因为作者补充数据路径更接近该随机状态。
+- 三分支公平比较必须直接复用同一 seed-42 split manifest。
+- 稳健性结论至少使用三个预先声明 seed，并包含 42 与 72；报告 paired mean、分题型结果和置信区间。
+- 禁止观察 test/judge 分数后选择 seed。
 
-- Phase-I checkpoint SHA-256；
-- train/validation manifest；
-- seed；
-- 最大 epoch 与 validation checkpoint 日程；
-- global batch、学习率、weight decay；
-- checkpoint 选择规则；
-- paper140 manifest；
-- series-batched generation；
-- Gemini prompt、model id、endpoint 语义和评分脚本版本。
+单次 seed-42 结果用于论文接近性检查；多 seed 结果用于方法改进的稳健性主张，两种目标要区分。
 
-改进分支只能改变其声明的架构或损失因素。建议先在 main 完成长预算 seed-42 基线，再用相同预算运行两个改进分支；不要拿改进分支的 3-epoch 结果与 main 的 35-epoch 结果比较。
+## 三分支对照
+
+`main`、`loss_resesign`、`architecture_redesign` 共同固定 Phase-I SHA-256、数据、manifest、seed、global batch、优化器、训练上限、验证日程、选模规则、paper140、生成协议和 judge。每个改进分支只能改变 `BRANCH_PROFILE.md` 声明的因素。
+
+推荐顺序：
+
+1. 完成 `main` seed-42 长预算训练和验证选模；
+2. 冻结所有公共配置及哈希；
+3. 对两个改进分支复用相同训练预算；
+4. 用免费验证指标筛查实现错误和明显退化；
+5. 对每个分支验证选出的唯一 checkpoint 生成 paper140；
+6. 日常/预筛使用 DeepSeek，最终一次使用 Gemini；
+7. 报告逐题 paired bootstrap，并保留分题型结果。
+
+不能拿改进分支的 3-epoch 结果与 `main` 的 35-epoch 结果比较。
 
 ## 验收层次
 
-1. 每轮：训练 loss、完整 validation NLL、题型分层 NLL；
-2. 候选 checkpoint：MC/TF forced-choice、OE token/numeric 指标与已有因果诊断；
-3. 最终唯一 checkpoint：paper140 series generation；
-4. 最后一次：Gemini 335 维完整评分；
-5. 任何架构结论：逐题 paired bootstrap，并同时报告生成质量和 evidence dependence。
+1. 训练过程：loss、非有限值、梯度、参数更新范围、checkpoint 完整性；
+2. 每个候选：完整 validation loss 和分题型 loss；
+3. 唯一候选：forced-choice、数值/文本代理和 evidence intervention；
+4. 正式生成：paper140、series batching、140/140 审计；
+5. 日常评测：同一 DeepSeek 配置；
+6. 最终评测：Gemini author mode、335/335 审计；
+7. 方法结论：paired 统计、生成质量和 evidence dependence 同时报告。
 
-作者候选 checkpoint 可用于验证推理与评测协议，但不能替代从同一训练协议得到的三分支公平 checkpoint。
+作者候选 checkpoint 可用于验证加载、推理和评测协议，但不能作为三个分支中的某一分支训练结果参与公平比较。
