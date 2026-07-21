@@ -61,6 +61,9 @@ def result_row(row, dimension, spec, prompt, primary, score, method, probs, samp
         "system_fingerprint": primary.get("system_fingerprint"),
         "usage": primary.get("usage"),
         "judge_max_tokens": g.MAX_TOKENS,
+        "endpoint_host": g.urlparse(g.API_ENDPOINT).netloc,
+        "logprobs_requested": True,
+        "logprobs_returned": method == "final_score_top_logprobs",
     }
 
 
@@ -97,6 +100,10 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument("--pending")
     parser.add_argument("--model", default="deepseek-v4-pro")
+    parser.add_argument(
+        "--endpoint", default=os.getenv("DEEPSEEK_BASE_URL", g.API_ENDPOINT),
+        help="OpenAI-compatible chat/completions endpoint.",
+    )
     parser.add_argument("--fallback-samples", type=int, default=20)
     parser.add_argument(
         "--max-tokens", type=int, default=4096,
@@ -107,6 +114,7 @@ def main() -> None:
     parser.add_argument("--fallback-workers", type=int, default=8)
     args = parser.parse_args()
     g.MAX_TOKENS = args.max_tokens
+    g.API_ENDPOINT = args.endpoint
 
     key = os.getenv("DEEPSEEK_API_KEY")
     if not key:

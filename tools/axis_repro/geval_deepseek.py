@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import concurrent.futures
@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .common import append_jsonl, read_jsonl
 
@@ -19,6 +20,7 @@ from .common import append_jsonl, read_jsonl
 # overrides this value explicitly; the module-level default keeps legacy CLIs
 # backwards compatible.
 MAX_TOKENS = 1200
+API_ENDPOINT = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/chat/completions")
 
 RUBRICS = {
  "multiple_choice": {
@@ -80,7 +82,7 @@ def api_call(key, model, prompt, temperature, logprobs):
             "temperature": temperature, "max_tokens": MAX_TOKENS,
             "thinking": {"type": "enabled", "level": "high"}}
     if logprobs: body.update({"logprobs": True, "top_logprobs": 20})
-    req = urllib.request.Request("https://api.deepseek.com/chat/completions",
+    req = urllib.request.Request(API_ENDPOINT,
         data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     for attempt in range(6):
         try:
@@ -131,14 +133,19 @@ def judge_one(key, model, row, dim, spec, fallback_samples):
             "dimension": dim, "weight": weight, "score": score, "method": method,
             "distribution": probs, "fallback_scores": samples,
             "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "model": model,
-            "system_fingerprint": primary.get("system_fingerprint"), "usage": primary.get("usage")}
+            "system_fingerprint": primary.get("system_fingerprint"), "usage": primary.get("usage"),
+            "endpoint_host": urlparse(API_ENDPOINT).netloc, "logprobs_requested": True,
+            "logprobs_returned": bool(primary.get("choices", [{}])[0].get("logprobs", {}).get("content"))}
 
 
 def main():
+    global API_ENDPOINT
     p = argparse.ArgumentParser()
     p.add_argument("--predictions", required=True); p.add_argument("--output", required=True)
     p.add_argument("--model", default="deepseek-v4-pro"); p.add_argument("--fallback-samples", type=int, default=20)
+    p.add_argument("--endpoint", default=os.getenv("DEEPSEEK_BASE_URL", API_ENDPOINT))
     p.add_argument("--max-rows", type=int); a = p.parse_args()
+    API_ENDPOINT = a.endpoint
     key = os.getenv("DEEPSEEK_API_KEY")
     if not key: raise RuntimeError("Set DEEPSEEK_API_KEY in the process environment; never place it in arguments or files")
     rows = read_jsonl(a.predictions)[:a.max_rows]; out = Path(a.output); out.parent.mkdir(parents=True, exist_ok=True)

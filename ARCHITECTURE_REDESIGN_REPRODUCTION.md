@@ -1,44 +1,19 @@
-# AXIS architecture redesign reproduction
+# AXIS 架构改进分支复现协议
 
-This branch extends the source-likelihood-ratio Phase-II objective with three
-independent architecture factors. The formal model uses all three factors and is
-trained from the same released Phase-I time-series encoder with a fresh Hint
-Tuner. It is not warm-started from the loss-only Phase-II checkpoint.
+本分支在 coherent counterfactual state objective 上实现三个独立架构因素。正式 bundle 使用 `full`；因子归因必须用相同目标下的 2×2×2 变体，而不是直接把 `full` 与 `main` 的原始目标比较。
 
-## Formal architecture
+## 正式架构
 
-1. **QK-Norm on prototype cross-attention only.** Q and K are split into heads,
-   L2-normalized along the head dimension, and scored as
-   `softmax(g * Q_hat K_hat^T) V`. V is never normalized. Each
-   `MultiheadAttention` module owns one learnable scalar `g`, shared by all
-   heads. Rank 0 computes `L = ceil(P97.5)` over Local hint lengths in the
-   seed-72 28,500-series training split and initializes
-   `g = log2(L^2 - L)`; the integer is broadcast to all three ranks and stored
-   in checkpoint metadata.
+1. **Prototype cross-attention QK-Norm**：Q/K 按 head 维 L2 归一化，V 不归一化；每个 attention 拥有可学习 scale。训练 split 上的 Local hint 长度统计决定初始化序列长度，并写入 checkpoint metadata。
+2. **Continuous bypass + prototype sidecar**：encoder state 的连续投影作为主路径，prototype attention 作为门控残差 sidecar；gate bias 默认 `-2`。
+3. **Direct task prompt**：30 个 fixed/task 位置由直接可学习的 `[1,30,d_llm]` 参数填充，不实例化旧 fixed-query prototype attention。
 
-2. **Continuous bypass with prototype sidecar.** For each selected encoder state
-   `H_t`, the direct path is `C_t = W_c H_t`. The prototype path remains
-   `P_t = Attn(W_local H_t, S_proto, S_proto)`. A vector gate and residual
-   fusion produce
-   `LN(C_t + sigmoid(W_g [C_t; P_t]) * P_t)`. `W_g` is zero-initialized with
-   bias -2, so training starts from a continuous-path-dominant state while
-   retaining a trainable semantic sidecar.
+LLM 和 Phase-I encoder 冻结。训练目标同时包含真实上下文 answer NLL 与 factual/counterfactual state CE。
 
-3. **Direct task soft prompt.** The 30 fixed/task positions are filled by one
-   directly learned `[1, 30, d_llm]` parameter. The old fixed-query-to-prototype
-   attention path is not instantiated in the formal model, preventing unused
-   trainable parameters under DDP.
+## 变体
 
-The LLM and Phase-I encoder remain frozen. Only the redesigned Perceiver/Hint
-Tuner is optimized. The objective remains full-answer NLL plus source-specific
-likelihood-ratio supervision with beta 1 and margin ln(2).
-
-## Factorial ablation presets
-
-The CLI option `--architecture-variant` supports all 2x2x2 combinations:
-
-| Variant | QK-Norm | Continuous bypass + sidecar | Direct task prompt |
-| --- | ---: | ---: | ---: |
+| `--architecture-variant` | QK-Norm | bypass/sidecar | direct task prompt |
+|---|---:|---:|---:|
 | `loss_only` | 0 | 0 | 0 |
 | `qk_only` | 1 | 0 | 0 |
 | `bypass_only` | 0 | 1 | 0 |
@@ -48,52 +23,92 @@ The CLI option `--architecture-variant` supports all 2x2x2 combinations:
 | `bypass_task_prompt` | 0 | 1 | 1 |
 | `full` | 1 | 1 | 1 |
 
-The current authorized formal run is `full` only. The other presets are
-implemented for later ablation runs and do not authorize extra GPU training.
+## 1. 构造并审计 counterfactual index
 
-## Formal three-GPU training
-
-Run only on the approved GPU server, with GPUs 0, 1, and 2 when they are free:
+必须与 `loss_resesign` 复用同一个 seed-42 index 文件和 SHA-256；不要在分支间分别生成不同 donor 集：
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
-  -m tools.axis_repro.train_phase2_loss_redesign \
-  --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
-  --counterfactual-index experiments/reproduction/loss_redesign/counterfactual_index.json \
+export CUDA_VISIBLE_DEVICES=0
+python -m tools.axis_repro.build_counterfactual_index \
   --data data/anomaly_llava_training_dataset \
-  --output experiments/reproduction/architecture_redesign/full/phase2 \
-  --architecture-variant full \
-  --epochs 3 --lr 1e-4 --weight-decay 1e-5 --seed 72 \
-  --num-workers 2 --save-every 5000 --beta 1.0
+  --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
+  --output experiments/reproduction/shared_author42/counterfactual_index.json \
+  --seed 42 --train-ratio 0.95 --tau 0.25 \
+  --donor-top-m 1 --gamma-percentile 5
+
+python -m tools.axis_repro.audit_counterfactual_index \
+  --data data/anomaly_llava_training_dataset \
+  --index experiments/reproduction/shared_author42/counterfactual_index.json \
+  --seed 42 --train-ratio 0.95 --expected-donor-top-m 1 \
+  --output experiments/reproduction/shared_author42/counterfactual_index_audit.json
 ```
 
-Do not pass `--qk-norm-seq-len` for formal training: it must be calculated from
-the fixed training split. Read the resulting integer from
-`reproduction_meta.architecture.qk_norm_seq_len` and pass that exact value to
-all validation and test inference commands.
+审计通过后冻结 index 与 Phase-I hash。
 
-## Selection and evaluation
+## 2. 多卡 smoke
 
-1. Strip optimizer state from all three epoch checkpoints. The stripping helper
-   preserves `reproduction_meta`.
-2. Run complete 1,500-series / 3,000-QA teacher-forced validation for epochs
-   Audit every stripped checkpoint before inference:
-   ```bash
-   python -m tools.axis_repro.audit_architecture_checkpoint \
-     --checkpoint epoch_1_inference.pth --expected-variant full
-   ```
-   Repeat for epochs 2 and 3.
+```bash
+export CUDA_VISIBLE_DEVICES=0,1,2
 
-   1, 2, and 3 on three GPUs, always with:
-   `--architecture-variant full --qk-norm-seq-len <training-L> --gate-bias -2`.
-3. Audit each validation output and select minimum overall mean teacher-forced
-   NLL without using test or judge scores.
-4. Run per-record full284 inference using the selected checkpoint, filter the
-   fixed paper140 manifest, and audit coverage.
-5. Run strict Appendix-E DeepSeek-v4-pro G-Eval and Table 1 aggregation.
+torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.train_phase2_architecture_redesign \
+  --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
+  --counterfactual-index experiments/reproduction/shared_author42/counterfactual_index.json \
+  --data data/anomaly_llava_training_dataset \
+  --output experiments/reproduction/architecture_redesign/full/smoke \
+  --architecture-variant full \
+  --epochs 1 --max-steps 2 --save-every 0 --seed 42
+```
 
-Training, validation, full284 inference, and every DeepSeek-v4-pro G-Eval API
-request must run on the approved GPU server. The local CPU machine is used only
-for code, unit tests, secure orchestration, and artifact transfer. Credentials
-are injected into the remote judge subprocess from a protected file and must
-never enter commands, logs, checkpoints, manifests, or the repository.
+检查三 rank、finite loss/gradient、只更新声明参数、index/checkpoint metadata 一致。smoke 产物不能用于评分。
+
+## 3. 正式长预算训练
+
+```bash
+export CUDA_VISIBLE_DEVICES=0,1,2
+
+torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.train_phase2_architecture_redesign \
+  --phase1 experiments/checkpoints/pretrain_single/pretrain_checkpoint_best.pth \
+  --counterfactual-index experiments/reproduction/shared_author42/counterfactual_index.json \
+  --data data/anomaly_llava_training_dataset \
+  --output experiments/reproduction/architecture_redesign/full/phase2_author42 \
+  --architecture-variant full \
+  --epochs 35 --seed 42 \
+  --local-lr 5e-5 --attention-lr 2e-5 --prompt-lr 5e-5 \
+  --weight-decay 1e-5 --gradient-clip 1.0 \
+  --beta 0.2 --beta-warmup-ratio 0.1 \
+  --num-workers 2 --save-every 5000
+```
+
+训练时不传 `--qk-norm-seq-len`，由固定 training split 计算并写入 `reproduction_meta.architecture.qk_norm_seq_len`。
+
+## 4. checkpoint 审计、验证和选模
+
+每个预先声明的候选先运行：
+
+```bash
+python -m tools.axis_repro.audit_architecture_checkpoint \
+  --checkpoint <checkpoint.pth> --expected-variant full
+
+python -m tools.axis_repro.audit_loss_objective_checkpoint \
+  --checkpoint <checkpoint.pth> --expected-donor-top-m 1
+```
+
+随后按 `REPRODUCTION.md` 在同一 1500-series 验证集上计算完整 loss。推理命令必须额外传入：
+
+```text
+--architecture-variant full
+--qk-norm-seq-len <checkpoint metadata 中的精确整数>
+--gate-bias -2
+```
+
+只按预先声明的完整 validation 指标选择 checkpoint，不能用 test/judge score。
+
+## 5. 正式生成与评测
+
+对验证选出的唯一 checkpoint 运行 `paper140 + batching=series + skip-loss`，并传入同一组 architecture 参数。日常使用 DeepSeek v4-pro，最终正式使用 Gemini 2.5 Pro author mode。命令、审计和 335 维完整度要求见 `REPRODUCTION.md` 与 `EVALUATION_PROTOCOL.md`。
+
+## 因子归因
+
+若研究问题是“架构是否有效”，至少共同训练 `loss_only` 与 `full`；严谨定位三个因素则运行预先声明的 2×2×2 设计。所有变体复用同一 index、初始化、seed、预算和选模日程。不要把 bundle 相对 `main` 的差异全部归因于某一个架构模块。
