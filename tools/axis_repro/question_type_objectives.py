@@ -72,6 +72,8 @@ _TF_NEGATIVE_PREDICATES = tuple(
         r"\babsence\s+of\s+anomal",
         r"\bfree\s+from\s+anomal",
         r"\bdoes\s+not\s+contain\b[^.!?]{0,30}\banomal",
+        r"\bno\s+evidence\s+of\s+anomalous\s+(?:behavior|behaviour|patterns?)\b",
+        r"\bdoes\s+not\s+(?:display|show|exhibit)\b[^.!?]{0,40}\bevidence\s+of\s+anomal",
         r"\bconsistent\s+with\s+normal\b",
         r"\bnormal\s+(?:behavior|behaviour|fluctuations?|pattern)\b",
         r"\bwindow\s+is\s+normal\b",
@@ -96,7 +98,8 @@ _TF_AMBIGUOUS_SCOPE = tuple(
     for pattern in (
         r"\b(?:no|does\s+not)\b[^.!?]{0,120}\b(?:indicat(?:e|es|ing|ive)|suggests?)\b[^.!?]{0,80}\b(?:presence\s+of\s+)?(?:an\s+)?anomal",
         r"\bno\s+evidence\b[^.!?]{0,100}\bpresence\s+of\s+(?:an\s+)?anomal",
-        r"\b(?:rather\s+than|unlikely\s+to\s+be\s+explained\s+by)\s+normal\b",
+        r"\brather\s+than\b[^.!?]{0,100}\bnormal\b",
+        r"\bunlikely\s+to\s+be\s+explained\s+by\s+normal\b",
     )
 )
 

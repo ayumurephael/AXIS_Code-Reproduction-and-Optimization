@@ -65,6 +65,9 @@ class SemanticRuleTests(unittest.TestCase):
         self.assertIsNone(parse_tf_state_predicate(
             "The abrupt increase is anomalous rather than normal fluctuation."
         ))
+        self.assertEqual(parse_tf_state_predicate(
+            "No evidence of anomalous behavior is present in the window."
+        ), 0)
         valid = build_supervision_record(
             {
                 "question_type": "true_false",
