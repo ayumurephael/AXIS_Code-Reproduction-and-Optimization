@@ -28,24 +28,14 @@ _TYPE_ALIASES = {
     "oe": "open_ended",
 }
 
-_TF_ATTRIBUTE_WORDS = {
-    "upward", "downward", "spike", "drop", "shift", "drift",
-    "amplitude", "periodic", "center", "centre", "boundary",
-    "sustained", "consecutive", "duration", "magnitude", "step",
-    "point", "position", "location", "increase", "decrease",
-}
-
 _NEGATIVE_STATE_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
-        r"\bno\s+(?:clear\s+|significant\s+|obvious\s+)?anomal(?:y|ies|ous\s+(?:behavior|behaviour|pattern))\b",
-        r"\bno\s+evidence\s+of\s+(?:an\s+)?anomal",
+        r"\b(?:no|not|without|does\s+not|do\s+not|did\s+not|lacks?|lacking)\b[^.!?]{0,180}\b(?:anomal\w*|abnormal\w*|irregular\s+(?:patterns?|behavio(?:r|ur)|fluctuations?|deviations?)|unusual\s+(?:patterns?|behavio(?:r|ur)|fluctuations?|deviations?))\b",
         r"\babsence\s+of\s+(?:an\s+)?anomal",
         r"\bfree\s+from\s+anomal",
-        r"\bdoes\s+not\s+(?:contain|show|exhibit|indicate)\b[^.!?]{0,50}\banomal",
-        r"\bnot\s+anomalous\b",
         r"\bconsistent\s+with\s+normal\b",
-        r"\bnormal\s+(?:behavior|behaviour|fluctuations?|pattern)\b",
+        r"\bnormal\s+(?:behavior|behaviour|fluctuations?|patterns?)\b",
         r"\bappears?\s+(?:to\s+be\s+)?normal\b",
         r"\bwindow\s+is\s+normal\b",
     )
@@ -61,7 +51,10 @@ _POSITIVE_STATE_PATTERNS = tuple(
         r"\banomal(?:y|ies)\s+(?:is|are|was|were)\s+detected\b",
         r"\bdetected\s+(?:an\s+)?anomal",
         r"\bsignificant\s+anomal(?:y|ies|ous\s+(?:behavior|behaviour|pattern))\b",
-        r"\babnormal\s+(?:behavior|behaviour|pattern|fluctuation)\b",
+        r"\b(?:anomalous|abnormal)\s+(?:patterns?|behavio(?:r|ur)|events?|activities|fluctuations?|deviations?|characteristics?)\b",
+        r"\b(?:irregular|unusual)\s+(?:patterns?|behavio(?:r|ur)|fluctuations?|deviations?)\b",
+        r"\batypical\b",
+        r"\bnot\s+(?:(?:consistent|in\s+line)\s+with|(?:typical|characteristic)\s+of)\s+(?:the\s+)?(?:normal|typical|stable)\b",
     )
 )
 
@@ -110,19 +103,24 @@ _OE_QUESTION_ASSERTIONS = tuple(
         r"\bgiven\s+the\s+presence\b",
         r"\b(?:the|this|that)\s+(?:clear\s+|observed\s+|detected\s+|local\s+)?anomal(?:y|ies)\b",
         r"\b(?:the|this|that)\s+(?:upward|downward|spike|drop|shift|drift)\b",
+        r"\bdetected\s+anomal(?:y|ies)\b",
+        r"\bthe\s+anomalous\s+patterns?\s+present\b",
     )
 )
 
-_OE_NEUTRAL_QUESTION_PATTERNS = tuple(
-    re.compile(pattern, re.IGNORECASE)
-    for pattern in (
-        r"\bwhether\b[^?]{0,120}\banomal",
-        r"\b(?:is|are)\s+there\b[^?]{0,100}\banomal",
-        r"\bdoes\b[^?]{0,100}\bcontain\b[^?]{0,50}\banomal",
-        r"\b(?:detect|identify|find)\b[^?]{0,80}\bany\s+anomal",
-        r"\b(?:assess|determine|evaluate|analy[sz]e)\b[^?]{0,120}\b(?:anomal|normal)",
-        r"\b(?:anomalies|anomaly)\s+(?:are|is)\s+present\b",
-    )
+_OE_SPECIFIC_QUESTION = re.compile(
+    r"\b(?:upward|downward|spikes?|drops?|shift|drift|amplitude|convex|concave|"
+    r"decline|increase|decrease|shake|periodic|sustained|abrupt|sharp|rapid)\b",
+    re.IGNORECASE,
+)
+_OE_GENERIC_QUESTION_CUE = re.compile(
+    r"\b(?:whether|identify|characterize|assess|determine|evaluate|analy[sz]e|"
+    r"what\s+evidence|how\s+would|how\s+can|presence\s+or\s+absence)\b",
+    re.IGNORECASE,
+)
+_OE_GENERIC_STATE_CUE = re.compile(
+    r"\b(?:anomal(?:y|ies|ous)|abnormal)\b",
+    re.IGNORECASE,
 )
 
 
@@ -199,9 +197,16 @@ def oe_answer_format_valid(answer: str) -> bool:
 
 def oe_question_counterfactual_valid(question: str) -> bool:
     text = str(question).strip()
-    if not text or _matches_any(_OE_QUESTION_ASSERTIONS, text):
+    if (
+        not text
+        or _matches_any(_OE_QUESTION_ASSERTIONS, text)
+        or _OE_SPECIFIC_QUESTION.search(text)
+    ):
         return False
-    return _matches_any(_OE_NEUTRAL_QUESTION_PATTERNS, text)
+    return bool(
+        _OE_GENERIC_QUESTION_CUE.search(text)
+        and _OE_GENERIC_STATE_CUE.search(text)
+    )
 
 
 def build_supervision_record(window: dict[str, Any], counterfactual: dict[str, Any]) -> dict[str, Any]:

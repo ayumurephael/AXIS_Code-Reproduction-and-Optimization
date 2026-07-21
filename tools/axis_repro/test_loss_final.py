@@ -94,6 +94,18 @@ class SemanticRuleTests(unittest.TestCase):
         self.assertEqual(parse_oe_answer_state("No anomaly is present. Values are smooth."), 0)
         self.assertTrue(oe_question_counterfactual_valid("Assess whether anomalies are present in this window."))
         self.assertFalse(oe_question_counterfactual_valid("Considering the presence of a clear anomaly, explain it."))
+        self.assertFalse(oe_question_counterfactual_valid(
+            "Determine whether the observed sharp downward spike is anomalous."
+        ))
+        self.assertTrue(oe_question_counterfactual_valid(
+            "How would you identify and characterize any abnormal patterns in this window?"
+        ))
+        self.assertEqual(parse_oe_answer_state(
+            "There is no evidence of a significant upward spike anomaly. Values are smooth."
+        ), 0)
+        self.assertEqual(parse_oe_answer_state(
+            "The window exhibits a clear unusual pattern. Values change atypically."
+        ), 1)
         valid = build_supervision_record(
             {
                 "question_type": "open_ended",
