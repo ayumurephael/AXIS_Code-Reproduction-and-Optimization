@@ -81,6 +81,9 @@ _OE_HYPOTHETICAL_SPECIFIC_PATTERNS = tuple(
     for pattern in (
         r"\b(?:the\s+)?possibility\s+of\b[^,?.]{0,160}",
         r"\bany\s+(?:abrupt|sharp|rapid|sudden|sustained|upward|downward|spikes?|drops?|shifts?|declines?|increases?|decreases?)\b[^,?.]{0,100}",
+        r"\bdistinguish\s+between\b[^,?.]{0,140}\b(?:normal|natural|typical)\b[^,?.]{0,80}",
+        r"\bconsidering\s+both\s+(?!the\s)(?![^,?.]{0,120}\b(?:observed|detected|occurrence|presence)\b)[^,?.]{0,120}",
+        r"\bpossible\s+(?:shift|drift|change)\s+in\s+(?:the\s+)?normal\s+trend\b",
     )
 )
 
@@ -140,6 +143,10 @@ _OE_QUESTION_ASSERTIONS = tuple(
         r"\bdetected\s+anomal(?:y|ies)\b",
         r"\bdetected\s+(?:pattern\s+)?change\b",
         r"\bthe\s+anomalous\s+patterns?\s+present\b",
+        r"\b(?:the|this|that)\s+anomalous\s+(?:patterns?|behavio(?:r|ur))\b",
+        r"\bidentification\s+of\s+multiple\s+(?:distinct\s+)?anomal",
+        r"\bsingle\s+(?:complex\s+)?anomal(?:y|ies)\s+or\s+multiple\s+(?:distinct\s+)?anomal",
+        r"\btypes?\s+of\s+anomal(?:y|ies)\s+present\b",
     )
 )
 
