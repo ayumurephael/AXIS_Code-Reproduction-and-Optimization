@@ -145,8 +145,6 @@ def _mask_matches(patterns: Iterable[re.Pattern[str]], text: str) -> str:
 
 def parse_tf_state_predicate(question: str) -> int | None:
     text = str(question).lower()
-    if any(re.search(rf"\b{re.escape(word)}\b", text) for word in _TF_ATTRIBUTE_WORDS):
-        return None
     negative = _matches_any(_TF_NEGATIVE_PREDICATES, text)
     positive = _matches_any(
         _TF_POSITIVE_PREDICATES,

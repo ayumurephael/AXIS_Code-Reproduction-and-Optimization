@@ -55,6 +55,10 @@ class SemanticRuleTests(unittest.TestCase):
         self.assertEqual(parse_tf_state_predicate("True or False: The window contains an anomaly."), 1)
         self.assertEqual(parse_tf_state_predicate("The window is free from anomalies."), 0)
         self.assertIsNone(parse_tf_state_predicate("The anomaly is a downward spike near the center."))
+        self.assertEqual(
+            parse_tf_state_predicate("The window contains an anomaly characterized by a downward spike."),
+            1,
+        )
         valid = build_supervision_record(
             {
                 "question_type": "true_false",
