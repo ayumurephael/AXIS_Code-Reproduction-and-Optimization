@@ -58,6 +58,14 @@ _POSITIVE_STATE_PATTERNS = tuple(
     )
 )
 
+_OE_POSITIVE_CONTRAST_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\bnot\s+(?:(?:consistent|in\s+line)\s+with|(?:typical|characteristic)\s+of)\s+(?:the\s+)?(?:normal|typical|stable)\b",
+        r"\bindicative\s+of\s+(?:an\s+)?anomal",
+    )
+)
+
 _TF_NEGATIVE_PREDICATES = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
@@ -178,8 +186,12 @@ def parse_oe_answer_state(answer: str) -> int | None:
     )
     if not text:
         return None
-    negative = _matches_any(_NEGATIVE_STATE_PATTERNS, text)
-    positive = _matches_any(
+    positive_contrast = _matches_any(_OE_POSITIVE_CONTRAST_PATTERNS, text)
+    negative = _matches_any(
+        _NEGATIVE_STATE_PATTERNS,
+        _mask_matches(_OE_POSITIVE_CONTRAST_PATTERNS, text),
+    )
+    positive = positive_contrast or _matches_any(
         _POSITIVE_STATE_PATTERNS,
         _mask_matches(_NEGATIVE_STATE_PATTERNS, text),
     )

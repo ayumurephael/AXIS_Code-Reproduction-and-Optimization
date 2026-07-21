@@ -106,6 +106,9 @@ class SemanticRuleTests(unittest.TestCase):
         self.assertEqual(parse_oe_answer_state(
             "The window exhibits a clear unusual pattern. Values change atypically."
         ), 1)
+        self.assertEqual(parse_oe_answer_state(
+            "The sharp reversal is not characteristic of normal fluctuations."
+        ), 1)
         valid = build_supervision_record(
             {
                 "question_type": "open_ended",
