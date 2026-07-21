@@ -91,6 +91,15 @@ _TF_POSITIVE_PREDICATES = tuple(
     )
 )
 
+_TF_AMBIGUOUS_SCOPE = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b(?:no|does\s+not)\b[^.!?]{0,120}\b(?:indicat(?:e|es|ing|ive)|suggests?)\b[^.!?]{0,80}\b(?:presence\s+of\s+)?(?:an\s+)?anomal",
+        r"\bno\s+evidence\b[^.!?]{0,100}\bpresence\s+of\s+(?:an\s+)?anomal",
+        r"\b(?:rather\s+than|unlikely\s+to\s+be\s+explained\s+by)\s+normal\b",
+    )
+)
+
 _OE_QUESTION_ASSERTIONS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
@@ -145,6 +154,8 @@ def _mask_matches(patterns: Iterable[re.Pattern[str]], text: str) -> str:
 
 def parse_tf_state_predicate(question: str) -> int | None:
     text = str(question).lower()
+    if _matches_any(_TF_AMBIGUOUS_SCOPE, text):
+        return None
     negative = _matches_any(_TF_NEGATIVE_PREDICATES, text)
     positive = _matches_any(
         _TF_POSITIVE_PREDICATES,

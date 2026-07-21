@@ -59,6 +59,12 @@ class SemanticRuleTests(unittest.TestCase):
             parse_tf_state_predicate("The window contains an anomaly characterized by a downward spike."),
             1,
         )
+        self.assertIsNone(parse_tf_state_predicate(
+            "The window shows no deviation that would indicate the presence of an anomaly."
+        ))
+        self.assertIsNone(parse_tf_state_predicate(
+            "The abrupt increase is anomalous rather than normal fluctuation."
+        ))
         valid = build_supervision_record(
             {
                 "question_type": "true_false",
