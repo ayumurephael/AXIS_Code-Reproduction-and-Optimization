@@ -46,6 +46,9 @@ _POSITIVE_STATE_PATTERNS = tuple(
     for pattern in (
         r"\bthere\s+(?:is|are)\b[^.!?]{0,45}\banomal(?:y|ies)\b",
         r"\b(?:an\s+)?anomal(?:y|ies)\s+(?:is|are)\s+present\b",
+        r"\b(?:an\s+)?anomal(?:y|ies)\s+(?:is|are)\s+(?:clearly\s+)?evident\b",
+        r"\b(?:demonstrates?|displays?|represents?|constitutes?|suggests?)\b[^.!?]{0,80}\b(?:an\s+)?anomal(?:y|ies)\b",
+        r"\b(?:supports?|indicat(?:e|es|ing))\b[^.!?]{0,80}\bpresence\s+of\s+(?:an\s+)?anomal",
         r"\b(?:contains?|shows?|exhibits?|indicates?|reveals?)\b[^.!?]{0,45}\banomal(?:y|ies|ous)\b",
         r"\bevidence\s+of\s+(?:an\s+)?anomal",
         r"\banomal(?:y|ies)\s+(?:is|are|was|were)\s+detected\b",
@@ -63,6 +66,25 @@ _OE_POSITIVE_CONTRAST_PATTERNS = tuple(
     for pattern in (
         r"\bnot\s+(?:(?:consistent|in\s+line)\s+with|(?:typical|characteristic)\s+of)\s+(?:the\s+)?(?:normal|typical|stable)\b",
         r"\bindicative\s+of\s+(?:an\s+)?anomal",
+        r"\b(?:rather\s+than|as\s+opposed\s+to)\s+(?:a\s+)?(?:normal|natural|typical)\s+fluctuation",
+        r"\bnot\s+(?:part\s+of|consistent\s+with)\s+(?:the\s+)?(?:normal|natural|typical)\s+fluctuations?",
+        r"\b(?:atypical|uncharacteristic)\s+of\s+(?:normal|natural|typical)\s+fluctuations?",
+    )
+)
+
+_OE_HYPOTHETICAL_SPECIFIC_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b(?:the\s+)?possibility\s+of\b[^,?.]{0,160}",
+        r"\bany\s+(?:abrupt|sharp|rapid|sudden|sustained|upward|downward|spikes?|drops?|shifts?|declines?|increases?|decreases?)\b[^,?.]{0,100}",
+    )
+)
+
+_OE_HYPOTHETICAL_ANSWER_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\b(?:to\s+determine|determin(?:e|ing)|assess(?:ing)?|evaluat(?:e|ing))\s+(?:whether|if)\b[^.!?]{0,160}",
+        r"\b(?:whether|if)\b[^.!?]{0,100}\b(?:anomal(?:y|ies)\s+(?:is|are)\s+present|there\s+(?:is|are)\s+(?:an\s+)?anomal)",
     )
 )
 
@@ -186,14 +208,15 @@ def parse_oe_answer_state(answer: str) -> int | None:
     )
     if not text:
         return None
-    positive_contrast = _matches_any(_OE_POSITIVE_CONTRAST_PATTERNS, text)
+    assertion_text = _mask_matches(_OE_HYPOTHETICAL_ANSWER_PATTERNS, text)
+    positive_contrast = _matches_any(_OE_POSITIVE_CONTRAST_PATTERNS, assertion_text)
     negative = _matches_any(
         _NEGATIVE_STATE_PATTERNS,
-        _mask_matches(_OE_POSITIVE_CONTRAST_PATTERNS, text),
+        _mask_matches(_OE_POSITIVE_CONTRAST_PATTERNS, assertion_text),
     )
     positive = positive_contrast or _matches_any(
         _POSITIVE_STATE_PATTERNS,
-        _mask_matches(_NEGATIVE_STATE_PATTERNS, text),
+        _mask_matches(_NEGATIVE_STATE_PATTERNS, assertion_text),
     )
     if negative == positive:
         return None
@@ -209,10 +232,11 @@ def oe_answer_format_valid(answer: str) -> bool:
 
 def oe_question_counterfactual_valid(question: str) -> bool:
     text = str(question).strip()
+    assertion_text = _mask_matches(_OE_HYPOTHETICAL_SPECIFIC_PATTERNS, text)
     if (
         not text
         or _matches_any(_OE_QUESTION_ASSERTIONS, text)
-        or _OE_SPECIFIC_QUESTION.search(text)
+        or _OE_SPECIFIC_QUESTION.search(assertion_text)
     ):
         return False
     return bool(

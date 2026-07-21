@@ -109,6 +109,26 @@ class SemanticRuleTests(unittest.TestCase):
         self.assertEqual(parse_oe_answer_state(
             "The sharp reversal is not characteristic of normal fluctuations."
         ), 1)
+        self.assertEqual(parse_oe_answer_state(
+            "The observed pattern demonstrates a genuine anomaly."
+        ), 1)
+        self.assertEqual(parse_oe_answer_state(
+            "The window displays a clear anomaly. This is atypical of normal fluctuations."
+        ), 1)
+        self.assertIsNone(parse_oe_answer_state(
+            "To determine if an anomaly is present, inspect the series. Values change smoothly."
+        ))
+        self.assertTrue(oe_question_counterfactual_valid(
+            "How would you identify any anomalous patterns, considering the possibility "
+            "of gradual changes followed by abrupt shifts?"
+        ))
+        self.assertTrue(oe_question_counterfactual_valid(
+            "How would you identify any anomalous patterns, considering any abrupt "
+            "changes in amplitude?"
+        ))
+        self.assertFalse(oe_question_counterfactual_valid(
+            "Determine whether the observed abrupt shift is anomalous."
+        ))
         valid = build_supervision_record(
             {
                 "question_type": "open_ended",
