@@ -31,7 +31,7 @@ _TYPE_ALIASES = {
 _NEGATIVE_STATE_PATTERNS = tuple(
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
-        r"\b(?:no|not|without|does\s+not|do\s+not|did\s+not|lacks?|lacking)\b[^.!?]{0,180}\b(?:anomal\w*|abnormal\w*|irregular\s+(?:patterns?|behavio(?:r|ur)|fluctuations?|deviations?)|unusual\s+(?:patterns?|behavio(?:r|ur)|fluctuations?|deviations?))\b",
+        r"\b(?:no|not|without|does\s+not|do\s+not|did\s+not|lacks?|lacking)\b[^.!?]{0,180}\b(?:anomal\w*|abnormal\w*|irregular\s+(?:patterns?|behavio(?:r|ur)|fluctuations?|deviations?)|unusual\s+(?:patterns?|behavio(?:r|ur)|fluctuations?|deviations?)|atypical(?:\s+(?:patterns?|behavio(?:r|ur)|fluctuations?|deviations?))?)\b",
         r"\babsence\s+of\s+(?:an\s+)?anomal",
         r"\bfree\s+from\s+anomal",
         r"\bconsistent\s+with\s+normal\b",
@@ -138,13 +138,14 @@ _OE_QUESTION_ASSERTIONS = tuple(
         r"\b(?:the|this|that)\s+(?:clear\s+|observed\s+|detected\s+|local\s+)?anomal(?:y|ies)\b",
         r"\b(?:the|this|that)\s+(?:upward|downward|spike|drop|shift|drift)\b",
         r"\bdetected\s+anomal(?:y|ies)\b",
+        r"\bdetected\s+(?:pattern\s+)?change\b",
         r"\bthe\s+anomalous\s+patterns?\s+present\b",
     )
 )
 
 _OE_SPECIFIC_QUESTION = re.compile(
     r"\b(?:upward|downward|spikes?|drops?|shift|drift|amplitude|convex|concave|"
-    r"decline|increase|decrease|shake|periodic|sustained|abrupt|sharp|rapid)\b",
+    r"decline|increase|decrease|shake|periodic|sustained|abrupt|sharp|rapid|sudden)\b",
     re.IGNORECASE,
 )
 _OE_GENERIC_QUESTION_CUE = re.compile(
