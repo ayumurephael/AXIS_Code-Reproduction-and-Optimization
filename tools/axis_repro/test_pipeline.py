@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 from .build_tables import aggregate
 from . import common
@@ -18,6 +19,32 @@ class TestPipeline(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertGreater(result[0], 4.99)
 
+    def test_configurable_deepseek_endpoint(self):
+        seen = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"choices": []}'
+
+        def fake_urlopen(request, timeout):
+            seen["url"] = request.full_url
+            seen["timeout"] = timeout
+            return FakeResponse()
+
+        from . import geval_deepseek
+        endpoint = "https://judge.example/v1/chat/completions"
+        with mock.patch.object(geval_deepseek, "API_ENDPOINT", endpoint), \
+             mock.patch.object(geval_deepseek.urllib.request, "urlopen", fake_urlopen):
+            response = geval_deepseek.api_call("secret", "deepseek-v4-pro", "prompt", 0, True)
+
+        self.assertEqual(response, {"choices": []})
+        self.assertEqual(seen, {"url": endpoint, "timeout": 180})
     def test_weighted_table(self):
         rows = [{"record_id":"r", "mode":"base", "question_type":"multiple_choice",
                  "dimension":d, "weight":w, "score":s}

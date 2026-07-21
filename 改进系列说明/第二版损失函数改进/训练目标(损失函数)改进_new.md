@@ -1,4 +1,4 @@
-# 全新的损失函数设计【改进请严格依照此版本进行】
+# 全新的损失函数设计
 
 # 先把核心思想说清楚
 
@@ -1913,52 +1913,3 @@ $$
 状态 prompt 与原 AXIS prompt 的关系则是：
 
 > 共用 AXIS 的证据模板、soft-token 注入方式和冻结 LLM；但用固定状态问题 $Q^z$ 替换原始问题 $Q_i$，形成独立前向序列，而不是把两个问题和答案拼在同一条 prompt 中。
-
-
-
-注意：
-
-# Fixed hint 应怎样处理
-
-定义：
-$$
-\bar F=\operatorname{stopgrad}(F).
-$$
-它表示：
-
-- state forward 中可以保留 Fixed 的数值；
-- 但 state loss 不允许更新 Fixed 分支。
-
-为什么不是直接删除 F？
-
-因为 baseline 的 Fixed soft prompt 可能已经成为冻结 LLM 的任务接口。保留它能维持模型工作状态，但必须防止辅助损失继续把状态监督写进 Fixed。
-
-不过仅仅对 Fixed 输出 `.detach()` 还不够，因为当前 AXIS 中 Local 和 Fixed 共用 `local_attention` 和 `mapping_layer`。共享参数更新后，下一步 Fixed 的实际数值仍会变化。
-
-更可靠的最小改造是：
-
-1. 从 baseline checkpoint 加载 Perceiver；
-2. 将当前 shared attention 复制为两份：
-
-```
-self.local_attention = copy.deepcopy(old_attention)
-self.fixed_attention = copy.deepcopy(old_attention)
-```
-
-1. Local 使用 `local_attention`；
-2. Fixed 使用 `fixed_attention`；
-3. 冻结：
-   - `fixed_attention`
-   - `fix_prompt_embeddings`
-   - `mapping_layer`，初期先冻结；
-4. 训练：
-   - `local_word_proj`
-   - `local_attention`
-
-这样 state loss 的主要可训练路径是 Local，而 Fixed 保持 baseline 状态。
-
-建议先从 baseline Phase-II checkpoint warm start，而不是再次从随机 Perceiver 开始。这样更容易判断：
-
-> 新状态目标是否能够增加 grounding，同时保留原有解释能力。
-
-正式论文比较时，再补充相同 Phase-I 初始化下的完整训练。
