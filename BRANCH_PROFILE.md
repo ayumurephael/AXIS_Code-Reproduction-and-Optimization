@@ -1,23 +1,24 @@
-# Branch profile: main
+# Branch profile: architecture_redesign
 
-`main` is the canonical AXIS baseline reproduction. It contains no redesign factor and is the control for `loss_resesign` and `architecture_redesign`.
+`architecture_redesign` is the combined redesign branch. It applies the coherent counterfactual state objective used by `loss_resesign` and enables the full architecture variant. It is not a one-factor comparison against `main`.
 
-## Model and objective
+## Declared changes
 
-- Model: `src/models/AXIS/AXIS.py`.
-- Phase-I time-series encoder: loaded from the fixed external checkpoint and frozen in Phase II.
-- Backbone LLM: frozen.
-- Trainable Phase-II component: the original AXIS Hint Tuner/Perceiver path.
-- Phase-II objective: the baseline answer-generation objective implemented by `tools.axis_repro.train_phase2_memory_safe_v3`.
+Relative to `main`:
+
+1. coherent factual/counterfactual binary state supervision;
+2. QK-Norm on prototype cross-attention;
+3. continuous encoder-state bypass with gated prototype sidecar;
+4. directly learned 30-token task soft prompt;
+5. parameter-group learning rates associated with the redesigned paths.
+
+For a clean architecture-effect estimate, compare `--architecture-variant full` with `--architecture-variant loss_only` inside this branch under the same counterfactual index, objective, optimizer groups, seed, budget and validation rule. Comparing this branch directly with `main` estimates the whole redesign bundle.
 
 ## Canonical entry points
 
-```bash
-python -m torch.distributed.run --nproc-per-node=3 \
-  -m tools.axis_repro.train_phase2_memory_safe_v3 --help
+- Counterfactual index: `tools.axis_repro.build_counterfactual_index`.
+- Training: `tools.axis_repro.train_phase2_architecture_redesign` (defaults to `full`).
+- Checkpoint audit: `tools.axis_repro.audit_architecture_checkpoint` and `tools.axis_repro.audit_loss_objective_checkpoint`.
+- Inference: `tools.axis_repro.run_inference_cli` with the checkpoint's exact architecture metadata.
 
-python -m torch.distributed.run --nproc-per-node=3 \
-  -m tools.axis_repro.run_inference_cli --help
-```
-
-The exact training and evaluation commands are in `REPRODUCTION.md`. Redesign results are valid only when compared with a `main` checkpoint trained under the same manifest, seed policy, global batch, maximum epoch, validation schedule and judge protocol.
+Formal commands and the 2×2×2 variants are in `ARCHITECTURE_REDESIGN_REPRODUCTION.md`. Design rationale is retained in `AXIS架构改进说明.md`; objective rationale is retained in `训练目标(损失函数)改进_new.md`. Those research notes are not execution instructions.

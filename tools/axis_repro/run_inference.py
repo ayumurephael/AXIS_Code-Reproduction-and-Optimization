@@ -12,7 +12,9 @@ import torch
 
 from .common import load_axis_records, read_jsonl
 from .io_utils import append_jsonl
+from .architecture_redesign import add_architecture_arguments
 from .model_utils import build_model, load_axis_checkpoint, sha256_file
+
 
 def dist_info():
     rank, world = int(os.getenv("RANK", "0")), int(os.getenv("WORLD_SIZE", "1"))
@@ -46,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip teacher-forced loss during test generation, as in the "
              "author's AXIS_test.py path.",
     )
-
+    add_architecture_arguments(parser, default_variant="loss_only")
     return parser
 
 
@@ -68,7 +70,11 @@ def main() -> None:
     shard = out / f"rank{rank}.jsonl"
     done = {(x["record_id"], x["mode"]) for x in read_jsonl(shard)} if shard.exists() else set()
 
-    model = build_model()
+    model = build_model(
+        architecture_variant=a.architecture_variant,
+        qk_norm_seq_len=a.qk_norm_seq_len,
+        gate_bias=a.gate_bias,
+    )
     load_axis_checkpoint(model, a.checkpoint)
     model.to(torch.device("cuda", local)).eval()
     for group in work_items:
@@ -133,9 +139,12 @@ def main() -> None:
             "checkpoint": str(Path(a.checkpoint).resolve()), "checkpoint_sha256": sha256_file(a.checkpoint),
             "subset": a.subset, "world_size": world, "modes": a.modes, "rows": len(rows),
             "batching": a.batching, "skip_loss": a.skip_loss,
-
+            "architecture_variant": a.architecture_variant,
+            "qk_norm_seq_len": a.qk_norm_seq_len,
+            "gate_bias": a.gate_bias,
         }, indent=2), encoding="utf-8")
         print(f"wrote {len(rows)} rows to {merged}")
+
 
 if __name__ == "__main__":
     main()
