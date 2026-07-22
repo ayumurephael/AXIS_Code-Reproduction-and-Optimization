@@ -15,7 +15,7 @@ def _require(condition: bool, message: str) -> None:
 def audit_loss_final_checkpoint(payload: dict, *, expected_stage: str) -> dict:
     metadata = payload.get("reproduction_meta")
     _require(isinstance(metadata, dict), "checkpoint has no reproduction metadata")
-    _require(int(metadata.get("objective_version", -1)) == 4, "objective version is not 4")
+    _require(int(metadata.get("objective_version", -1)) == 5, "objective version is not 5")
     _require(metadata.get("stage") == expected_stage, "checkpoint stage mismatch")
     expected_objective = (
         "answer_only_recovery_v1"
@@ -27,15 +27,26 @@ def audit_loss_final_checkpoint(payload: dict, *, expected_stage: str) -> dict:
     _require(metadata.get("fixed_hint_auxiliary_gradient") is False, "auxiliary loss updates Fixed")
     _require(
         metadata.get("fixed_hint_auxiliary_isolation")
-        == "direct_task_prompt_output_stop_gradient",
+        == "processed_fixed_hint_output_stop_gradient",
         "Fixed isolation mechanism mismatch",
     )
     _require(metadata.get("component_backward") == "sequential_same_optimizer_step", "component schedule mismatch")
     _require(int(metadata.get("world_size", -1)) == 3, "formal run must use world size 3")
     _require(int(metadata.get("epochs", -1)) == 6, "formal stage must contain six epochs")
     _require(int(metadata.get("seed", -1)) == 72, "formal seed mismatch")
-    _require(metadata.get("architecture", {}).get("variant") == "full", "architecture is not full")
-    _require(int(metadata.get("architecture", {}).get("qk_norm_seq_len", -1)) == 40, "QK length is not 40")
+    architecture = metadata.get("architecture", {})
+    _require(architecture.get("variant") == "loss_only", "architecture is not author loss_only")
+    _require(architecture.get("qk_norm") is False, "loss_final enables QK-Norm")
+    _require(architecture.get("continuous_bypass") is False, "loss_final enables residual bypass")
+    _require(architecture.get("direct_task_prompt") is False, "loss_final enables direct task prompt")
+    _require(architecture.get("qk_norm_seq_len") is None, "author architecture has a QK length")
+    _require(int(architecture.get("fixed_query_tokens", -1)) == 30, "author fixed-query count is not 30")
+    _require(architecture.get("task_prompt_tokens") is None, "direct task tokens are present")
+    _require(
+        architecture.get("fixed_hint_path")
+        == "learned_queries_to_shared_prototype_cross_attention",
+        "Fixed Hint does not use the author prototype-attention path",
+    )
 
     if expected_stage == "answer_only":
         _require(metadata.get("init_phase2") is None, "answer-only unexpectedly warm-started")
@@ -82,6 +93,29 @@ def audit_loss_final_checkpoint(payload: dict, *, expected_stage: str) -> dict:
 
     state = payload.get("model_state_dict", {})
     _require("moirai_trainable" in state, "checkpoint has no Perceiver state")
+    perceiver_state = state["moirai_trainable"]
+    _require(isinstance(perceiver_state, dict), "Perceiver state is not a mapping")
+    prefix = "perceiver."
+    if perceiver_state and all(key.startswith(prefix) for key in perceiver_state):
+        perceiver_keys = {key[len(prefix):] for key in perceiver_state}
+    else:
+        perceiver_keys = set(perceiver_state)
+    author_keys = {
+        "fix_prompt_embeddings",
+        "mapping_layer.weight",
+        "mapping_layer.bias",
+        "local_word_proj.weight",
+        "local_word_proj.bias",
+        "local_attention.q_proj.weight",
+        "local_attention.k_proj.weight",
+        "local_attention.v_proj.weight",
+        "local_attention.out_proj.weight",
+    }
+    _require(
+        perceiver_keys == author_keys,
+        f"Perceiver state is not author-compatible: missing={sorted(author_keys - perceiver_keys)}, "
+        f"unexpected={sorted(perceiver_keys - author_keys)}",
+    )
     return {
         "ok": True,
         "stage": expected_stage,

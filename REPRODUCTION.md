@@ -202,3 +202,22 @@ python -m tools.axis_repro.table_runner \
 - judge、prompt、endpoint 语义和评分脚本 commit。
 
 唯一可变项是 `BRANCH_PROFILE.md` 声明的架构或损失因素。不能比较一个分支的 3-epoch checkpoint 与另一个分支的 35-epoch checkpoint，也不能用 Gemini 测试分数回头调整超参数。
+
+## 10. `loss_final` architecture gate
+
+Before any new `loss_final` run, verify the branch profile and CLI default:
+
+```bash
+python -m tools.axis_repro.train_phase2_loss_final --help
+```
+
+The only permitted architecture is `--architecture-variant loss_only`; omit QK length. The trainer fails before CUDA initialization if a redesign variant is requested. The corresponding checkpoint audit must confirm all of the following:
+
+- `variant=loss_only`;
+- `qk_norm=false`;
+- `continuous_bypass=false`;
+- `direct_task_prompt=false`;
+- 30 learned Fixed queries routed through shared prototype cross-attention;
+- exactly the nine author-compatible Perceiver tensors.
+
+Do not resume checkpoints from the aborted full-architecture Answer-Only or Joint runs. Restart both matched arms from the predeclared common initializer described in `AUTHOR_COMPATIBLE_TRAINING.md`.

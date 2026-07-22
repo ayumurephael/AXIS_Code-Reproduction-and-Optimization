@@ -62,8 +62,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=72)
     parser.add_argument("--max-new-tokens", type=int, default=64)
     parser.add_argument("--max-series", type=int)
-    parser.add_argument("--architecture-variant", default="full")
-    parser.add_argument("--qk-norm-seq-len", type=int, default=40)
+    parser.add_argument("--architecture-variant", default="loss_only")
+    parser.add_argument("--qk-norm-seq-len", type=int)
     parser.add_argument("--gate-bias", type=float, default=-2.0)
     args = parser.parse_args()
 

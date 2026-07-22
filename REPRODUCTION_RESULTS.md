@@ -20,7 +20,9 @@
 
 最后一行相对论文的 MC/OE/TF Final 差值为 `+0.08/-0.05/+0.09`；三个 Final 的平均绝对误差为 0.073，十指标平均绝对误差为 0.074。它证明当前代码路径能够加载作者前缀 checkpoint、执行作者 series batching 并用作者 Gemini prompt 得到接近论文的结果。
 
-作者候选 checkpoint 是外部实验资产，不随 Git 仓库分发，也不能替代从统一协议重新训练三个分支。公平架构比较仍需按 `AUTHOR_COMPATIBLE_TRAINING.md` 从同一 Phase-I 状态训练。
+This table does not use one checkpoint throughout. The first three repository-epoch-3 rows use the self-trained inference checkpoint with SHA-256 `8d562f8ff22c6709caaa2f7ba8208f3631a652d1932f001f39fa75ff8700fa4b`. The two author-epoch-33 rows use `axis_qa_by_pretrain_best_accelerate/model_optimizer.pth` with SHA-256 `d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7`. A result must therefore identify checkpoint, batching, and judge rather than referring to a generic "REPRODUCTION_RESULTS checkpoint".
+
+作者候选 checkpoint 是外部实验资产，不随 Git 仓库分发，也不能替代从统一协议重新训练各对照分支。公平架构比较仍需按 `AUTHOR_COMPATIBLE_TRAINING.md` 从同一 Phase-I 状态训练。
 
 ## 三轮基线 checkpoint
 

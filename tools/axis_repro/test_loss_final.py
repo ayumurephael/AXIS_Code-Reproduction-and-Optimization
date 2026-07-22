@@ -26,7 +26,7 @@ if "einops" not in sys.modules:
     sys.modules["einops"] = einops
 
 
-from src.models.AXIS.AXIS import AXIS
+from src.models.AXIS.AXIS import AXIS, Perceiver
 from .audit_loss_final_checkpoint import audit_loss_final_checkpoint
 from .loss_redesign import answer_collate_fn
 from .question_type_objectives import (
@@ -39,7 +39,11 @@ from .question_type_objectives import (
     parse_tf_target,
     select_tf_verbalizers,
 )
-from .train_phase2_loss_final import build_parser
+from .train_phase2_loss_final import (
+    _validate_author_architecture_args,
+    build_model,
+    build_parser,
+)
 
 
 class SemanticRuleTests(unittest.TestCase):
@@ -231,28 +235,122 @@ class TrainingProtocolTests(unittest.TestCase):
         self.assertEqual(parsed.beta_tf, 0.05)
         self.assertEqual(parsed.beta_oe, 0.05)
         self.assertEqual(parsed.expected_donor_top_m, 1)
-        self.assertEqual(parsed.architecture_variant, "full")
+        self.assertEqual(parsed.architecture_variant, "loss_only")
+        self.assertIsNone(parsed.qk_norm_seq_len)
+
+    def test_loss_final_rejects_every_redesigned_architecture(self):
+        parsed = build_parser().parse_args([
+            "--stage", "joint",
+            "--phase1", "phase1.pth",
+            "--counterfactual-index", "cf.json",
+            "--supervision-cache", "cache.json",
+            "--output", "out",
+            "--architecture-variant", "full",
+            "--qk-norm-seq-len", "40",
+        ])
+        with self.assertRaises(ValueError):
+            _validate_author_architecture_args(parsed)
+        with self.assertRaises(ValueError):
+            build_model("full", 40)
+
+    def test_default_perceiver_has_exact_author_trainable_state(self):
+        perceiver = Perceiver(
+            vocab_size=17,
+            hidden_size=8,
+            d_proj=4,
+            num_prototype=5,
+            num_fixed_tokens=3,
+            num_heads=2,
+        )
+        self.assertEqual(set(perceiver.state_dict()), {
+            "fix_prompt_embeddings",
+            "mapping_layer.weight",
+            "mapping_layer.bias",
+            "local_word_proj.weight",
+            "local_word_proj.bias",
+            "local_attention.q_proj.weight",
+            "local_attention.k_proj.weight",
+            "local_attention.v_proj.weight",
+            "local_attention.out_proj.weight",
+        })
+        self.assertFalse(hasattr(perceiver, "task_prompt_embeddings"))
+        self.assertFalse(hasattr(perceiver, "continuous_proj"))
+        self.assertFalse(hasattr(perceiver.local_attention, "qk_scale"))
+
+    def test_auxiliary_freezes_fixed_queries_but_trains_local_evidence_path(self):
+        perceiver = Perceiver(
+            vocab_size=17,
+            hidden_size=8,
+            d_proj=4,
+            num_prototype=5,
+            num_fixed_tokens=3,
+            num_heads=2,
+        )
+        words = torch.randn(17, 8)
+        local = torch.randn(4, 4)
+        source = perceiver.get_source_embeddings(words)
+        auxiliary = (
+            perceiver.process_local_embeddings(local, source, 0, 4).sum()
+            + perceiver.process_fixed_embeddings(source, 3).detach().sum()
+        )
+        auxiliary.backward()
+        self.assertIsNone(perceiver.fix_prompt_embeddings.grad)
+        self.assertIsNotNone(perceiver.local_word_proj.weight.grad)
+        self.assertIsNotNone(perceiver.mapping_layer.weight.grad)
+        self.assertIsNotNone(perceiver.local_attention.q_proj.weight.grad)
+
+        perceiver.zero_grad(set_to_none=True)
+        source = perceiver.get_source_embeddings(words)
+        answer = (
+            perceiver.process_local_embeddings(local, source, 0, 4).sum()
+            + perceiver.process_fixed_embeddings(source, 3).sum()
+        )
+        answer.backward()
+        self.assertIsNotNone(perceiver.fix_prompt_embeddings.grad)
+        self.assertGreater(float(perceiver.fix_prompt_embeddings.grad.abs().sum()), 0.0)
 
     @staticmethod
     def _payload(stage):
         joint = stage == "joint"
+        author_keys = {
+            "fix_prompt_embeddings",
+            "mapping_layer.weight",
+            "mapping_layer.bias",
+            "local_word_proj.weight",
+            "local_word_proj.bias",
+            "local_attention.q_proj.weight",
+            "local_attention.k_proj.weight",
+            "local_attention.v_proj.weight",
+            "local_attention.out_proj.weight",
+        }
         return {
             "epoch": 6,
             "global_step": 57000,
-            "model_state_dict": {"moirai_trainable": {"x": torch.tensor(1)}},
+            "model_state_dict": {
+                "moirai_trainable": {key: torch.tensor(1) for key in author_keys}
+            },
             "optimizer_state_dict": {},
             "reproduction_meta": {
-                "objective_version": 4,
+                "objective_version": 5,
                 "objective": "question_type_routed_joint_v1" if joint else "answer_only_recovery_v1",
                 "stage": stage,
                 "fixed_hint_answer_gradient": True,
                 "fixed_hint_auxiliary_gradient": False,
-                "fixed_hint_auxiliary_isolation": "direct_task_prompt_output_stop_gradient",
+                "fixed_hint_auxiliary_isolation": "processed_fixed_hint_output_stop_gradient",
                 "component_backward": "sequential_same_optimizer_step",
                 "world_size": 3,
                 "epochs": 6,
                 "seed": 72,
-                "architecture": {"variant": "full", "qk_norm_seq_len": 40},
+                "architecture": {
+                    "variant": "loss_only",
+                    "qk_norm": False,
+                    "continuous_bypass": False,
+                    "direct_task_prompt": False,
+                    "qk_norm_seq_len": None,
+                    "fixed_query_tokens": 30,
+                    "task_prompt_tokens": None,
+                    "fixed_hint_path": "learned_queries_to_shared_prototype_cross_attention",
+                },
                 "init_phase2": "answer.pth" if joint else None,
                 "init_phase2_sha256": "abc" if joint else None,
                 "resume_optimizer": joint,
@@ -283,6 +381,12 @@ class TrainingProtocolTests(unittest.TestCase):
         broken["reproduction_meta"]["beta_oe_target"] = 0.1
         with self.assertRaises(ValueError):
             audit_loss_final_checkpoint(broken, expected_stage="joint")
+        wrong_architecture = self._payload("joint")
+        wrong_architecture["model_state_dict"]["moirai_trainable"][
+            "task_prompt_embeddings"
+        ] = torch.tensor(1)
+        with self.assertRaises(ValueError):
+            audit_loss_final_checkpoint(wrong_architecture, expected_stage="joint")
 
 
 if __name__ == "__main__":

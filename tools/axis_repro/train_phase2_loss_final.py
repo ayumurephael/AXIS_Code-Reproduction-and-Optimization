@@ -402,10 +402,17 @@ def _combined_component_forward(
 
 
 def build_model(
-    architecture_variant: str = "full",
+    architecture_variant: str = "loss_only",
     qk_norm_seq_len: int | None = None,
     gate_bias: float = -2.0,
 ):
+    if architecture_variant != "loss_only":
+        raise ValueError(
+            "loss_final is a loss-only branch and requires the author AXIS "
+            "architecture (--architecture-variant loss_only)"
+        )
+    if qk_norm_seq_len is not None:
+        raise ValueError("loss_final author architecture does not use QK-Norm")
     model = _PLAIN_BUILD(
         architecture_variant=architecture_variant,
         qk_norm_seq_len=qk_norm_seq_len,
@@ -479,7 +486,7 @@ def _reduce_step_stats(component_stats, grad_norm, betas):
     }
 
 
-def build_parser(default_architecture_variant: str = "full") -> argparse.ArgumentParser:
+def build_parser(default_architecture_variant: str = "loss_only") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stage", choices=("answer_only", "joint"), required=True)
     parser.add_argument("--phase1", required=True)
@@ -508,8 +515,19 @@ def build_parser(default_architecture_variant: str = "full") -> argparse.Argumen
     return parser
 
 
-def main(default_architecture_variant: str = "full") -> None:
+def _validate_author_architecture_args(args: argparse.Namespace) -> None:
+    if args.architecture_variant != "loss_only":
+        raise ValueError(
+            "loss_final may change the training objective only; QK-Norm, the "
+            "continuous residual bypass, and the direct task prompt are forbidden"
+        )
+    if args.qk_norm_seq_len is not None:
+        raise ValueError("loss_final author architecture does not accept --qk-norm-seq-len")
+
+
+def main(default_architecture_variant: str = "loss_only") -> None:
     args = build_parser(default_architecture_variant).parse_args()
+    _validate_author_architecture_args(args)
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
     if args.resume_optimizer and not args.init_phase2:
@@ -618,11 +636,13 @@ def main(default_architecture_variant: str = "full") -> None:
         "qk_length_source": qk_length_source,
         "qk_length_percentile": 97.5 if qk_length_source == "seeded_train_local_p97.5" else None,
         "gate_bias": args.gate_bias,
-        "task_prompt_tokens": 30,
+        "fixed_query_tokens": 30,
+        "task_prompt_tokens": None,
+        "fixed_hint_path": "learned_queries_to_shared_prototype_cross_attention",
     }
     metadata = {
         "objective": "answer_only_recovery_v1" if args.stage == "answer_only" else "question_type_routed_joint_v1",
-        "objective_version": 4,
+        "objective_version": 5,
         "stage": args.stage,
         "phase1": str(Path(args.phase1).resolve()),
         "phase1_sha256": phase1_sha,
@@ -658,7 +678,7 @@ def main(default_architecture_variant: str = "full") -> None:
         },
         "fixed_hint_auxiliary_gradient": False,
         "fixed_hint_answer_gradient": True,
-        "fixed_hint_auxiliary_isolation": "direct_task_prompt_output_stop_gradient",
+        "fixed_hint_auxiliary_isolation": "processed_fixed_hint_output_stop_gradient",
         "ddp_auxiliary_denominator": "global_valid_rows_per_component",
         "oe_qcar_target_tokens": "answer_content_only_no_prefix_eos_padding",
         "oe_qcar_counterfactual_policy": "abnormal_self_normal_patch_only",

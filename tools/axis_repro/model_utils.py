@@ -54,12 +54,13 @@ def validate_checkpoint_architecture(payload: dict, llm_config) -> None:
         raise ValueError(
             f"checkpoint QK length {actual.get('qk_norm_seq_len')} != requested {expected_length}"
         )
-    expected_gate_bias = float(getattr(llm_config, "gate_bias", -2.0))
-    actual_gate_bias = float(actual.get("gate_bias", expected_gate_bias))
-    if abs(actual_gate_bias - expected_gate_bias) > 1e-12:
-        raise ValueError(
-            f"checkpoint gate bias {actual_gate_bias} != requested {expected_gate_bias}"
-        )
+    if bool(actual.get("continuous_bypass")):
+        expected_gate_bias = float(getattr(llm_config, "gate_bias", -2.0))
+        actual_gate_bias = float(actual.get("gate_bias", expected_gate_bias))
+        if abs(actual_gate_bias - expected_gate_bias) > 1e-12:
+            raise ValueError(
+                f"checkpoint gate bias {actual_gate_bias} != requested {expected_gate_bias}"
+            )
 
 def load_axis_payload(model, payload: dict, strict: bool = True) -> Dict[str, Any]:
     """Load an already-materialized AXIS checkpoint payload into ``model``."""

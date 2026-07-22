@@ -61,15 +61,15 @@ torchrun --standalone --nproc_per_node=3 \
 
 单次 seed-42 结果用于论文接近性检查；多 seed 结果用于方法改进的稳健性主张，两种目标要区分。
 
-## 三分支对照
+## 跨分支对照
 
-`main`、`loss_resesign`、`architecture_redesign` 共同固定 Phase-I SHA-256、数据、manifest、seed、global batch、优化器、训练上限、验证日程、选模规则、paper140、生成协议和 judge。每个改进分支只能改变 `BRANCH_PROFILE.md` 声明的因素。
+`main`、`loss_resesign`、`architecture_redesign`、`architecture_redesign_fixedhint_frozen` 与 `loss_final` 共同固定 Phase-I SHA-256、数据、manifest、seed、global batch、优化器、训练上限、验证日程、选模规则、paper140、生成协议和 judge。每个改进分支只能改变 `BRANCH_PROFILE.md` 声明的因素。
 
 推荐顺序：
 
 1. 完成 `main` seed-42 长预算训练和验证选模；
 2. 冻结所有公共配置及哈希；
-3. 对两个改进分支复用相同训练预算；
+3. 对各改进分支复用相同训练预算；
 4. 用免费验证指标筛查实现错误和明显退化；
 5. 对每个分支验证选出的唯一 checkpoint 生成 paper140；
 6. 日常/预筛使用 DeepSeek，最终一次使用 Gemini；
@@ -87,4 +87,15 @@ torchrun --standalone --nproc_per_node=3 \
 6. 最终评测：Gemini author mode、335/335 审计；
 7. 方法结论：paired 统计、生成质量和 evidence dependence 同时报告。
 
-作者候选 checkpoint 可用于验证加载、推理和评测协议，但不能作为三个分支中的某一分支训练结果参与公平比较。
+作者候选 checkpoint 可用于验证加载、推理和评测协议，但不能作为任一实验分支的训练结果参与公平比较。
+
+## Loss-final initialization policy
+
+`loss_final` must use the author `loss_only` architecture. Any earlier checkpoint whose metadata says `architecture.variant=full` contains QK-Norm, residual-bypass, and direct-task-prompt parameters and is not a valid initializer after the architecture restoration.
+
+Two different research questions require two different matched controls:
+
+1. Primary objective comparison: initialize both answer-only and loss-final from the same Phase-I checkpoint; keep data, total optimization budget, and validation selection identical.
+2. Low-cost post-training add-on: initialize both arms from the same author Phase-II best checkpoint, reset the optimizer in both arms, and compare answer-only continuation against answer-plus-auxiliary continuation for the same extra budget.
+
+Comparing author best before training with loss-final after additional training is not a controlled loss ablation. Continuing only the treatment arm confounds auxiliary loss with optimizer reset and extra answer-NLL updates.

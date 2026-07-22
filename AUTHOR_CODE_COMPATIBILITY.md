@@ -71,4 +71,52 @@ DeepSeek runner 保留原分维度概率/采样逻辑，服务日常低成本实
 - 不从 test/Gemini 分数推断训练早停点。
 - 不把 per-record 诊断结果当作正式作者协议。
 - 不把 DeepSeek 与 Gemini 分数放在同一统计样本中聚合。
-- 不将作者参考源码、外部 checkpoint 或凭据提交到三个运行分支。
+- 不将作者参考源码、外部 checkpoint 或凭据提交到任何运行分支。
+
+## Paper, released code, and checkpoint architecture boundary
+
+Section 3.2 uses local time-series states as queries over a prototype bank. Shared learned queries `P_fix` also attend to the same prototype bank. The paper does not define Fixed Hint as a direct soft prompt, and it does not describe a Local-Hint continuous residual bypass or QK-Norm.
+
+The released materials contain a dimension conflict that must be recorded:
+
+| Item | Appendix B.3 | Released code/checkpoint |
+|---|---:|---:|
+| TS encoder layers | 6 | 8 |
+| prototypes | 1024 | 1000 |
+| Fixed queries | 8 | 30 |
+
+The released Phase-II checkpoint has `fix_prompt_embeddings` shape `[1, 30, 3584]` and `mapping_layer.weight` shape `[1000, 151667]`, with exactly the original nine Perceiver tensors. When author weights must load strictly, 30/1000/8 is the executable standard. Changing to 8/1024/6 makes that checkpoint structurally incompatible.
+
+## Author checkpoint inventory
+
+The three files under `baseline_author/experiments/checkpoints` were inspected on CPU. Epoch and loss values below come from payloads, not filenames. The supplemental trainers iterate `range(num_epochs)`, so the stored epoch fields are zero-based under that code; raw `epoch=33` can denote the 34th pass of an uninterrupted run. The private training history is not present, so reports should preserve the raw field rather than silently converting it.
+
+The Phase-I payload config names a Llama-8B LLM, but Phase II uses 3584-wide Qwen-7B Hint-Tuner tensors. Phase II only consumes the Phase-I time-series module, so the Phase-I `llm_config.model_name` must not be used to infer the Phase-II backbone.
+
+| File | SHA-256 | Payload and role |
+|---|---|---|
+| `pretrain_single/pretrain_checkpoint_best.pth` | `2f1507fcc3c3232d375dcb0c18bfcd11f2ec9e184dcb1cc9fb603f0f38c94a2e` | Phase-I best: `epoch=22`, `loss=0.04245388498529792`. Contains 111 TS-encoder/reconstruction/anomaly-head tensors, optimizer state, and training config. Fresh Phase II loads its TS module and freezes it. |
+| `axis_qa_by_pretrain_best_accelerate/model_optimizer.pth` | `d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7` | Author Phase-II validation-best candidate: `epoch=33`, `avg_loss=0.7127881973981858`. Contains 111 frozen TS tensors and 9 BF16 Hint-Tuner tensors. |
+| `axis_qa_by_pretrain_step_accelerate/model_optimizer.pth` | `549b776614edc09336cf00ced13dff9f1cad51c245f4ca54ba1d855b92fce0b7` | Last overwritten periodic step candidate within epoch 33. `avg_loss=0.7364754394601621` is the running training mean at that save. No batch/global step is stored, so the exact step cannot be recovered. Use only if best is missing or an experiment explicitly requests it. |
+
+Despite the filename `model_optimizer.pth`, both Phase-II payloads contain only `epoch`, `model_state_dict`, and `avg_loss`; neither contains `optimizer_state_dict`. They support inference or continued fine-tuning with a newly created optimizer, not restoration of AdamW moments or a scheduler. Equal file size also does not imply equal weights.
+
+The author test code tries `best_accelerate` before `step_accelerate`. This repository likewise forbids silently substituting step when best exists.
+
+## Using the author Phase-II checkpoint to test a new loss
+
+Direct continued training from author `best_accelerate` is useful as a low-cost post-training add-on experiment, but by itself it does not prove that a new loss is better than answer NLL:
+
+1. the author model is already optimized through epoch 33, so auxiliary objectives see a different initial state;
+2. the checkpoint has no optimizer state, so continuation resets the optimizer;
+3. extra answer-NLL steps can change results even without auxiliary losses;
+4. its training history and budget differ from a method trained from Phase I.
+
+The minimum matched add-on experiment clones the same author Phase-II best state twice:
+
+- control: new identical optimizer, answer NLL only;
+- treatment: new identical optimizer, answer NLL plus the new auxiliary objective.
+
+Use the same extra steps, data order, learning rates, validation schedule, and selection rule. This answers whether the new loss helps as post-training on an already trained AXIS.
+
+The stronger question--whether adding the loss to Phase-II training is globally better than the author objective--still requires answer-only and loss-final runs from the same Phase-I checkpoint, with identical total budget and full-validation selection. Author best is a loading/inference reference or a matched post-training initializer, not a replacement for that from-Phase-I control.
