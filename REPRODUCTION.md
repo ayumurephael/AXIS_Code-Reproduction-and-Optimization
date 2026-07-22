@@ -221,3 +221,55 @@ The only permitted architecture is `--architecture-variant loss_only`; omit QK l
 - exactly the nine author-compatible Perceiver tensors.
 
 Do not resume checkpoints from the aborted full-architecture Answer-Only or Joint runs. Restart both matched arms from the predeclared common initializer described in `AUTHOR_COMPATIBLE_TRAINING.md`.
+
+## 11. 作者 checkpoint 双臂续训实验
+
+该实验只检验新损失作为 post-training add-on 是否有效，不替代第 4–5 节的完整
+Phase-II 复现。Control 与 Treatment 必须使用同一个作者 best checkpoint SHA、
+同一 seed、相同答案流和相同 1,600-step 预算；两边均重置 optimizer。
+
+Control：
+
+```bash
+torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.train_phase2_author_posttrain \
+  --arm control \
+  --phase1 <phase1_best.pth> \
+  --init-phase2 <author_model_optimizer.pth> \
+  --expected-init-sha256 <author_best_sha256> \
+  --data data/anomaly_llava_training_dataset \
+  --output experiments/reproduction/author_posttrain/control \
+  --epochs 1 --steps-per-epoch 1600 --seed 72
+```
+
+Treatment：
+
+```bash
+torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.train_phase2_author_posttrain \
+  --arm treatment \
+  --phase1 <phase1_best.pth> \
+  --init-phase2 <author_model_optimizer.pth> \
+  --expected-init-sha256 <author_best_sha256> \
+  --counterfactual-index <top1_counterfactual_index.json> \
+  --supervision-cache <question_type_supervision.json> \
+  --data data/anomaly_llava_training_dataset \
+  --output experiments/reproduction/author_posttrain/treatment \
+  --epochs 1 --steps-per-epoch 1600 --calibration-steps 200 --seed 72
+```
+
+固定优化配置为：Local LR `1e-5`、attention LR `2e-5`、Fixed-query LR
+`1e-5`、AdamW `(beta1=0.9, beta2=0.95, eps=1e-10)`、weight decay
+`1e-5`、gradient clip `1.0`、5% LR warm-up 后 cosine decay至峰值的 10%。
+Treatment 的 MC/TF/OE 有效 QA 全局暴露量严格为 2400/1800/600；beta 由
+200-step 无参数更新的独立梯度范数探针确定并写入 checkpoint metadata。
+
+两个 `final.pth` 都必须通过：
+
+```bash
+python -m tools.axis_repro.audit_author_posttrain_checkpoint <checkpoint> \
+  --arm <control-or-treatment>
+```
+
+随后分别执行相同 `paper140 + series batching + skip-loss` 推理和 Gemini
+author-mode G-Eval。主效应为 Treatment − Control；论文 Table 1 仅作为外部参考。

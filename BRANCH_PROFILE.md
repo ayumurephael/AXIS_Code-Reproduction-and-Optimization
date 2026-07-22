@@ -36,3 +36,22 @@ Answer NLL updates the complete author Hint Tuner, including the Fixed-Hint quer
 - Inference: `tools.axis_repro.run_inference_cli` with `--architecture-variant loss_only` (the default).
 
 Architecture-redesign documents and utilities remain as research history shared with redesign branches, but they are not executable protocol for `loss_final`. Formal comparison must use the same Phase-I checkpoint, split, budget, validation selection, generation protocol, and judge as its answer-only control.
+
+## Released-checkpoint matched post-training
+
+`tools.axis_repro.train_phase2_author_posttrain` answers the separate low-cost
+question of whether the routed losses improve an already trained author model.
+It never replaces the Phase-I-to-Phase-II reproduction protocol. The formal
+post-training comparison uses two arms initialized from the exact same released
+`model_optimizer.pth` SHA and resets AdamW in both arms:
+
+- `control`: 1,600 answer-only updates;
+- `treatment`: the same answer stream and 1,600 updates, plus one QA-level
+  auxiliary draw per step with exact MC:TF:OE ratio 4:3:1.
+
+One post-training epoch is therefore a fixed 1,600-step experimental block, not
+a pass through all 28,500 training series. On three ranks it contains 2,400 MC,
+1,800 TF, and 600 OE auxiliary QA exposures. The treatment performs a separate
+200-step no-update gradient probe, derives fixed betas from evidence-path
+gradient norms, then applies a 10% beta warm-up. Test/G-Eval scores may not be
+used to choose a second epoch.

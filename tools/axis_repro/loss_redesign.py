@@ -11,6 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.checkpoint import checkpoint
+from torch.utils.data import Dataset
 
 from src.models.AXIS.dataset import AXISAnomalyQADataset
 from .question_type_objectives import (
@@ -372,6 +373,84 @@ class CounterfactualAXISDataset(AXISAnomalyQADataset):
             "series_file": file_path.name,
             "counterfactuals": counterfactuals,
             "supervisions": supervisions,
+        }
+
+
+class CounterfactualQAView(Dataset):
+    """QA-row view over a counterfactual series dataset.
+
+    The original dataset samples whole series, so an auxiliary component is
+    active only when a randomly selected series happens to contain an eligible
+    row. This view indexes the high-precision supervision cache directly and
+    lets the post-training runner construct deterministic MC/TF/OE queues while
+    keeping the factual answer stream unchanged.
+    """
+
+    COMPONENT_FIELDS = {
+        "mc": "mc_pair_valid",
+        "tf": "tf_pair_valid",
+        "oe": "oe_pair_valid",
+    }
+
+    def __init__(self, base: CounterfactualAXISDataset) -> None:
+        if base.supervision_records is None or base.supervision_metadata is None:
+            raise ValueError("CounterfactualQAView requires a supervision cache")
+        self.base = base
+        self.records: list[tuple[int, int, str]] = []
+        self.positions_by_component: dict[str, list[int]] = {
+            component: [] for component in self.COMPONENT_FIELDS
+        }
+        series_indices = {path.name: index for index, path in enumerate(base.series_files)}
+        routed = []
+        for record_id, supervision in base.supervision_records.items():
+            try:
+                series_name, window_text = record_id.rsplit(":", 1)
+                series_index = series_indices[series_name]
+                window_index = int(window_text)
+            except (KeyError, ValueError) as error:
+                raise ValueError(f"invalid supervision record id: {record_id}") from error
+            active = [
+                component
+                for component, field in self.COMPONENT_FIELDS.items()
+                if bool(supervision.get(field, False))
+            ]
+            if len(active) > 1:
+                raise ValueError(f"auxiliary row is routed to multiple components: {record_id}")
+            if active:
+                routed.append((series_index, window_index, record_id, active[0]))
+
+        for series_index, window_index, record_id, component in sorted(routed):
+            position = len(self.records)
+            self.records.append((series_index, window_index, record_id))
+            self.positions_by_component[component].append(position)
+
+        stats = base.supervision_metadata.get("stats", {})
+        expected = {
+            "mc": int(stats.get("valid/mc_pair_valid", -1)),
+            "tf": int(stats.get("valid/tf_pair_valid", -1)),
+            "oe": int(stats.get("valid/oe_pair_valid", -1)),
+        }
+        actual = {
+            component: len(positions)
+            for component, positions in self.positions_by_component.items()
+        }
+        if actual != expected:
+            raise ValueError(f"QA view count mismatch: actual={actual}, expected={expected}")
+
+    def __len__(self) -> int:
+        return len(self.records)
+
+    def __getitem__(self, index: int) -> dict:
+        series_index, window_index, record_id = self.records[index]
+        item = self.base[series_index]
+        if f'{item["series_file"]}:{window_index}' != record_id:
+            raise RuntimeError("counterfactual QA index is not stable")
+        return {
+            "time_series": item["time_series"],
+            "analysis_data": [item["analysis_data"][window_index]],
+            "series_file": item["series_file"],
+            "counterfactuals": [item["counterfactuals"][window_index]],
+            "supervisions": [item["supervisions"][window_index]],
         }
 
 
