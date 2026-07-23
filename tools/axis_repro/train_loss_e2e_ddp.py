@@ -6,6 +6,7 @@ run for a fixed number of epochs.  The control retains dynamic fixed hints and
 global continuation-token NLL.  The treatment uses cached F0 and the
 row-balanced conclusion/explanation objective.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -68,6 +69,13 @@ METRIC_KEYS = (
     "open_ended_objective_sum",
     "open_ended_row_count",
 )
+FROZEN_LLM_STORAGE_DTYPE_SCHEDULE = {
+    1: torch.float16,
+    2: torch.bfloat16,
+}
+LEGACY_EPOCH1_FP16_SOURCE_COMMITS = frozenset(
+    {"bcbf73dee7343837be86cff1ae392d8e26fd67cb"}
+)
 
 
 def save_atomic(payload: dict, path: Path) -> None:
@@ -126,12 +134,12 @@ def _segment_lengths(answer: str, segmentation) -> dict:
     conclusion = (
         ""
         if segmentation.conclusion is None
-        else answer[segmentation.conclusion.start:segmentation.conclusion.end]
+        else answer[segmentation.conclusion.start : segmentation.conclusion.end]
     )
     explanation = (
         ""
         if segmentation.explanation is None
-        else answer[segmentation.explanation.start:segmentation.explanation.end]
+        else answer[segmentation.explanation.start : segmentation.explanation.end]
     )
     return {
         "conclusion_chars": len(conclusion),
@@ -212,14 +220,14 @@ def build_data_audit(dataset: AXISAnomalyQADataset, seed: int) -> dict:
                     ""
                     if segmentation.conclusion is None
                     else answer[
-                        segmentation.conclusion.start:segmentation.conclusion.end
+                        segmentation.conclusion.start : segmentation.conclusion.end
                     ]
                 )
                 explanation = (
                     ""
                     if segmentation.explanation is None
                     else answer[
-                        segmentation.explanation.start:segmentation.explanation.end
+                        segmentation.explanation.start : segmentation.explanation.end
                     ]
                 )
                 conclusion_excerpt, conclusion_shortened = _excerpt(conclusion)
@@ -252,9 +260,7 @@ def build_data_audit(dataset: AXISAnomalyQADataset, seed: int) -> dict:
         "segment_length_audit": {
             "units": {
                 "chars": "Python Unicode code points after span trimming",
-                "content_words": (
-                    "ASCII word/number units used by the OE short rule"
-                ),
+                "content_words": ("ASCII word/number units used by the OE short rule"),
                 "percentiles": "nearest-rank",
             },
             "by_question_type": _summarize_length_groups(lengths_by_type),
@@ -378,9 +384,7 @@ def _summary(values: Mapping[str, float]) -> dict:
     return {
         "objective": _ratio(values, "objective_sum", "objective_count"),
         "global_token_nll": _ratio(values, "token_nll_sum", "token_count"),
-        "conclusion_nll": _ratio(
-            values, "conclusion_mean_sum", "conclusion_row_count"
-        ),
+        "conclusion_nll": _ratio(values, "conclusion_mean_sum", "conclusion_row_count"),
         "explanation_nll": _ratio(
             values, "explanation_mean_sum", "explanation_row_count"
         ),
@@ -453,12 +457,8 @@ def _optimization_summary(state: Mapping) -> dict:
         "gradient_l2_norm_mean": (
             None if count == 0 else state["gradient_norm_sum"] / count
         ),
-        "gradient_l2_norm_max": (
-            None if count == 0 else state["gradient_norm_max"]
-        ),
-        "gradient_l2_norm_last": (
-            None if count == 0 else state["gradient_norm_last"]
-        ),
+        "gradient_l2_norm_max": (None if count == 0 else state["gradient_norm_max"]),
+        "gradient_l2_norm_last": (None if count == 0 else state["gradient_norm_last"]),
         "nonfinite_gradient_steps": state["nonfinite_gradient_steps"],
         "clipped_steps": state["clipped_steps"],
         "max_grad_norm": state["max_grad_norm"],
@@ -503,6 +503,114 @@ def _epoch_learning_rate(
     if epoch < 1:
         raise ValueError("epoch numbering starts at one")
     return float(epoch2_lr if epoch >= 2 and epoch2_lr is not None else initial_lr)
+
+
+def _validate_formal_optimizer_schedule(
+    *,
+    initial_lr: float,
+    epoch2_lr: Optional[float],
+    weight_decay: float,
+    max_grad_norm: Optional[float],
+) -> None:
+    expected = {
+        "initial_lr": (initial_lr, 1e-4),
+        "epoch2_lr": (epoch2_lr, 3e-5),
+        "weight_decay": (weight_decay, 1e-5),
+        "max_grad_norm": (max_grad_norm, None),
+    }
+    mismatches = [
+        f"{name}={actual!r} (expected {locked!r})"
+        for name, (actual, locked) in expected.items()
+        if actual != locked
+    ]
+    if mismatches:
+        raise ValueError("formal optimizer schedule mismatch: " + "; ".join(mismatches))
+
+
+def _epoch_frozen_llm_storage_dtype(epoch: int) -> torch.dtype:
+    try:
+        return FROZEN_LLM_STORAGE_DTYPE_SCHEDULE[epoch]
+    except KeyError as error:
+        raise ValueError(
+            "the locked frozen-LLM dtype schedule contains only epochs 1 and 2"
+        ) from error
+
+
+def _ensure_frozen_llm_storage_dtype(
+    llm: torch.nn.Module,
+    target_dtype: torch.dtype,
+) -> dict:
+    """Apply and verify the locked storage dtype without touching trainable state."""
+    if target_dtype not in {torch.float16, torch.bfloat16}:
+        raise ValueError("frozen LLM storage dtype must be FP16 or BF16")
+    trainable = [
+        name for name, parameter in llm.named_parameters() if parameter.requires_grad
+    ]
+    if trainable:
+        raise RuntimeError(
+            "frozen LLM dtype transition found trainable parameters: "
+            + ", ".join(trainable[:5])
+        )
+    floating = [
+        (name, parameter)
+        for name, parameter in llm.named_parameters()
+        if parameter.is_floating_point()
+    ]
+    if not floating:
+        raise RuntimeError("frozen LLM has no floating-point parameters")
+    before = collections.Counter(str(parameter.dtype) for _, parameter in floating)
+    transition_applied = set(before) != {str(target_dtype)}
+    if transition_applied:
+        llm.to(dtype=target_dtype)
+    after = collections.Counter(
+        str(parameter.dtype)
+        for _, parameter in llm.named_parameters()
+        if parameter.is_floating_point()
+    )
+    if set(after) != {str(target_dtype)}:
+        raise RuntimeError(f"frozen LLM dtype transition failed: {dict(after)}")
+    input_embeddings = llm.get_input_embeddings()
+    output_embeddings = llm.get_output_embeddings()
+    input_dtype = str(input_embeddings.weight.dtype)
+    output_dtype = (
+        None if output_embeddings is None else str(output_embeddings.weight.dtype)
+    )
+    if input_dtype != str(target_dtype) or output_dtype != str(target_dtype):
+        raise RuntimeError(
+            "input/output embedding dtype differs from the locked epoch dtype"
+        )
+    return {
+        "before_parameter_dtypes": dict(before),
+        "after_parameter_dtypes": dict(after),
+        "after_dtype": str(target_dtype),
+        "input_embedding_dtype": input_dtype,
+        "output_embedding_dtype": output_dtype,
+        "transition_applied": transition_applied,
+    }
+
+
+def _validated_epoch1_frozen_llm_dtype(meta: Mapping) -> dict:
+    """Prove that a resume checkpoint's completed first epoch used FP16."""
+    observed = meta.get("frozen_llm_storage_dtype_observed_by_epoch", {}).get("1")
+    if observed is not None:
+        if observed != "torch.float16":
+            raise ValueError(
+                "resume checkpoint epoch-1 frozen LLM dtype is not torch.float16"
+            )
+        return {
+            "dtype": observed,
+            "provenance": "checkpoint_manifest_runtime_validation",
+        }
+    source_commit = meta.get("source_commit")
+    if source_commit in LEGACY_EPOCH1_FP16_SOURCE_COMMITS:
+        return {
+            "dtype": "torch.float16",
+            "provenance": "validated_legacy_source_commit",
+            "source_commit": source_commit,
+        }
+    raise ValueError(
+        "resume checkpoint lacks auditable epoch-1 frozen LLM dtype evidence"
+    )
 
 
 def _validate_epoch_boundary_resume(
@@ -556,6 +664,7 @@ def _validate_epoch_boundary_resume(
             )
     if meta.get("source_dirty") is not False:
         raise ValueError("resume checkpoint was produced from a dirty source tree")
+    _validated_epoch1_frozen_llm_dtype(meta)
     cumulative = payload["cumulative_training_metrics"]
     missing_metrics = sorted(set(METRIC_KEYS).difference(cumulative))
     if missing_metrics:
@@ -675,11 +784,15 @@ def main() -> None:
             raise ValueError(
                 "formal loss_e2e_0723 runs require 2 epochs and no max-steps"
             )
+        _validate_formal_optimizer_schedule(
+            initial_lr=args.lr,
+            epoch2_lr=args.epoch2_lr,
+            weight_decay=args.weight_decay,
+            max_grad_norm=args.max_grad_norm,
+        )
     elif args.run_purpose == "calibration":
         if args.epochs != 2 or args.max_steps != 200:
-            raise ValueError(
-                "calibration is fixed to 200 steps from the first epoch"
-            )
+            raise ValueError("calibration is fixed to 200 steps from the first epoch")
     elif args.max_steps is None:
         raise ValueError("smoke runs require --max-steps")
     if args.seed != 72:
@@ -725,9 +838,11 @@ def main() -> None:
         )
     base = build_model()
     tokenization_box = [
-        build_answer_tokenization_audit(dataset, base.axis.tokenizer)
-        if rank == 0
-        else None
+        (
+            build_answer_tokenization_audit(dataset, base.axis.tokenizer)
+            if rank == 0
+            else None
+        )
     ]
     torch.distributed.broadcast_object_list(tokenization_box, src=0)
     audit["answer_tokenization"] = tokenization_box[0]
@@ -754,9 +869,7 @@ def main() -> None:
         # F0 is a reference, not an optimizable parameter in the treatment arm.
         base.axis.perceiver.fix_prompt_embeddings.requires_grad_(False)
     trainable = sum(p.numel() for p in base.parameters() if p.requires_grad)
-    initial_perceiver = (
-        _parameter_snapshot(base.axis.perceiver) if rank == 0 else None
-    )
+    initial_perceiver = _parameter_snapshot(base.axis.perceiver) if rank == 0 else None
     resume_payload = None
     resume_checkpoint_meta = None
     if args.resume_from is not None:
@@ -815,6 +928,7 @@ def main() -> None:
                 "sha256": _tensor_sha256(reference),
                 "repeat_max_abs_error": float(difference.max()),
                 "repeat_mean_abs_error": float(difference.mean()),
+                "abs_max": float(reference.float().abs().max()),
             }
         else:
             reference = fixed_hint_checkpoint_state(base.axis)
@@ -824,6 +938,7 @@ def main() -> None:
             if _tensor_sha256(reference) != fixed_hint_meta["sha256"]:
                 raise RuntimeError("restored F0 hash differs from epoch-1 manifest")
             fixed_hint_meta["resume_hash_verified"] = True
+            fixed_hint_meta["abs_max"] = float(reference.float().abs().max())
     llm = base.axis.model
     llm.gradient_checkpointing_enable()
     llm.enable_input_require_grads()
@@ -873,8 +988,7 @@ def main() -> None:
     if len(loader) != steps_per_epoch:
         raise RuntimeError("DDP loader length changed after resume validation")
     milestones = {
-        max(1, round(planned_steps * fraction))
-        for fraction in (0.25, 0.50, 0.75, 1.00)
+        max(1, round(planned_steps * fraction)) for fraction in (0.25, 0.50, 0.75, 1.00)
     }
     calibration_manifest_sha256 = None
     if args.run_purpose == "calibration":
@@ -896,6 +1010,18 @@ def main() -> None:
                 encoding="utf-8",
             )
 
+    frozen_llm_observed: dict[str, str] = {}
+    frozen_llm_runtime: dict[str, dict] = {}
+    frozen_llm_provenance: dict[str, str] = {}
+    if resume_payload is not None:
+        epoch1_dtype = _validated_epoch1_frozen_llm_dtype(resume_checkpoint_meta)
+        frozen_llm_observed["1"] = epoch1_dtype["dtype"]
+        frozen_llm_provenance["1"] = epoch1_dtype["provenance"]
+    frozen_llm_schedule = {
+        str(epoch): str(dtype)
+        for epoch, dtype in FROZEN_LLM_STORAGE_DTYPE_SCHEDULE.items()
+    }
+
     meta = {
         "experiment": "loss_e2e_0723",
         "arm": args.arm,
@@ -910,9 +1036,11 @@ def main() -> None:
         "optimizer_reset_reason": (
             "completed epoch-1 optimizer state restored"
             if resume_payload is not None
-            else "author checkpoint contains no optimizer_state_dict"
-            if not author_has_optimizer
-            else "fresh two-arm optimizer initialized from the author checkpoint"
+            else (
+                "author checkpoint contains no optimizer_state_dict"
+                if not author_has_optimizer
+                else "fresh two-arm optimizer initialized from the author checkpoint"
+            )
         ),
         "world_size": world,
         "batch_size_series_per_rank": 1,
@@ -923,24 +1051,23 @@ def main() -> None:
         "milestone_steps": sorted(milestones),
         "lr": args.lr,
         "epoch_learning_rates": {
-            "1": _epoch_learning_rate(
-                1, initial_lr=args.lr, epoch2_lr=args.epoch2_lr
-            ),
-            "2": _epoch_learning_rate(
-                2, initial_lr=args.lr, epoch2_lr=args.epoch2_lr
-            ),
+            "1": _epoch_learning_rate(1, initial_lr=args.lr, epoch2_lr=args.epoch2_lr),
+            "2": _epoch_learning_rate(2, initial_lr=args.lr, epoch2_lr=args.epoch2_lr),
         },
         "weight_decay": args.weight_decay,
         "optimizer": "torch.optim.AdamW",
+        "frozen_llm_storage_dtype_policy": ("epoch1_fp16_epoch2_bfloat16"),
+        "frozen_llm_storage_dtype_schedule": frozen_llm_schedule,
+        "frozen_llm_storage_dtype_observed_by_epoch": frozen_llm_observed,
+        "frozen_llm_storage_dtype_observation_provenance": (frozen_llm_provenance),
+        "frozen_llm_storage_dtype_runtime": frozen_llm_runtime,
         "optimizer_betas": list(optimizer.param_groups[0]["betas"]),
         "optimizer_eps": optimizer.param_groups[0]["eps"],
         "scheduler": None,
         "warmup_steps": 0,
         "max_grad_norm": args.max_grad_norm,
         "seed": args.seed,
-        "calibration_subset_manifest_sha256": (
-            calibration_manifest_sha256
-        ),
+        "calibration_subset_manifest_sha256": (calibration_manifest_sha256),
         "segment_alpha": args.alpha,
         "tf_rule": (
             "conclusion = True/False label + first complete semantic statement; "
@@ -1034,6 +1161,24 @@ def main() -> None:
         )
         for group in optimizer.param_groups:
             group["lr"] = epoch_lr
+        dtype_record = _ensure_frozen_llm_storage_dtype(
+            ddp.module.base.axis.model,
+            _epoch_frozen_llm_storage_dtype(epoch),
+        )
+        epoch_key = str(epoch)
+        meta["frozen_llm_storage_dtype_observed_by_epoch"][epoch_key] = dtype_record[
+            "after_dtype"
+        ]
+        meta["frozen_llm_storage_dtype_observation_provenance"][
+            epoch_key
+        ] = "runtime_parameter_validation"
+        meta["frozen_llm_storage_dtype_runtime"][epoch_key] = dtype_record
+        if rank == 0:
+            (output / "run_manifest.json").write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        torch.distributed.barrier()
         sampler.set_epoch(epoch)
         ddp.train()
         ddp.module.base.ts_pretrain_model.eval()
@@ -1051,10 +1196,7 @@ def main() -> None:
                 local_rank,
                 non_blocking=True,
             )
-            valid_rows = [
-                answer.strip() != ERROR_ANSWER
-                for answer in batch["answers"]
-            ]
+            valid_rows = [answer.strip() != ERROR_ANSWER for answer in batch["answers"]]
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 outputs = ddp(
                     time_series,
@@ -1130,9 +1272,7 @@ def main() -> None:
                 )
 
             if global_step in milestones and rank == 0:
-                optimization["parameter_relative_change_by_step"][
-                    str(global_step)
-                ] = {
+                optimization["parameter_relative_change_by_step"][str(global_step)] = {
                     "all_perceiver_parameters": _relative_parameter_change(
                         ddp.module.base.axis.perceiver,
                         initial_perceiver,
@@ -1143,9 +1283,7 @@ def main() -> None:
                         initially_trainable_names,
                     ),
                 }
-                meta["optimization_diagnostics"] = _optimization_summary(
-                    optimization
-                )
+                meta["optimization_diagnostics"] = _optimization_summary(optimization)
                 save_atomic(
                     _checkpoint_payload(
                         model=ddp.module.base,
@@ -1179,12 +1317,8 @@ def main() -> None:
 
     elapsed = time.perf_counter() - start_time
     if rank == 0:
-        if str(global_step) not in optimization[
-            "parameter_relative_change_by_step"
-        ]:
-            optimization["parameter_relative_change_by_step"][
-                str(global_step)
-            ] = {
+        if str(global_step) not in optimization["parameter_relative_change_by_step"]:
+            optimization["parameter_relative_change_by_step"][str(global_step)] = {
                 "all_perceiver_parameters": _relative_parameter_change(
                     ddp.module.base.axis.perceiver,
                     initial_perceiver,
@@ -1204,17 +1338,20 @@ def main() -> None:
             "planned_steps": planned_steps,
             "formal_complete": not stopped_early and global_step == planned_steps,
             "epoch_learning_rates": meta["epoch_learning_rates"],
+            "frozen_llm_storage_dtype_schedule": meta[
+                "frozen_llm_storage_dtype_schedule"
+            ],
+            "frozen_llm_storage_dtype_observed_by_epoch": meta[
+                "frozen_llm_storage_dtype_observed_by_epoch"
+            ],
+            "frozen_llm_storage_dtype_runtime": meta[
+                "frozen_llm_storage_dtype_runtime"
+            ],
             "wall_seconds_this_process": elapsed,
             "steps_executed_this_process": global_step - process_start_step,
-            "steps_per_second_per_rank": (
-                (global_step - process_start_step) / elapsed
-            ),
+            "steps_per_second_per_rank": ((global_step - process_start_step) / elapsed),
             "qa_rows_per_second_global": (
-                (
-                    cumulative["valid_row_count"]
-                    - process_start_valid_rows
-                )
-                / elapsed
+                (cumulative["valid_row_count"] - process_start_valid_rows) / elapsed
             ),
             "metrics": _summary(cumulative),
             "raw_metric_sums": cumulative,

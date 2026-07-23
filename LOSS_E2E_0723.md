@@ -18,10 +18,14 @@ without changing the existing Phase-I to Phase-II reproduction entry points.
 - Both arms run exactly two complete epochs on three DDP ranks with one series
   per rank and no early stopping. The 25%, 50%, 75%, and 100% checkpoints are
   diagnostics; the 100% endpoint is the primary comparison.
+- Both arms use the same frozen-LLM storage-precision schedule: FP16 in epoch 1
+  and BF16 in epoch 2. The trainable Perceiver and AdamW state remain FP32.
+  The run manifest records the planned and runtime-verified dtype for each epoch.
 - The control uses the original dynamic fixed hint and global continuation-token
   NLL. The treatment caches fixed hint F0 once at step zero under BF16 autocast,
   stores the injected FP16 tensor in every checkpoint, stops its gradient, and
-  uses the segmented objective.
+  uses the segmented objective. In epoch 2 it is cast to the BF16 input-embedding
+  dtype at injection; the cached tensor itself and its hash remain unchanged.
 - Segment weight is `alpha=0.40` for the conclusion and `0.60` for the
   explanation. Each segment is token-mean normalized, each QA row is combined,
   and QA rows are then mean normalized globally across all DDP ranks.
@@ -81,11 +85,23 @@ The LR=1e-4 treatment trajectory produced a fail-closed non-finite gradient at
 step 9987, after a clean completed epoch-1 checkpoint at step 9500. The
 confirmed recovery protocol is identical across both arms:
 
-- epoch 1: AdamW LR `1e-4`;
-- epoch 2: AdamW LR `3e-5`;
+- epoch 1: AdamW LR `1e-4`, frozen LLM stored in FP16;
+- epoch 2: AdamW LR `3e-5`, frozen LLM stored in BF16;
 - treatment resumes only from the complete step-9500 epoch boundary, restoring
   model, optimizer, cumulative metrics and cached F0;
 - no mid-epoch batch is skipped and no test score selects this schedule.
+
+The lower LR alone later encountered another fail-closed non-finite gradient at
+step 11238. A segregated diagnostic replay changed only the frozen LLM storage
+dtype to BF16 at the epoch-2 boundary. It executed through step 11650 (412 steps
+past the failure), recorded zero non-finite-gradient steps, and then ended by its
+predeclared 1800-second timeout. The diagnostic state is not a formal checkpoint
+and is never resumed. Its role is limited to selecting the common numerical
+storage policy above; paper140 and Gemini/G-Eval were not consulted.
+
+The legacy step-9500 checkpoint is accepted only because its clean source commit
+is explicitly allowlisted as the audited FP16 epoch-1 implementation. New
+checkpoints must carry runtime dtype evidence in their reproduction manifest.
 
 The treatment recovery command adds only the audited epoch-boundary checkpoint:
 
