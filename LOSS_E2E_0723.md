@@ -116,6 +116,54 @@ CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
   --resume-from experiments/loss_e2e_0723/treatment/step_9500.pth
 ```
 
+## Four-milestone validation selection
+
+Each arm predeclares exactly four candidate checkpoints: steps `4750`, `9500`,
+`14250`, and `19000`. The unique checkpoint used for paper140 is selected on
+the frozen seed-72 5% validation split (1500 series / 3000 QA rows), never on
+test generation or judge scores.
+
+The common selection metric for both arms is the sum of teacher-forced global
+NLL over all effective answer tokens divided by the exact effective-token count.
+Here, effective means the shifted AXIS label is not `-100` on a non-error row
+under the common global continuation objective. The terminal EOS supervised by
+that objective is included; the Treatment-only conclusion/explanation weights
+do not enter checkpoint selection.
+Rows whose answer is exactly `Error generating answer.` are excluded before both
+the numerator and denominator are accumulated. Three ranks process disjoint
+series partitions, aggregate the numerator and denominator in FP64, and require
+identical validation identities and denominators across all four candidates.
+The minimum NLL wins; an exact numerical tie deterministically chooses the lower
+step. Formal validation fixes the frozen LLM and autocast to FP16 to match the
+repository inference path; this evaluation precision is independent of the
+FP16-to-BF16 training storage schedule.
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.validate_loss_e2e \
+  --checkpoints \
+    experiments/loss_e2e_0723/${arm}/step_4750.pth \
+    experiments/loss_e2e_0723/${arm}/step_9500.pth \
+    experiments/loss_e2e_0723/${arm}/step_14250.pth \
+    experiments/loss_e2e_0723/${arm}/step_19000.pth \
+  --arm ${arm} \
+  --data /path/to/anomaly_llava_training_dataset \
+  --series-split-manifest /path/to/manifests_seed72/phase2_split.json \
+  --output experiments/loss_e2e_0723/${arm}/validation
+
+python -m tools.axis_repro.select_best_loss_e2e \
+  experiments/loss_e2e_0723/${arm}/validation/step_4750.json \
+  experiments/loss_e2e_0723/${arm}/validation/step_9500.json \
+  experiments/loss_e2e_0723/${arm}/validation/step_14250.json \
+  experiments/loss_e2e_0723/${arm}/validation/step_19000.json \
+  --arm ${arm} \
+  --output experiments/loss_e2e_0723/${arm}/best_validation_token_nll.json
+```
+
+Treatment completes this selection, paper140 inference, Gemini 2.5 Pro G-Eval,
+and result audit before Control training starts. Control then repeats the same
+training, four-candidate selection, inference, judge, and audit protocol.
+
 ## Learning-rate calibration
 
 The attention-risk review requires a fixed, non-test calibration before a

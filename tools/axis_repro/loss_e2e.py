@@ -380,7 +380,14 @@ def _chunk_token_nll(
             )
             return flat.view_as(yy)
 
-        chunks.append(checkpoint(chunk_loss, h, y, use_reentrant=False))
+        if torch.is_grad_enabled():
+            chunk = checkpoint(chunk_loss, h, y, use_reentrant=False)
+        else:
+            # Validation never needs activation recomputation. Running the
+            # same FP32 token loss directly is both faster and compatible with
+            # torch.inference_mode() tensors.
+            chunk = chunk_loss(h, y)
+        chunks.append(chunk)
     return torch.cat(chunks, dim=1)
 
 
