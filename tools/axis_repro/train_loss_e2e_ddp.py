@@ -45,6 +45,7 @@ METRIC_KEYS = (
     "objective_count",
     "token_nll_sum",
     "token_count",
+    "valid_row_count",
     "conclusion_mean_sum",
     "conclusion_row_count",
     "explanation_mean_sum",
@@ -198,7 +199,8 @@ def _summary(values: Mapping[str, float]) -> dict:
             "open_ended_objective_sum",
             "open_ended_row_count",
         ),
-        "objective_rows": values.get("objective_count", 0.0),
+        "objective_denominator": values.get("objective_count", 0.0),
+        "valid_rows": values.get("valid_row_count", 0.0),
         "token_count": values.get("token_count", 0.0),
         "both_segment_rows": values.get("both_segment_row_count", 0.0),
         "conclusion_only_rows": values.get("conclusion_only_row_count", 0.0),
@@ -550,7 +552,7 @@ def main() -> None:
             "wall_seconds": elapsed,
             "steps_per_second_per_rank": global_step / elapsed,
             "qa_rows_per_second_global": (
-                cumulative["objective_count"] / elapsed
+                cumulative["valid_row_count"] / elapsed
             ),
             "metrics": _summary(cumulative),
             "raw_metric_sums": cumulative,

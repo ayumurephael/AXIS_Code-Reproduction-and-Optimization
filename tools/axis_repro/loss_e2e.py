@@ -344,6 +344,7 @@ def objective_from_hidden(
     result = {
         "token_nll_sum": token_sum,
         "token_count": token_count,
+        "valid_row_count": row_valid.sum().to(torch.float32),
         "conclusion_mean_sum": zero,
         "conclusion_row_count": token_count.new_zeros(()),
         "explanation_mean_sum": zero,
