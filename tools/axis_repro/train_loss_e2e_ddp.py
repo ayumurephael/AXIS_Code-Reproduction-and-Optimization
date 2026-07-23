@@ -42,8 +42,9 @@ from .loss_e2e_runtime import (
     initialize_fixed_hint_reference,
     install_fixed_hint_runtime,
     load_loss_e2e_checkpoint,
+    set_fixed_hint_reference,
 )
-from .model_utils import build_model, freeze_for_phase2, sha256_file
+from .model_utils import build_model, freeze_for_phase2, load_axis_payload, sha256_file
 
 
 METRIC_KEYS = (
@@ -467,6 +468,113 @@ def _optimization_summary(state: Mapping) -> dict:
     }
 
 
+def _optimization_state_from_summary(
+    summary: Mapping,
+    *,
+    expected_max_grad_norm: Optional[float],
+) -> dict:
+    """Restore auditable optimizer diagnostics from an epoch checkpoint."""
+    count = int(summary["gradient_norm_count"])
+    mean = summary["gradient_l2_norm_mean"]
+    if count <= 0 or mean is None:
+        raise ValueError("resume checkpoint has no gradient diagnostics")
+    if summary.get("max_grad_norm") != expected_max_grad_norm:
+        raise ValueError("resume checkpoint gradient-clipping policy changed")
+    return {
+        "gradient_norm_count": count,
+        "gradient_norm_sum": float(mean) * count,
+        "gradient_norm_max": float(summary["gradient_l2_norm_max"]),
+        "gradient_norm_last": float(summary["gradient_l2_norm_last"]),
+        "nonfinite_gradient_steps": int(summary["nonfinite_gradient_steps"]),
+        "clipped_steps": int(summary["clipped_steps"]),
+        "max_grad_norm": expected_max_grad_norm,
+        "parameter_relative_change_by_step": dict(
+            summary["parameter_relative_change_by_step"]
+        ),
+    }
+
+
+def _epoch_learning_rate(
+    epoch: int,
+    *,
+    initial_lr: float,
+    epoch2_lr: Optional[float],
+) -> float:
+    if epoch < 1:
+        raise ValueError("epoch numbering starts at one")
+    return float(epoch2_lr if epoch >= 2 and epoch2_lr is not None else initial_lr)
+
+
+def _validate_epoch_boundary_resume(
+    payload: Mapping,
+    *,
+    arm: str,
+    steps_per_epoch: int,
+    seed: int,
+    alpha: float,
+    initial_lr: float,
+    weight_decay: float,
+    data_audit_sha256: str,
+    author_checkpoint_sha256: str,
+) -> Mapping:
+    """Fail closed unless a checkpoint is the exact completed epoch-1 state."""
+    required = {
+        "epoch",
+        "global_step",
+        "model_state_dict",
+        "optimizer_state_dict",
+        "reproduction_meta",
+        "cumulative_training_metrics",
+    }
+    missing = sorted(required.difference(payload))
+    if missing:
+        raise ValueError(f"resume checkpoint is missing fields: {missing}")
+    if int(payload["epoch"]) != 1 or int(payload["global_step"]) != steps_per_epoch:
+        raise ValueError(
+            "formal resume is allowed only at the completed epoch-1 boundary"
+        )
+    meta = payload["reproduction_meta"]
+    expected = {
+        "experiment": "loss_e2e_0723",
+        "arm": arm,
+        "run_purpose": "formal",
+        "world_size": 3,
+        "epochs": 2,
+        "planned_steps": 2 * steps_per_epoch,
+        "seed": seed,
+        "segment_alpha": alpha,
+        "lr": initial_lr,
+        "weight_decay": weight_decay,
+        "data_audit_sha256": data_audit_sha256,
+        "author_checkpoint_sha256": author_checkpoint_sha256,
+    }
+    for key, value in expected.items():
+        if meta.get(key) != value:
+            raise ValueError(
+                f"resume checkpoint identity mismatch for {key}: "
+                f"{meta.get(key)!r} != {value!r}"
+            )
+    if meta.get("source_dirty") is not False:
+        raise ValueError("resume checkpoint was produced from a dirty source tree")
+    cumulative = payload["cumulative_training_metrics"]
+    missing_metrics = sorted(set(METRIC_KEYS).difference(cumulative))
+    if missing_metrics:
+        raise ValueError(
+            f"resume checkpoint lacks cumulative metrics: {missing_metrics}"
+        )
+    expected_valid_rows = int(meta["data_counts"]["qa_rows_included"])
+    if int(cumulative["valid_row_count"]) != expected_valid_rows:
+        raise ValueError("resume checkpoint does not contain one full data epoch")
+    if int(meta["optimization_diagnostics"]["gradient_norm_count"]) != steps_per_epoch:
+        raise ValueError("resume checkpoint gradient count is not one full epoch")
+    if int(meta["optimization_diagnostics"]["nonfinite_gradient_steps"]) != 0:
+        raise ValueError("resume checkpoint already contains non-finite gradients")
+    state = payload["model_state_dict"]
+    if arm == "treatment" and "fixed_hint_reference" not in state:
+        raise ValueError("treatment resume checkpoint has no cached F0")
+    return meta
+
+
 def _calibration_subset_manifest(
     dataset: AXISAnomalyQADataset,
     *,
@@ -526,6 +634,18 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--epochs", type=int, default=2)
     result.add_argument("--lr", type=float, default=1e-4)
     result.add_argument("--weight-decay", type=float, default=1e-5)
+    result.add_argument(
+        "--epoch2-lr",
+        type=float,
+        help="Optional epoch-2 LR; used identically by both formal arms.",
+    )
+    result.add_argument(
+        "--resume-from",
+        help=(
+            "Resume only from a fail-closed completed epoch-1 checkpoint; "
+            "mid-epoch recovery is forbidden."
+        ),
+    )
     result.add_argument("--seed", type=int, default=72)
     result.add_argument("--alpha", type=float, default=0.40)
     result.add_argument("--num-workers", type=int, default=2)
@@ -568,6 +688,13 @@ def main() -> None:
         raise ValueError("the confirmed treatment alpha is exactly 0.40")
     if args.max_grad_norm is not None and args.max_grad_norm <= 0:
         raise ValueError("--max-grad-norm must be positive when provided")
+    if args.epoch2_lr is not None and args.epoch2_lr <= 0:
+        raise ValueError("--epoch2-lr must be positive when provided")
+    if args.resume_from is not None:
+        if args.run_purpose != "formal":
+            raise ValueError("resume is supported only for formal runs")
+        if args.epoch2_lr is None:
+            raise ValueError("formal resume requires an explicit --epoch2-lr")
 
     rank = int(os.environ["RANK"])
     world = int(os.environ["WORLD_SIZE"])
@@ -610,6 +737,8 @@ def main() -> None:
         )
     audit_text = json.dumps(audit, ensure_ascii=False, indent=2)
     audit_sha256 = hashlib.sha256(audit_text.encode("utf-8")).hexdigest()
+    author_checkpoint_sha256 = sha256_file(args.checkpoint)
+    steps_per_epoch = math.ceil(len(dataset) / world)
     if rank == 0:
         (output / "data_exclusion_manifest.json").write_text(
             audit_text,
@@ -628,6 +757,31 @@ def main() -> None:
     initial_perceiver = (
         _parameter_snapshot(base.axis.perceiver) if rank == 0 else None
     )
+    resume_payload = None
+    resume_checkpoint_meta = None
+    if args.resume_from is not None:
+        resume_payload = torch.load(
+            args.resume_from,
+            map_location="cpu",
+            weights_only=False,
+        )
+        resume_checkpoint_meta = _validate_epoch_boundary_resume(
+            resume_payload,
+            arm=args.arm,
+            steps_per_epoch=steps_per_epoch,
+            seed=args.seed,
+            alpha=args.alpha,
+            initial_lr=args.lr,
+            weight_decay=args.weight_decay,
+            data_audit_sha256=audit_sha256,
+            author_checkpoint_sha256=author_checkpoint_sha256,
+        )
+        load_axis_payload(base, resume_payload, strict=True)
+        if args.arm == "treatment":
+            set_fixed_hint_reference(
+                base.axis,
+                resume_payload["model_state_dict"]["fixed_hint_reference"],
+            )
     initially_trainable_names = {
         name
         for name, parameter in base.axis.perceiver.named_parameters()
@@ -644,23 +798,32 @@ def main() -> None:
         "repeat_mean_abs_error": None,
     }
     if args.arm == "treatment":
-        with torch.autocast("cuda", dtype=torch.bfloat16):
-            reference = initialize_fixed_hint_reference(base.axis)
-            word_embeddings = base.axis.model.get_input_embeddings().weight
-            source = base.axis.perceiver.get_source_embeddings(word_embeddings)
-            repeated = base.axis.perceiver.process_fixed_embeddings(
-                source,
-                base.axis.num_fixed_tokens,
-            ).to(reference.dtype)
-        difference = (reference.float() - repeated.float()).abs()
-        fixed_hint_meta = {
-            "policy": "cached_step0",
-            "dtype": str(reference.dtype),
-            "shape": list(reference.shape),
-            "sha256": _tensor_sha256(reference),
-            "repeat_max_abs_error": float(difference.max()),
-            "repeat_mean_abs_error": float(difference.mean()),
-        }
+        if resume_payload is None:
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                reference = initialize_fixed_hint_reference(base.axis)
+                word_embeddings = base.axis.model.get_input_embeddings().weight
+                source = base.axis.perceiver.get_source_embeddings(word_embeddings)
+                repeated = base.axis.perceiver.process_fixed_embeddings(
+                    source,
+                    base.axis.num_fixed_tokens,
+                ).to(reference.dtype)
+            difference = (reference.float() - repeated.float()).abs()
+            fixed_hint_meta = {
+                "policy": "cached_step0",
+                "dtype": str(reference.dtype),
+                "shape": list(reference.shape),
+                "sha256": _tensor_sha256(reference),
+                "repeat_max_abs_error": float(difference.max()),
+                "repeat_mean_abs_error": float(difference.mean()),
+            }
+        else:
+            reference = fixed_hint_checkpoint_state(base.axis)
+            if reference is None:
+                raise RuntimeError("restored treatment checkpoint has no F0")
+            fixed_hint_meta = dict(resume_checkpoint_meta["fixed_hint"])
+            if _tensor_sha256(reference) != fixed_hint_meta["sha256"]:
+                raise RuntimeError("restored F0 hash differs from epoch-1 manifest")
+            fixed_hint_meta["resume_hash_verified"] = True
     llm = base.axis.model
     llm.gradient_checkpointing_enable()
     llm.enable_input_require_grads()
@@ -686,6 +849,8 @@ def main() -> None:
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
+    if resume_payload is not None:
+        optimizer.load_state_dict(resume_payload["optimizer_state_dict"])
 
     sampler = DistributedSampler(
         dataset,
@@ -705,6 +870,8 @@ def main() -> None:
         collate_fn=collate_fn,
     )
     planned_steps = args.epochs * len(loader)
+    if len(loader) != steps_per_epoch:
+        raise RuntimeError("DDP loader length changed after resume validation")
     milestones = {
         max(1, round(planned_steps * fraction))
         for fraction in (0.25, 0.50, 0.75, 1.00)
@@ -737,13 +904,15 @@ def main() -> None:
         "source_dirty": bool(_git_value("status", "--porcelain")),
         "run_purpose": args.run_purpose,
         "author_checkpoint": str(Path(args.checkpoint).resolve()),
-        "author_checkpoint_sha256": sha256_file(args.checkpoint),
+        "author_checkpoint_sha256": author_checkpoint_sha256,
         "author_checkpoint_epoch": author_payload.get("epoch"),
         "author_checkpoint_has_optimizer_state": author_has_optimizer,
         "optimizer_reset_reason": (
-            "author checkpoint contains no optimizer_state_dict"
+            "completed epoch-1 optimizer state restored"
+            if resume_payload is not None
+            else "author checkpoint contains no optimizer_state_dict"
             if not author_has_optimizer
-            else "two-arm protocol requires identical fresh optimizers"
+            else "fresh two-arm optimizer initialized from the author checkpoint"
         ),
         "world_size": world,
         "batch_size_series_per_rank": 1,
@@ -753,6 +922,14 @@ def main() -> None:
         "planned_steps": planned_steps,
         "milestone_steps": sorted(milestones),
         "lr": args.lr,
+        "epoch_learning_rates": {
+            "1": _epoch_learning_rate(
+                1, initial_lr=args.lr, epoch2_lr=args.epoch2_lr
+            ),
+            "2": _epoch_learning_rate(
+                2, initial_lr=args.lr, epoch2_lr=args.epoch2_lr
+            ),
+        },
         "weight_decay": args.weight_decay,
         "optimizer": "torch.optim.AdamW",
         "optimizer_betas": list(optimizer.param_groups[0]["betas"]),
@@ -798,6 +975,19 @@ def main() -> None:
             "gpu": torch.cuda.get_device_name(local_rank),
         },
     }
+    if resume_payload is not None:
+        meta["resume"] = {
+            "policy": "completed_epoch_boundary_only",
+            "checkpoint": str(Path(args.resume_from).resolve()),
+            "checkpoint_sha256": sha256_file(args.resume_from),
+            "checkpoint_epoch": int(resume_payload["epoch"]),
+            "checkpoint_global_step": int(resume_payload["global_step"]),
+            "checkpoint_source_commit": resume_checkpoint_meta["source_commit"],
+            "optimizer_state_restored": True,
+            "cumulative_metrics_restored": True,
+            "sampler_resume_epoch": int(resume_payload["epoch"]) + 1,
+            "mid_epoch_batches_skipped": 0,
+        }
     if rank == 0:
         (output / "run_manifest.json").write_text(
             json.dumps(meta, ensure_ascii=False, indent=2),
@@ -805,22 +995,45 @@ def main() -> None:
         )
         print(json.dumps(meta, ensure_ascii=False), flush=True)
 
-    cumulative = {key: 0.0 for key in METRIC_KEYS}
-    optimization = {
-        "gradient_norm_count": 0,
-        "gradient_norm_sum": 0.0,
-        "gradient_norm_max": 0.0,
-        "gradient_norm_last": None,
-        "nonfinite_gradient_steps": 0,
-        "clipped_steps": 0,
-        "max_grad_norm": args.max_grad_norm,
-        "parameter_relative_change_by_step": {},
-    }
-    global_step = 0
+    if resume_payload is None:
+        cumulative = {key: 0.0 for key in METRIC_KEYS}
+        optimization = {
+            "gradient_norm_count": 0,
+            "gradient_norm_sum": 0.0,
+            "gradient_norm_max": 0.0,
+            "gradient_norm_last": None,
+            "nonfinite_gradient_steps": 0,
+            "clipped_steps": 0,
+            "max_grad_norm": args.max_grad_norm,
+            "parameter_relative_change_by_step": {},
+        }
+        global_step = 0
+        start_epoch = 1
+    else:
+        cumulative = {
+            key: float(resume_payload["cumulative_training_metrics"][key])
+            for key in METRIC_KEYS
+        }
+        optimization = _optimization_state_from_summary(
+            resume_checkpoint_meta["optimization_diagnostics"],
+            expected_max_grad_norm=args.max_grad_norm,
+        )
+        global_step = int(resume_payload["global_step"])
+        start_epoch = int(resume_payload["epoch"]) + 1
+    process_start_step = global_step
+    process_start_valid_rows = cumulative["valid_row_count"]
     start_time = time.perf_counter()
     timed_start = None
+    timed_step_origin = process_start_step
     stopped_early = False
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
+        epoch_lr = _epoch_learning_rate(
+            epoch,
+            initial_lr=args.lr,
+            epoch2_lr=args.epoch2_lr,
+        )
+        for group in optimizer.param_groups:
+            group["lr"] = epoch_lr
         sampler.set_epoch(epoch)
         ddp.train()
         ddp.module.base.ts_pretrain_model.eval()
@@ -891,11 +1104,12 @@ def main() -> None:
             for key, value in zip(METRIC_KEYS, packed.tolist()):
                 cumulative[key] += value
 
-            if global_step == 10:
+            if global_step == process_start_step + 10:
                 timed_start = time.perf_counter()
+                timed_step_origin = global_step
             if rank == 0 and global_step % args.log_every == 0:
                 elapsed = time.perf_counter() - (timed_start or start_time)
-                measured_steps = max(1, global_step - (10 if timed_start else 0))
+                measured_steps = max(1, global_step - timed_step_origin)
                 rate = measured_steps / elapsed
                 remaining = max(0, planned_steps - global_step) / rate
                 step_values = dict(zip(METRIC_KEYS, packed.tolist()))
@@ -989,10 +1203,18 @@ def main() -> None:
             "steps": global_step,
             "planned_steps": planned_steps,
             "formal_complete": not stopped_early and global_step == planned_steps,
-            "wall_seconds": elapsed,
-            "steps_per_second_per_rank": global_step / elapsed,
+            "epoch_learning_rates": meta["epoch_learning_rates"],
+            "wall_seconds_this_process": elapsed,
+            "steps_executed_this_process": global_step - process_start_step,
+            "steps_per_second_per_rank": (
+                (global_step - process_start_step) / elapsed
+            ),
             "qa_rows_per_second_global": (
-                cumulative["valid_row_count"] / elapsed
+                (
+                    cumulative["valid_row_count"]
+                    - process_start_valid_rows
+                )
+                / elapsed
             ),
             "metrics": _summary(cumulative),
             "raw_metric_sums": cumulative,

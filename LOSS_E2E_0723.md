@@ -59,7 +59,8 @@ CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
   --checkpoint /path/to/axis_qa_by_pretrain_best_accelerate/model_optimizer.pth \
   --data /path/to/anomaly_llava_training_dataset \
   --output experiments/loss_e2e_0723/control \
-  --arm control --epochs 2 --seed 72 --lr 1e-4 --weight-decay 1e-5
+  --arm control --epochs 2 --seed 72 --lr 1e-4 --epoch2-lr 3e-5 \
+  --weight-decay 1e-5
 
 CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
   -m tools.axis_repro.train_loss_e2e_ddp \
@@ -67,12 +68,37 @@ CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
   --data /path/to/anomaly_llava_training_dataset \
   --output experiments/loss_e2e_0723/treatment \
   --arm treatment --epochs 2 --seed 72 --alpha 0.40 \
-  --lr 1e-4 --weight-decay 1e-5
+  --lr 1e-4 --epoch2-lr 3e-5 --weight-decay 1e-5
 ```
 
 Use `tools.axis_repro.run_inference_loss_e2e` for checkpoints from this
 experiment. It is identical to the pinned inference protocol except that it
 restores the treatment checkpoint's cached F0 tensor.
+
+## Confirmed formal recovery schedule
+
+The LR=1e-4 treatment trajectory produced a fail-closed non-finite gradient at
+step 9987, after a clean completed epoch-1 checkpoint at step 9500. The
+confirmed recovery protocol is identical across both arms:
+
+- epoch 1: AdamW LR `1e-4`;
+- epoch 2: AdamW LR `3e-5`;
+- treatment resumes only from the complete step-9500 epoch boundary, restoring
+  model, optimizer, cumulative metrics and cached F0;
+- no mid-epoch batch is skipped and no test score selects this schedule.
+
+The treatment recovery command adds only the audited epoch-boundary checkpoint:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.train_loss_e2e_ddp \
+  --checkpoint /path/to/author/model_optimizer.pth \
+  --data /path/to/anomaly_llava_training_dataset \
+  --output experiments/loss_e2e_0723/treatment \
+  --arm treatment --epochs 2 --seed 72 --alpha 0.40 \
+  --lr 1e-4 --epoch2-lr 3e-5 --weight-decay 1e-5 \
+  --resume-from experiments/loss_e2e_0723/treatment/step_9500.pth
+```
 
 ## Learning-rate calibration
 
