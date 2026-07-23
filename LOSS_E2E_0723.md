@@ -31,9 +31,22 @@ without changing the existing Phase-I to Phase-II reproduction entry points.
 - MC split priority is Explanation/Reasoning marker, blank line, first line,
   first sentence, then whole-answer fallback. OE uses the first sentence and
   merges the second when the first contains fewer than five content tokens.
-- Prompt, padding, BOS/EOS, separator, `Answer:` and split-marker tokens are not
-  part of treatment segments. Fast-tokenizer offset mappings bind character
-  spans to the exact answer tokenization.
+- Prompt, padding, BOS, intermediate tokenizer special tokens, separator,
+  `Answer:`, and split-marker tokens are not part of treatment segments. The
+  final appended EOS is supervised by the explanation when it exists and by
+  the conclusion otherwise. Fast-tokenizer offsets bind character spans to the
+  exact answer tokenization.
+- Standalone answer encoding uses `truncation=False`. The formal preflight
+  audits all included answers, requires zero over-limit answers, and fails
+  closed if its untruncated answer block differs from the baseline full input.
+- Sentence boundaries protect common abbreviations such as `e.g.` and `i.e.`
+  when they continue a statement. The exclusion manifest also records
+  conclusion/explanation character and content-word distributions plus three
+  deterministic examples for every segmentation rule.
+- Every step records the global L2 norm of the DDP-averaged gradient. Milestone
+  checkpoints and the final summary record relative parameter change from the
+  common author checkpoint. Gradient clipping is available explicitly but is
+  disabled in the locked two-arm protocol unless a calibration run justifies it.
 
 ## Formal commands
 
@@ -60,3 +73,24 @@ CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
 Use `tools.axis_repro.run_inference_loss_e2e` for checkpoints from this
 experiment. It is identical to the pinned inference protocol except that it
 restores the treatment checkpoint's cached F0 tensor.
+
+## Learning-rate calibration
+
+The attention-risk review requires a fixed, non-test calibration before a
+revised formal run. Run all four combinations of arm and learning rate with
+`--run-purpose calibration --max-steps 200`, keeping every other argument
+identical:
+
+```bash
+# Repeat for arm={control,treatment} and lr={1e-4,3e-5}.
+CUDA_VISIBLE_DEVICES=0,1,2 torchrun --standalone --nproc_per_node=3 \
+  -m tools.axis_repro.train_loss_e2e_ddp \
+  --checkpoint /path/to/model_optimizer.pth \
+  --data /path/to/anomaly_llava_training_dataset \
+  --output experiments/loss_e2e_0723/calibration/${arm}_${lr} \
+  --arm ${arm} --run-purpose calibration --max-steps 200 \
+  --epochs 2 --seed 72 --alpha 0.40 --lr ${lr} --weight-decay 1e-5
+```
+
+The script writes the exact 600-series rank/order manifest. LR selection must
+use gradient norms, parameter drift, and calibration loss only—never paper140.

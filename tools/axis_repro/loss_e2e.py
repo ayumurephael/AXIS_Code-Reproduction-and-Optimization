@@ -23,6 +23,21 @@ ERROR_ANSWER = "Error generating answer."
 
 _CONTENT_WORD = re.compile(r"[A-Za-z]+(?:['-][A-Za-z]+)*|\d+(?:\.\d+)?")
 _SENTENCE_END = re.compile(r"[.!?](?:[\"')\]]*)(?=\s|$)")
+_ABBREVIATION = re.compile(
+    r"(?:\b(?:e\.g|i\.e|a\.k\.a|etc|vs|approx|resp|incl|excl|"
+    r"fig|eq|no|mr|mrs|ms|dr|prof|sr|jr))\.$",
+    re.IGNORECASE,
+)
+_INITIALISM = re.compile(r"(?:\b[A-Za-z]\.){2,}$")
+_ALWAYS_PROTECTED_ABBREVIATIONS = {
+    "mr.",
+    "mrs.",
+    "ms.",
+    "dr.",
+    "prof.",
+    "sr.",
+    "jr.",
+}
 _MC_MARKER = re.compile(r"\b(?:Explanation|Reasoning)\s*:\s*", re.IGNORECASE)
 _BLANK_LINE = re.compile(r"\r?\n[ \t]*\r?\n")
 _NEWLINE = re.compile(r"\r?\n")
@@ -74,11 +89,56 @@ def _trim_span(text: str, start: int, end: int) -> Optional[Span]:
     return Span(start, end) if end > start else None
 
 
+def content_word_count(text: str) -> int:
+    return len(_CONTENT_WORD.findall(text))
+
+
+def _protected_abbreviation_period(text: str, period: int, end: int) -> bool:
+    """Return whether a candidate period is internal to an abbreviation.
+
+    A protected abbreviation is not allowed to consume a genuine sentence end:
+    general abbreviations are protected only when followed by a lowercase word,
+    a number, or an opening delimiter. Titles are always protected when followed
+    by more text (for example, ``Dr. Smith``).
+    """
+    prefix = text[:period + 1]
+    next_index = period + 1
+    while next_index < end and text[next_index].isspace():
+        next_index += 1
+    if next_index >= end:
+        return False
+    # A leading MC label (``A. Stable``) is not a complete semantic sentence.
+    if re.fullmatch(r"\s*[A-D]\.", prefix, flags=re.IGNORECASE):
+        return True
+    initialism = _INITIALISM.search(prefix)
+    match = _ABBREVIATION.search(prefix)
+    if initialism is None and match is None:
+        return False
+    following = text[next_index]
+    if initialism is not None:
+        return (
+            following.islower()
+            or following.isdigit()
+            or following in "([{"
+        )
+    assert match is not None
+    abbreviation = match.group(0).lower()
+    if abbreviation in _ALWAYS_PROTECTED_ABBREVIATIONS:
+        return True
+    return following.islower() or following.isdigit() or following in "([{"
+
+
 def _sentence_spans(text: str, start: int = 0, end: Optional[int] = None) -> List[Span]:
     end = len(text) if end is None else end
     spans: List[Span] = []
     cursor = start
     for match in _SENTENCE_END.finditer(text, start, end):
+        if text[match.start()] == "." and _protected_abbreviation_period(
+            text,
+            match.start(),
+            end,
+        ):
+            continue
         span = _trim_span(text, cursor, match.end())
         if span is not None:
             spans.append(span)
@@ -184,7 +244,7 @@ def _segment_open_ended(answer: str, short_threshold: int) -> AnswerSegmentation
 
     conclusion_end = sentences[0].end
     rule = "oe_first_sentence"
-    if len(_CONTENT_WORD.findall(answer[sentences[0].start:sentences[0].end])) < short_threshold:
+    if content_word_count(answer[sentences[0].start:sentences[0].end]) < short_threshold:
         if len(sentences) >= 2:
             conclusion_end = sentences[1].end
             rule = "oe_short_merge_second"
@@ -227,6 +287,8 @@ def build_full_segment_ids(
     answer_block_start: int,
     answers: Sequence[str],
     question_types: Sequence[str],
+    terminal_eos_index: Optional[int] = None,
+    terminal_eos_token_id: Optional[int] = None,
     short_threshold: int = 5,
 ) -> Tuple[torch.Tensor, List[AnswerSegmentation]]:
     """Map deterministic character spans to the exact tokenized answer block."""
@@ -278,6 +340,21 @@ def build_full_segment_ids(
                 if con_overlap >= exp_overlap
                 else SEGMENT_EXPLANATION
             )
+        if terminal_eos_index is not None:
+            if not 0 <= terminal_eos_index < full_input_ids.size(1):
+                raise ValueError("terminal EOS position is outside the full input")
+            if terminal_eos_token_id is not None and int(
+                full_input_ids[row, terminal_eos_index]
+            ) != int(terminal_eos_token_id):
+                raise RuntimeError("the declared terminal EOS position is not EOS")
+            terminal_segment = (
+                SEGMENT_EXPLANATION
+                if segmentation.explanation is not None
+                else SEGMENT_CONCLUSION
+                if segmentation.conclusion is not None
+                else SEGMENT_IGNORE
+            )
+            segment_ids[row, terminal_eos_index] = terminal_segment
     return segment_ids, segmentations
 
 

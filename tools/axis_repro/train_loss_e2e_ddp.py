@@ -17,8 +17,9 @@ import platform
 import random
 import subprocess
 import time
+import math
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Optional, Sequence
 
 import numpy as np
 import torch
@@ -29,7 +30,12 @@ from torch.utils.data import DataLoader, DistributedSampler
 from src.models.AXIS.AXIS_test import collate_fn
 from src.models.AXIS.dataset import AXISAnomalyQADataset
 
-from .loss_e2e import ERROR_ANSWER, count_segmentation_rules, normalize_question_type
+from .loss_e2e import (
+    ERROR_ANSWER,
+    content_word_count,
+    normalize_question_type,
+    segment_answer,
+)
 from .loss_e2e_runtime import (
     ContinuationObjectiveModel,
     fixed_hint_checkpoint_state,
@@ -85,10 +91,82 @@ def _ordered_series_sha256(dataset: AXISAnomalyQADataset) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _nearest_rank(values: Sequence[int], percentile: float) -> int:
+    ordered = sorted(values)
+    index = max(0, math.ceil(percentile * len(ordered)) - 1)
+    return ordered[index]
+
+
+def _length_summary(values: Sequence[int]) -> dict:
+    if not values:
+        return {
+            "count": 0,
+            "zero_count": 0,
+            "min": None,
+            "p50": None,
+            "p95": None,
+            "p99": None,
+            "max": None,
+            "mean": None,
+        }
+    return {
+        "count": len(values),
+        "zero_count": sum(value == 0 for value in values),
+        "min": min(values),
+        "p50": _nearest_rank(values, 0.50),
+        "p95": _nearest_rank(values, 0.95),
+        "p99": _nearest_rank(values, 0.99),
+        "max": max(values),
+        "mean": sum(values) / len(values),
+    }
+
+
+def _segment_lengths(answer: str, segmentation) -> dict:
+    conclusion = (
+        ""
+        if segmentation.conclusion is None
+        else answer[segmentation.conclusion.start:segmentation.conclusion.end]
+    )
+    explanation = (
+        ""
+        if segmentation.explanation is None
+        else answer[segmentation.explanation.start:segmentation.explanation.end]
+    )
+    return {
+        "conclusion_chars": len(conclusion),
+        "explanation_chars": len(explanation),
+        "conclusion_content_words": content_word_count(conclusion),
+        "explanation_content_words": content_word_count(explanation),
+    }
+
+
+def _summarize_length_groups(groups: Mapping[str, Mapping[str, list[int]]]) -> dict:
+    return {
+        group: {
+            metric: _length_summary(values)
+            for metric, values in sorted(metrics.items())
+        }
+        for group, metrics in sorted(groups.items())
+    }
+
+
+def _excerpt(text: str, limit: int = 360) -> tuple[str, bool]:
+    if len(text) <= limit:
+        return text, False
+    return text[:limit] + "…", True
+
+
 def build_data_audit(dataset: AXISAnomalyQADataset, seed: int) -> dict:
     type_counts: collections.Counter[str] = collections.Counter()
     included_type_counts: collections.Counter[str] = collections.Counter()
     rule_counts: collections.Counter[str] = collections.Counter()
+    lengths_by_type: dict[str, dict[str, list[int]]] = collections.defaultdict(
+        lambda: collections.defaultdict(list)
+    )
+    lengths_by_rule: dict[str, dict[str, list[int]]] = collections.defaultdict(
+        lambda: collections.defaultdict(list)
+    )
+    samples_by_rule: dict[str, list[dict]] = collections.defaultdict(list)
     exclusions = []
     total = 0
     for series_path in dataset.series_files:
@@ -116,14 +194,50 @@ def build_data_audit(dataset: AXISAnomalyQADataset, seed: int) -> dict:
                 )
                 continue
             included_type_counts[question_type] += 1
-            rule_counts.update(
-                count_segmentation_rules(
-                    [answer],
-                    [str(item.get("question_type", ""))],
-                )
+            segmentation = segment_answer(
+                answer,
+                str(item.get("question_type", "")),
             )
+            rule_key = f"{question_type}/{segmentation.rule}"
+            rule_counts[rule_key] += 1
+            if segmentation.fallback:
+                rule_counts[f"{question_type}/fallback"] += 1
+            lengths = _segment_lengths(answer, segmentation)
+            for metric, value in lengths.items():
+                lengths_by_type[question_type][metric].append(value)
+                lengths_by_rule[rule_key][metric].append(value)
+            if len(samples_by_rule[rule_key]) < 3:
+                conclusion = (
+                    ""
+                    if segmentation.conclusion is None
+                    else answer[
+                        segmentation.conclusion.start:segmentation.conclusion.end
+                    ]
+                )
+                explanation = (
+                    ""
+                    if segmentation.explanation is None
+                    else answer[
+                        segmentation.explanation.start:segmentation.explanation.end
+                    ]
+                )
+                conclusion_excerpt, conclusion_shortened = _excerpt(conclusion)
+                explanation_excerpt, explanation_shortened = _excerpt(explanation)
+                samples_by_rule[rule_key].append(
+                    {
+                        "series_file": series_path.name,
+                        "window_index": window_index,
+                        "fallback": segmentation.fallback,
+                        **lengths,
+                        "conclusion_excerpt": conclusion_excerpt,
+                        "explanation_excerpt": explanation_excerpt,
+                        "excerpt_shortened": (
+                            conclusion_shortened or explanation_shortened
+                        ),
+                    }
+                )
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "seed": seed,
         "train_ratio": 0.95,
         "train_series": len(dataset),
@@ -134,7 +248,92 @@ def build_data_audit(dataset: AXISAnomalyQADataset, seed: int) -> dict:
         "question_type_counts": dict(sorted(type_counts.items())),
         "included_question_type_counts": dict(sorted(included_type_counts.items())),
         "segmentation_rule_counts": dict(sorted(rule_counts.items())),
+        "segment_length_audit": {
+            "units": {
+                "chars": "Python Unicode code points after span trimming",
+                "content_words": (
+                    "ASCII word/number units used by the OE short rule"
+                ),
+                "percentiles": "nearest-rank",
+            },
+            "by_question_type": _summarize_length_groups(lengths_by_type),
+            "by_rule": _summarize_length_groups(lengths_by_rule),
+            "deterministic_first_three_samples_by_rule": {
+                key: value for key, value in sorted(samples_by_rule.items())
+            },
+        },
         "exclusions": exclusions,
+    }
+
+
+def build_answer_tokenization_audit(
+    dataset: AXISAnomalyQADataset,
+    tokenizer,
+    *,
+    batch_size: int = 512,
+) -> dict:
+    """Audit the exact standalone answer encoding without truncation."""
+    model_max_length = int(tokenizer.model_max_length)
+    lengths: list[int] = []
+    longest: list[dict] = []
+    over_limit: list[dict] = []
+    pending_prompts: list[str] = []
+    pending_ids: list[tuple[str, int]] = []
+
+    def consume() -> None:
+        if not pending_prompts:
+            return
+        encoded = tokenizer(
+            pending_prompts,
+            add_special_tokens=True,
+            padding=False,
+            truncation=False,
+        )["input_ids"]
+        for token_ids, (series_file, window_index) in zip(encoded, pending_ids):
+            length = len(token_ids)
+            lengths.append(length)
+            item = {
+                "series_file": series_file,
+                "window_index": window_index,
+                "tokens_with_answer_prefix_and_specials": length,
+            }
+            longest.append(item)
+            if length > model_max_length:
+                over_limit.append(item)
+        pending_prompts.clear()
+        pending_ids.clear()
+
+    for series_path in dataset.series_files:
+        with open(series_path, "r", encoding="utf-8") as handle:
+            record = json.load(handle)
+        for window_index, item in enumerate(record["windows"]):
+            answer = str(item["answer"])
+            if answer.strip() == ERROR_ANSWER:
+                continue
+            pending_prompts.append(f"Answer: {answer}")
+            pending_ids.append((series_path.name, window_index))
+            if len(pending_prompts) >= batch_size:
+                consume()
+    consume()
+    longest.sort(
+        key=lambda item: (
+            -item["tokens_with_answer_prefix_and_specials"],
+            item["series_file"],
+            item["window_index"],
+        )
+    )
+    return {
+        "policy": (
+            "standalone answer encoding uses truncation=False; any mismatch "
+            "with the baseline full input fails closed"
+        ),
+        "tokenizer_is_fast": bool(getattr(tokenizer, "is_fast", False)),
+        "tokenizer_model_max_length": model_max_length,
+        "answer_rows_audited": len(lengths),
+        "truncated_answer_count": len(over_limit),
+        "untruncated_token_lengths": _length_summary(lengths),
+        "ten_longest_answer_identifiers": longest[:10],
+        "over_limit_identifiers": over_limit,
     }
 
 
@@ -209,12 +408,121 @@ def _summary(values: Mapping[str, float]) -> dict:
     }
 
 
+def _parameter_snapshot(module: torch.nn.Module) -> dict[str, torch.Tensor]:
+    return {
+        name: parameter.detach().float().cpu().clone()
+        for name, parameter in module.named_parameters()
+    }
+
+
+def _relative_parameter_change(
+    module: torch.nn.Module,
+    initial: Mapping[str, torch.Tensor],
+    names: Optional[set[str]] = None,
+) -> float:
+    numerator = 0.0
+    denominator = 0.0
+    for name, parameter in module.named_parameters():
+        if names is not None and name not in names:
+            continue
+        reference = initial[name]
+        current = parameter.detach().float().cpu()
+        numerator += float((current - reference).square().sum())
+        denominator += float(reference.square().sum())
+    if denominator == 0.0:
+        return 0.0 if numerator == 0.0 else float("inf")
+    return math.sqrt(numerator / denominator)
+
+
+def _gradient_l2_norm(parameters) -> torch.Tensor:
+    norms = [
+        parameter.grad.detach().float().norm(2)
+        for parameter in parameters
+        if parameter.grad is not None
+    ]
+    if not norms:
+        raise RuntimeError("no gradients were produced for trainable parameters")
+    return torch.stack(norms).norm(2)
+
+
+def _optimization_summary(state: Mapping) -> dict:
+    count = int(state["gradient_norm_count"])
+    return {
+        "gradient_norm_count": count,
+        "gradient_l2_norm_mean": (
+            None if count == 0 else state["gradient_norm_sum"] / count
+        ),
+        "gradient_l2_norm_max": (
+            None if count == 0 else state["gradient_norm_max"]
+        ),
+        "gradient_l2_norm_last": (
+            None if count == 0 else state["gradient_norm_last"]
+        ),
+        "nonfinite_gradient_steps": state["nonfinite_gradient_steps"],
+        "clipped_steps": state["clipped_steps"],
+        "max_grad_norm": state["max_grad_norm"],
+        "parameter_relative_change_by_step": dict(
+            state["parameter_relative_change_by_step"]
+        ),
+    }
+
+
+def _calibration_subset_manifest(
+    dataset: AXISAnomalyQADataset,
+    *,
+    world_size: int,
+    seed: int,
+    steps_per_rank: int,
+) -> dict:
+    rank_series: dict[str, list[str]] = {}
+    all_names: list[str] = []
+    for rank in range(world_size):
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            seed=seed,
+            drop_last=False,
+        )
+        sampler.set_epoch(1)
+        indices = list(iter(sampler))[:steps_per_rank]
+        names = [dataset.series_files[index].name for index in indices]
+        rank_series[str(rank)] = names
+        all_names.extend(names)
+    if len(set(all_names)) != len(all_names):
+        raise RuntimeError("calibration subset unexpectedly contains duplicates")
+    ordered_payload = "\n".join(
+        f"{rank}:{position}:{name}"
+        for rank, names in sorted(rank_series.items())
+        for position, name in enumerate(names)
+    )
+    return {
+        "schema_version": 1,
+        "selection_only": True,
+        "source_split": "seed-72 95% training split",
+        "sampler_epoch": 1,
+        "world_size": world_size,
+        "steps_per_rank": steps_per_rank,
+        "unique_series": len(set(all_names)),
+        "ordered_rank_series_sha256": hashlib.sha256(
+            ordered_payload.encode("utf-8")
+        ).hexdigest(),
+        "rank_series": rank_series,
+    }
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser()
     result.add_argument("--checkpoint", required=True)
     result.add_argument("--arm", choices=["control", "treatment"], required=True)
     result.add_argument("--data", default="data/anomaly_llava_training_dataset")
     result.add_argument("--output", required=True)
+    result.add_argument(
+        "--run-purpose",
+        choices=["formal", "calibration", "smoke"],
+        default="formal",
+    )
     result.add_argument("--epochs", type=int, default=2)
     result.add_argument("--lr", type=float, default=1e-4)
     result.add_argument("--weight-decay", type=float, default=1e-5)
@@ -224,6 +532,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--loss-chunk-size", type=int, default=64)
     result.add_argument("--expected-excluded", type=int, default=13)
     result.add_argument("--log-every", type=int, default=20)
+    result.add_argument(
+        "--max-grad-norm",
+        type=float,
+        default=None,
+        help="Optional global gradient clipping threshold; omitted in locked runs.",
+    )
     result.add_argument(
         "--max-steps",
         type=int,
@@ -236,12 +550,24 @@ def main() -> None:
     args = parser().parse_args()
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required; local CPU execution is forbidden")
-    if args.epochs != 2 and args.max_steps is None:
-        raise ValueError("formal loss_e2e_0723 runs must use exactly 2 epochs")
+    if args.run_purpose == "formal":
+        if args.epochs != 2 or args.max_steps is not None:
+            raise ValueError(
+                "formal loss_e2e_0723 runs require 2 epochs and no max-steps"
+            )
+    elif args.run_purpose == "calibration":
+        if args.epochs != 2 or args.max_steps != 200:
+            raise ValueError(
+                "calibration is fixed to 200 steps from the first epoch"
+            )
+    elif args.max_steps is None:
+        raise ValueError("smoke runs require --max-steps")
     if args.seed != 72:
         raise ValueError("loss_e2e_0723 training split is fixed to seed=72")
     if args.arm == "treatment" and args.alpha != 0.40:
         raise ValueError("the confirmed treatment alpha is exactly 0.40")
+    if args.max_grad_norm is not None and args.max_grad_norm <= 0:
+        raise ValueError("--max-grad-norm must be positive when provided")
 
     rank = int(os.environ["RANK"])
     world = int(os.environ["WORLD_SIZE"])
@@ -270,6 +596,18 @@ def main() -> None:
             f"expected {args.expected_excluded} corrupt labels, "
             f"found {audit['qa_rows_excluded']}"
         )
+    base = build_model()
+    tokenization_box = [
+        build_answer_tokenization_audit(dataset, base.axis.tokenizer)
+        if rank == 0
+        else None
+    ]
+    torch.distributed.broadcast_object_list(tokenization_box, src=0)
+    audit["answer_tokenization"] = tokenization_box[0]
+    if audit["answer_tokenization"]["truncated_answer_count"] != 0:
+        raise RuntimeError(
+            "formal training forbids truncated answers; inspect the data audit"
+        )
     audit_text = json.dumps(audit, ensure_ascii=False, indent=2)
     audit_sha256 = hashlib.sha256(audit_text.encode("utf-8")).hexdigest()
     if rank == 0:
@@ -279,10 +617,22 @@ def main() -> None:
         )
     torch.distributed.barrier()
 
-    base = build_model()
     author_payload = load_loss_e2e_checkpoint(base, args.checkpoint)
     author_has_optimizer = "optimizer_state_dict" in author_payload
     trainable_before_f0 = freeze_for_phase2(base)
+    if args.arm == "treatment":
+        install_fixed_hint_runtime(base.axis)
+        # F0 is a reference, not an optimizable parameter in the treatment arm.
+        base.axis.perceiver.fix_prompt_embeddings.requires_grad_(False)
+    trainable = sum(p.numel() for p in base.parameters() if p.requires_grad)
+    initial_perceiver = (
+        _parameter_snapshot(base.axis.perceiver) if rank == 0 else None
+    )
+    initially_trainable_names = {
+        name
+        for name, parameter in base.axis.perceiver.named_parameters()
+        if parameter.requires_grad
+    }
     base.to(local_rank)
 
     fixed_hint_meta = {
@@ -294,7 +644,6 @@ def main() -> None:
         "repeat_mean_abs_error": None,
     }
     if args.arm == "treatment":
-        install_fixed_hint_runtime(base.axis)
         with torch.autocast("cuda", dtype=torch.bfloat16):
             reference = initialize_fixed_hint_reference(base.axis)
             word_embeddings = base.axis.model.get_input_embeddings().weight
@@ -312,10 +661,6 @@ def main() -> None:
             "repeat_max_abs_error": float(difference.max()),
             "repeat_mean_abs_error": float(difference.mean()),
         }
-        # F0 is a reference, not an optimizable parameter in the treatment arm.
-        base.axis.perceiver.fix_prompt_embeddings.requires_grad_(False)
-
-    trainable = sum(p.numel() for p in base.parameters() if p.requires_grad)
     llm = base.axis.model
     llm.gradient_checkpointing_enable()
     llm.enable_input_require_grads()
@@ -364,12 +709,33 @@ def main() -> None:
         max(1, round(planned_steps * fraction))
         for fraction in (0.25, 0.50, 0.75, 1.00)
     }
+    calibration_manifest_sha256 = None
+    if args.run_purpose == "calibration":
+        calibration_manifest = _calibration_subset_manifest(
+            dataset,
+            world_size=world,
+            seed=args.seed,
+            steps_per_rank=args.max_steps,
+        )
+        calibration_text = json.dumps(
+            calibration_manifest, ensure_ascii=False, indent=2
+        )
+        calibration_manifest_sha256 = hashlib.sha256(
+            calibration_text.encode("utf-8")
+        ).hexdigest()
+        if rank == 0:
+            (output / "calibration_subset_manifest.json").write_text(
+                calibration_text,
+                encoding="utf-8",
+            )
+
     meta = {
         "experiment": "loss_e2e_0723",
         "arm": args.arm,
         "source_branch": _git_value("branch", "--show-current"),
         "source_commit": _git_value("rev-parse", "HEAD"),
         "source_dirty": bool(_git_value("status", "--porcelain")),
+        "run_purpose": args.run_purpose,
         "author_checkpoint": str(Path(args.checkpoint).resolve()),
         "author_checkpoint_sha256": sha256_file(args.checkpoint),
         "author_checkpoint_epoch": author_payload.get("epoch"),
@@ -391,7 +757,13 @@ def main() -> None:
         "optimizer": "torch.optim.AdamW",
         "optimizer_betas": list(optimizer.param_groups[0]["betas"]),
         "optimizer_eps": optimizer.param_groups[0]["eps"],
+        "scheduler": None,
+        "warmup_steps": 0,
+        "max_grad_norm": args.max_grad_norm,
         "seed": args.seed,
+        "calibration_subset_manifest_sha256": (
+            calibration_manifest_sha256
+        ),
         "segment_alpha": args.alpha,
         "tf_rule": (
             "conclusion = True/False label + first complete semantic statement; "
@@ -412,6 +784,8 @@ def main() -> None:
                 "question_type_counts",
                 "included_question_type_counts",
                 "segmentation_rule_counts",
+                "segment_length_audit",
+                "answer_tokenization",
             )
         },
         "fixed_hint": fixed_hint_meta,
@@ -432,6 +806,16 @@ def main() -> None:
         print(json.dumps(meta, ensure_ascii=False), flush=True)
 
     cumulative = {key: 0.0 for key in METRIC_KEYS}
+    optimization = {
+        "gradient_norm_count": 0,
+        "gradient_norm_sum": 0.0,
+        "gradient_norm_max": 0.0,
+        "gradient_norm_last": None,
+        "nonfinite_gradient_steps": 0,
+        "clipped_steps": 0,
+        "max_grad_norm": args.max_grad_norm,
+        "parameter_relative_change_by_step": {},
+    }
     global_step = 0
     start_time = time.perf_counter()
     timed_start = None
@@ -481,6 +865,27 @@ def main() -> None:
             # that average equal the desired global numerator/global denominator.
             loss = outputs["objective_sum"] * world / global_denominator
             loss.backward()
+            if args.max_grad_norm is None:
+                gradient_norm_tensor = _gradient_l2_norm(ddp.parameters())
+            else:
+                gradient_norm_tensor = torch.nn.utils.clip_grad_norm_(
+                    ddp.parameters(),
+                    max_norm=args.max_grad_norm,
+                )
+            gradient_norm = float(gradient_norm_tensor.detach())
+            if not math.isfinite(gradient_norm):
+                optimization["nonfinite_gradient_steps"] += 1
+                raise FloatingPointError(
+                    f"non-finite gradient norm at step {global_step + 1}"
+                )
+            optimization["gradient_norm_count"] += 1
+            optimization["gradient_norm_sum"] += gradient_norm
+            optimization["gradient_norm_max"] = max(
+                optimization["gradient_norm_max"], gradient_norm
+            )
+            optimization["gradient_norm_last"] = gradient_norm
+            if args.max_grad_norm is not None and gradient_norm > args.max_grad_norm:
+                optimization["clipped_steps"] += 1
             optimizer.step()
             global_step += 1
             for key, value in zip(METRIC_KEYS, packed.tolist()):
@@ -501,6 +906,8 @@ def main() -> None:
                             "epoch": epoch,
                             "step_metrics": _summary(step_values),
                             "cumulative_metrics": _summary(cumulative),
+                            "gradient_l2_norm": gradient_norm,
+                            "optimization": _optimization_summary(optimization),
                             "steps_per_second_per_rank": rate,
                             "estimated_remaining_hours": remaining / 3600,
                         }
@@ -509,6 +916,22 @@ def main() -> None:
                 )
 
             if global_step in milestones and rank == 0:
+                optimization["parameter_relative_change_by_step"][
+                    str(global_step)
+                ] = {
+                    "all_perceiver_parameters": _relative_parameter_change(
+                        ddp.module.base.axis.perceiver,
+                        initial_perceiver,
+                    ),
+                    "trainable_perceiver_parameters": _relative_parameter_change(
+                        ddp.module.base.axis.perceiver,
+                        initial_perceiver,
+                        initially_trainable_names,
+                    ),
+                }
+                meta["optimization_diagnostics"] = _optimization_summary(
+                    optimization
+                )
                 save_atomic(
                     _checkpoint_payload(
                         model=ddp.module.base,
@@ -542,6 +965,23 @@ def main() -> None:
 
     elapsed = time.perf_counter() - start_time
     if rank == 0:
+        if str(global_step) not in optimization[
+            "parameter_relative_change_by_step"
+        ]:
+            optimization["parameter_relative_change_by_step"][
+                str(global_step)
+            ] = {
+                "all_perceiver_parameters": _relative_parameter_change(
+                    ddp.module.base.axis.perceiver,
+                    initial_perceiver,
+                ),
+                "trainable_perceiver_parameters": _relative_parameter_change(
+                    ddp.module.base.axis.perceiver,
+                    initial_perceiver,
+                    initially_trainable_names,
+                ),
+            }
+        meta["optimization_diagnostics"] = _optimization_summary(optimization)
         final = {
             "arm": args.arm,
             "world_size": world,
@@ -556,6 +996,7 @@ def main() -> None:
             ),
             "metrics": _summary(cumulative),
             "raw_metric_sums": cumulative,
+            "optimization_diagnostics": _optimization_summary(optimization),
         }
         (output / "training_summary.json").write_text(
             json.dumps(final, ensure_ascii=False, indent=2),

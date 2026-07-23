@@ -146,7 +146,7 @@ def _answer_encoding(axis: nn.Module, answers: Sequence[str]):
         [f"{ANSWER_PREFIX}{answer}" for answer in answers],
         return_tensors="pt",
         padding=True,
-        truncation=True,
+        truncation=False,
         add_special_tokens=True,
         return_offsets_mapping=True,
     )
@@ -197,6 +197,10 @@ def axis_objective_forward(
             answer_block_start=question_length + 1,
             answers=answers,
             question_types=question_types,
+            terminal_eos_index=(
+                question_length + 1 + encoding["input_ids"].size(1)
+            ),
+            terminal_eos_token_id=axis.tokenizer.eos_token_id,
         )
 
     hidden = axis.model.model(

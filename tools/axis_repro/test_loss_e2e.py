@@ -11,6 +11,7 @@ from .loss_e2e import (
     objective_from_hidden,
     segment_answer,
 )
+from .loss_e2e_runtime import _answer_encoding
 
 
 class TestDeterministicSegmentation(unittest.TestCase):
@@ -56,6 +57,36 @@ class TestDeterministicSegmentation(unittest.TestCase):
         )
         self.assertEqual(result.rule, "oe_short_merge_second")
 
+    def test_sentence_split_protects_common_abbreviations(self):
+        answer = (
+            "The level changes, e.g. it remains elevated for five steps. "
+            "This supports the anomaly decision."
+        )
+        result = segment_answer(answer, "Open-Ended")
+        self.assertEqual(
+            answer[result.conclusion.start:result.conclusion.end],
+            "The level changes, e.g. it remains elevated for five steps.",
+        )
+        self.assertEqual(
+            answer[result.explanation.start:result.explanation.end],
+            "This supports the anomaly decision.",
+        )
+
+    def test_sentence_split_keeps_abbreviation_at_real_sentence_end(self):
+        answer = "The behavior differs from the expected baseline, etc. It is anomalous."
+        result = segment_answer(answer, "Open-Ended")
+        self.assertEqual(result.rule, "oe_first_sentence")
+        self.assertEqual(answer[result.conclusion.start:result.conclusion.end], "The behavior differs from the expected baseline, etc.")
+
+    def test_leading_mc_label_is_not_treated_as_a_sentence(self):
+        answer = "A. The values remain stable."
+        result = segment_answer(answer, "Multiple Choice")
+        self.assertEqual(result.rule, "mc_all")
+        self.assertEqual(
+            answer[result.conclusion.start:result.conclusion.end],
+            answer,
+        )
+
     def test_offsets_exclude_answer_prefix_and_special_tokens(self):
         answer = "False. First fact. More detail."
         answer_ids = torch.tensor([[90, 10, 11, 12, 13, 14, 15, 16, 91]])
@@ -83,6 +114,8 @@ class TestDeterministicSegmentation(unittest.TestCase):
             answer_block_start=2,
             answers=[answer],
             question_types=["true_false"],
+            terminal_eos_index=full.size(1) - 1,
+            terminal_eos_token_id=3,
         )
         answer_segments = segments[0, 2:2 + answer_ids.size(1)].tolist()
         self.assertEqual(answer_segments[:3], [0, 0, 0])
@@ -92,6 +125,47 @@ class TestDeterministicSegmentation(unittest.TestCase):
         )
         self.assertEqual(answer_segments[7], SEGMENT_EXPLANATION)
         self.assertEqual(answer_segments[8], 0)
+        self.assertEqual(segments[0, -1], SEGMENT_EXPLANATION)
+
+    def test_terminal_eos_uses_only_available_conclusion_segment(self):
+        answer = "A) Stable"
+        answer_ids = torch.tensor([[90, 10, 11, 12, 91]])
+        offsets = torch.tensor(
+            [[[0, 0], [0, 6], [6, 7], [7, 17], [0, 0]]]
+        )
+        full = torch.cat(
+            [torch.tensor([[1, 2]]), answer_ids, torch.tensor([[3]])],
+            dim=1,
+        )
+        segments, _ = build_full_segment_ids(
+            full_input_ids=full,
+            answer_input_ids=answer_ids,
+            answer_offsets=offsets,
+            answer_block_start=2,
+            answers=[answer],
+            question_types=["multiple_choice"],
+            terminal_eos_index=full.size(1) - 1,
+            terminal_eos_token_id=3,
+        )
+        self.assertEqual(segments[0, -1], SEGMENT_CONCLUSION)
+
+    def test_answer_encoding_explicitly_disables_truncation(self):
+        class RecordingTokenizer:
+            is_fast = True
+
+            def __init__(self):
+                self.kwargs = None
+
+            def __call__(self, _values, **kwargs):
+                self.kwargs = kwargs
+                return {"input_ids": torch.tensor([[1]])}
+
+        class Axis:
+            tokenizer = RecordingTokenizer()
+
+        axis = Axis()
+        _answer_encoding(axis, ["short answer"])
+        self.assertIs(axis.tokenizer.kwargs["truncation"], False)
 
 
 class TestObjective(unittest.TestCase):
