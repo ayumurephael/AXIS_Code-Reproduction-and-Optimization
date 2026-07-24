@@ -97,7 +97,8 @@ Qwen 使用阿里云百炼 OpenAI 兼容接口。中国内地（北京）默认�
 `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`；其他地域的
 API key 必须配套对应地域或 Workspace endpoint，并通过 `QWEN_BASE_URL` 或
 `--endpoint` 显式覆盖。模型 ID 可自由指定；本实验固定
-`qwen3-30b-a3b-instruct-2507`。
+`qwen3-30b-a3b-instruct-2507`，扩展交叉评测另使用
+`qwen3.5-397b-a17b`。
 
 Qwen3 开源模型支持输出 token logprobs，但百炼 `top_logprobs` 上限为 5。
 runner 使用作者 prompt，并定位最终 `**Score:**` 后的单个 ASCII 数字 token。
@@ -146,6 +147,7 @@ python -m tools.axis_repro.audit_results \
   --modes base \
   --expected-model qwen3-30b-a3b-instruct-2507 \
   --expected-provider qwen \
+  --expected-enable-thinking auto \
   --allowed-methods final_score_top_logprobs \
                     final_score_top_logprobs_bounded \
                     final_score_top_logprobs_readout \
@@ -159,6 +161,12 @@ python -m tools.axis_repro.audit_results \
 `enable_thinking`。对支持混合模式的其他 Qwen3 模型，可以使用
 `--enable-thinking true|false`；`auto` 表示不发送该扩展字段。正式 Qwen
 结果应执行上述 fail-closed 审计。
+
+`qwen3.5-397b-a17b` 是支持思考/非思考的混合模式模型。本项目为保证两臂及
+两个 Qwen Judge 的 score-token 口径一致，主评分和 JSON readout 都显式传
+`--enable-thinking false`，并在最终审计传
+`--expected-enable-thinking false`。pending journal、最终 score row 和 readout
+元数据必须保存同一模式；发现主判词与 readout 模式不一致时立即 fail-closed。
 
 Qwen API key、模型和 endpoint 具有地域一致性要求。401/403 应检查 key 与权限，
 404 应检查模型 ID/地域，429 与 5xx 才进行有界退避。结果必须记录实际返回

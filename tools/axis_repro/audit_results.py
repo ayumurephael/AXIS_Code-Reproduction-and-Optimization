@@ -23,6 +23,10 @@ def main() -> None:
     )
     parser.add_argument("--expected-model")
     parser.add_argument("--expected-provider")
+    parser.add_argument(
+        "--expected-enable-thinking",
+        choices=("auto", "true", "false"),
+    )
     parser.add_argument("--allowed-methods", nargs="+")
     parser.add_argument(
         "--require-logprobs",
@@ -92,6 +96,11 @@ def main() -> None:
         methods = Counter(str(row.get("method", "")) for row in scores)
         models = Counter(str(row.get("model", "")) for row in scores)
         providers = Counter(str(row.get("provider", "")) for row in scores)
+        thinking_modes = Counter(
+            "auto" if row.get("enable_thinking") is None
+            else str(row.get("enable_thinking")).lower()
+            for row in scores
+        )
         logprobs_returned = sum(
             bool(row.get("logprobs_returned")) for row in scores
         )
@@ -191,6 +200,13 @@ def main() -> None:
             errors.append(f"model mismatch: {dict(models)}")
         if args.expected_provider and set(providers) != {args.expected_provider}:
             errors.append(f"provider mismatch: {dict(providers)}")
+        if (
+            args.expected_enable_thinking
+            and set(thinking_modes) != {args.expected_enable_thinking}
+        ):
+            errors.append(
+                f"enable_thinking mismatch: {dict(thinking_modes)}"
+            )
         if args.allowed_methods and not set(methods).issubset(
             set(args.allowed_methods)
         ):
@@ -205,6 +221,7 @@ def main() -> None:
             "score_methods": dict(methods),
             "score_models": dict(models),
             "score_providers": dict(providers),
+            "score_enable_thinking": dict(thinking_modes),
             "logprobs_returned": logprobs_returned,
             "valid_prompt_hashes": sum(
                 re.fullmatch(r"[0-9a-f]{64}", value) is not None
