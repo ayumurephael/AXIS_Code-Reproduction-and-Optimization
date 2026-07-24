@@ -1,0 +1,26 @@
+{
+  "prediction_rows": 140,
+  "records": 140,
+  "prediction_modes": {
+    "base": 140
+  },
+  "score_rows": 335,
+  "score_methods": {
+    "final_score_top_logprobs_bounded": 332,
+    "final_score_top_logprobs": 1,
+    "final_score_top_logprobs_readout": 2
+  },
+  "score_models": {
+    "qwen3.5-397b-a17b": 335
+  },
+  "score_providers": {
+    "qwen": 335
+  },
+  "score_enable_thinking": {
+    "false": 335
+  },
+  "logprobs_returned": 335,
+  "valid_prompt_hashes": 335,
+  "errors": [],
+  "ok": true
+}

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "experiment": "loss_e2e_0723",
+  "extension": "qwen3-30b-a3b-instruct-2507-geval",
+  "source_code_commit": "d2c707375ebe9ce1e4ffa38134186de65870cf1d",
+  "file_count": 10,
+  "total_bytes": 2614635,
+  "files": [
+    {
+      "path": "artifacts/control/geval_qwen3_30b_a3b_instruct_2507.jsonl",
+      "bytes": 1300934,
+      "sha256": "7340f2494dc9e8869651f546c28ab58ab31dd3eab6f943f5280017af27d26db8"
+    },
+    {
+      "path": "artifacts/control/qwen_audit.json",
+      "bytes": 465,
+      "sha256": "60e13c2c678a11d61b44fe914544a59b1b46936c08e87ee4cd1496b1c426f151"
+    },
+    {
+      "path": "artifacts/control/table1_qwen.json",
+      "bytes": 625,
+      "sha256": "628792059727cbb3e6f3dbf4940d0e35510166295adda8e37e8fe4a720db40cb"
+    },
+    {
+      "path": "artifacts/control/table1_qwen.md",
+      "bytes": 459,
+      "sha256": "22ddeef2038649001387a309440571f6f9210b4245fd41e8d04c7c089d8beae8"
+    },
+    {
+      "path": "artifacts/qwen_cross_audit.json",
+      "bytes": 1940,
+      "sha256": "6e9adc570a9470379042111a7fbde3046f0e5a7b029082ed74f98fd334fa2944"
+    },
+    {
+      "path": "artifacts/treatment/geval_qwen3_30b_a3b_instruct_2507.jsonl",
+      "bytes": 1304452,
+      "sha256": "908966334f923db64aa3aa4615c14da0f758092eae9c7bdececc5e1bb87ff7f9"
+    },
+    {
+      "path": "artifacts/treatment/qwen_audit.json",
+      "bytes": 508,
+      "sha256": "2b9b8e76e73fcf131d4935b77835a37b34dfcc7af0473d7de891a1eed85c8724"
+    },
+    {
+      "path": "artifacts/treatment/table1_qwen.json",
+      "bytes": 627,
+      "sha256": "0bc1306bbacf04dbdd6ad9ec48b96d68b5d8df4d0ae6db01ff03072dcee66000"
+    },
+    {
+      "path": "artifacts/treatment/table1_qwen.md",
+      "bytes": 459,
+      "sha256": "0f61ba39cc8c696210cd5375a1fa5494d578834d799a6e286c69e7433a2ba6d6"
+    },
+    {
+      "path": "qwen_derived_metrics.json",
+      "bytes": 4166,
+      "sha256": "00a65b12a914fee563c5460a05388c23d549214d53d9539a6b9b269122b98f70"
+    }
+  ],
+  "excluded": [
+    "API keys and temporary key files",
+    "model checkpoints",
+    "process identifiers",
+    "server connection information"
+  ]
+}

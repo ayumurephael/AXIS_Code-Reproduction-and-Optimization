@@ -1,0 +1,23 @@
+{
+  "prediction_rows": 140,
+  "records": 140,
+  "prediction_modes": {
+    "base": 140
+  },
+  "score_rows": 335,
+  "score_methods": {
+    "final_score_top_logprobs": 8,
+    "final_score_top_logprobs_bounded": 324,
+    "final_score_top_logprobs_readout_bounded": 3
+  },
+  "score_models": {
+    "qwen3-30b-a3b-instruct-2507": 335
+  },
+  "score_providers": {
+    "qwen": 335
+  },
+  "logprobs_returned": 335,
+  "valid_prompt_hashes": 335,
+  "errors": [],
+  "ok": true
+}

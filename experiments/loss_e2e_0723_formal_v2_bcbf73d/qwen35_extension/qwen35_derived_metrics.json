@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "experiment": "loss_e2e_0723",
+  "judge": {
+    "provider": "qwen",
+    "model": "qwen3.5-397b-a17b",
+    "enable_thinking": false,
+    "judge_seed": 72,
+    "manifest_seed": 42
+  },
+  "comparison_definition": {
+    "absolute_delta": "treatment - control",
+    "relative_change_pct": "(treatment - control) / control * 100"
+  },
+  "table1_comparison": [
+    {
+      "key": "multiple_choice/final",
+      "metric": "MC Final",
+      "control": 4.504186065034531,
+      "treatment": 4.37390040312195,
+      "absolute_delta": -0.1302856619125814,
+      "relative_change_pct": -2.8925461788529057,
+      "direction": "declined"
+    },
+    {
+      "key": "multiple_choice/correctness",
+      "metric": "MC Corr.",
+      "control": 4.496397393195717,
+      "treatment": 4.382579450018607,
+      "absolute_delta": -0.1138179431771098,
+      "relative_change_pct": -2.531314143837633,
+      "direction": "declined"
+    },
+    {
+      "key": "multiple_choice/reasoning_quality",
+      "metric": "MC Rsn.",
+      "control": 4.522359632658435,
+      "treatment": 4.353649293696418,
+      "absolute_delta": -0.1687103389620166,
+      "relative_change_pct": -3.730582100186524,
+      "direction": "declined"
+    },
+    {
+      "key": "open_ended/final",
+      "metric": "OE Final",
+      "control": 3.0033549772897428,
+      "treatment": 3.2037466442845903,
+      "absolute_delta": 0.20039166699484756,
+      "relative_change_pct": 6.672260472376229,
+      "direction": "improved"
+    },
+    {
+      "key": "open_ended/accuracy",
+      "metric": "OE Acc.",
+      "control": 2.7969429831697306,
+      "treatment": 2.9945641727401044,
+      "absolute_delta": 0.1976211895703739,
+      "relative_change_pct": 7.065613806199687,
+      "direction": "improved"
+    },
+    {
+      "key": "open_ended/completeness",
+      "metric": "OE Comp.",
+      "control": 2.922336559932855,
+      "treatment": 3.1612132507872888,
+      "absolute_delta": 0.23887669085443397,
+      "relative_change_pct": 8.174167689293204,
+      "direction": "improved"
+    },
+    {
+      "key": "open_ended/relevance",
+      "metric": "OE Rel.",
+      "control": 3.3386904573461282,
+      "treatment": 3.4974151535000093,
+      "absolute_delta": 0.15872469615388107,
+      "relative_change_pct": 4.754100393004053,
+      "direction": "improved"
+    },
+    {
+      "key": "true_false/final",
+      "metric": "TF Final",
+      "control": 3.17804758754183,
+      "treatment": 3.615334443041701,
+      "absolute_delta": 0.4372868554998708,
+      "relative_change_pct": 13.759606911301958,
+      "direction": "improved"
+    },
+    {
+      "key": "true_false/correctness",
+      "metric": "TF Corr.",
+      "control": 3.285973083592146,
+      "treatment": 3.664380847243171,
+      "absolute_delta": 0.37840776365102524,
+      "relative_change_pct": 11.515850983093236,
+      "direction": "improved"
+    },
+    {
+      "key": "true_false/justification_quality",
+      "metric": "TF Justif.",
+      "control": 3.0161593434663563,
+      "treatment": 3.541764836739493,
+      "absolute_delta": 0.5256054932731367,
+      "relative_change_pct": 17.426317160985217,
+      "direction": "improved"
+    },
+    {
+      "key": "macro_final",
+      "metric": "Macro Final",
+      "control": 3.5618628766220346,
+      "treatment": 3.7309938301494134,
+      "absolute_delta": 0.16913095352737884,
+      "relative_change_pct": 4.748384746573333,
+      "direction": "improved"
+    }
+  ],
+  "audit": {
+    "code_commit": "0fd2c08f6ba32a7402f051e3eeb8e4a21303243e",
+    "control_score_rows": 335,
+    "treatment_score_rows": 335,
+    "control_readout_rows": 2,
+    "treatment_readout_rows": 5,
+    "fallback_samples": 0,
+    "shared_manifest_sha256": "c2aefed015869d153ab3f5632442f83ac3ffccf140685229ffab7a3a8e9cc1a6",
+    "control_max_missing_score_mass_upper_bound": 9.207025595852015e-07,
+    "treatment_max_missing_score_mass_upper_bound": 9.854389826747558e-07,
+    "control_max_score_error_upper_bound": 3.682810238340806e-06,
+    "treatment_max_score_error_upper_bound": 3.941755930699023e-06
+  }
+}

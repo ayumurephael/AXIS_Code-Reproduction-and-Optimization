@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "experiment": "loss_e2e_0723",
+  "extension": "qwen3.5-397b-a17b-geval",
+  "source_code_commit": "0fd2c08f6ba32a7402f051e3eeb8e4a21303243e",
+  "file_count": 10,
+  "total_bytes": 2643370,
+  "files": [
+    {
+      "path": "artifacts/control/geval_qwen3_5_397b_a17b.jsonl",
+      "bytes": 1316976,
+      "sha256": "0b69047558f339346c5bd430474f11e82dd6d59ce610faa5ab183a8afc82c9d9"
+    },
+    {
+      "path": "artifacts/control/qwen35_audit.json",
+      "bytes": 498,
+      "sha256": "aa9565f2d3a799072c7114530d5dec4233c47f1d3d946e9d5533d4986ddb169a"
+    },
+    {
+      "path": "artifacts/control/table1_qwen35.json",
+      "bytes": 627,
+      "sha256": "314cc133ea12c14f95b2d49ca40b7a26887a49d2c413d94837f605d11054fda9"
+    },
+    {
+      "path": "artifacts/control/table1_qwen35.md",
+      "bytes": 459,
+      "sha256": "1a35f4e4eaff7993424b20f43fa6223fdbcbf64b798569a3668a2390c81c1619"
+    },
+    {
+      "path": "artifacts/qwen35_cross_audit.json",
+      "bytes": 1896,
+      "sha256": "3ad5bb1de37bc990ebc0b4b055aa84703b1e8f8d0c96464af379fbe46214e3cf"
+    },
+    {
+      "path": "artifacts/treatment/geval_qwen3_5_397b_a17b.jsonl",
+      "bytes": 1317270,
+      "sha256": "72b9ad9264c9aeaa15bbca0b56cfd4e0a6c0a67a2f417b8c4351269f92cf99d7"
+    },
+    {
+      "path": "artifacts/treatment/qwen35_audit.json",
+      "bytes": 498,
+      "sha256": "b6d48a4954dd27fdcb7445313616e13763c3ea3b5e951d4def1f99840a3c26e7"
+    },
+    {
+      "path": "artifacts/treatment/table1_qwen35.json",
+      "bytes": 627,
+      "sha256": "70332aaf6035a7b1c7371ad8d23bbc0ea8b88a72aa496125a60ebc0cddbb420c"
+    },
+    {
+      "path": "artifacts/treatment/table1_qwen35.md",
+      "bytes": 459,
+      "sha256": "5388e12f49a5b7a8983be080920f84f5ff261f180dfcd6c109eecde707a457ce"
+    },
+    {
+      "path": "qwen35_derived_metrics.json",
+      "bytes": 4060,
+      "sha256": "2a1bd8c7f8ca52c92b559f97e4a4f2d98a62d5d7dfa0943b0a0c19888c61765e"
+    }
+  ],
+  "excluded": [
+    "API keys and temporary key files",
+    "model checkpoints",
+    "process identifiers",
+    "server connection information"
+  ]
+}
