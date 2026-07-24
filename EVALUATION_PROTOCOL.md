@@ -100,9 +100,13 @@ API key 必须配套对应地域或 Workspace endpoint，并通过 `QWEN_BASE_UR
 `qwen3-30b-a3b-instruct-2507`。
 
 Qwen3 开源模型支持输出 token logprobs，但百炼 `top_logprobs` 上限为 5。
-runner 使用作者 prompt，并只在最终 `**Score:**` token 的候选恰好覆盖 1--5 时
-计算归一化期望。默认缺少完整分布即失败；只有明确采用 AXIS 回退协议时才可传
-`--fallback-samples 20`。
+runner 使用作者 prompt，并定位最终 `**Score:**` 后的单个 ASCII 数字 token。
+若 top-5 恰好覆盖 1--5，则计算精确归一化期望；若非评分 token 挤占 top-5，
+每个未返回数字的 logprob 都不大于已返回第 5 名的 cutoff。runner 据此计算缺失
+评分质量的最坏上界，只有上界不超过 `1e-6` 才接受有界截断分布，并记录
+`missing_score_mass_upper_bound`、`score_error_upper_bound` 和缺失数字。超过阈值
+仍 fail-closed；不能静默把任意缺失候选当作概率 0。只有明确采用 AXIS 回退协议
+时才可传 `--fallback-samples 20`。
 
 ```bash
 export QWEN_API_KEY='<set outside repository>'
@@ -115,6 +119,7 @@ python -m tools.axis_repro.geval_qwen \
   --top-logprobs 5 \
   --seed 72 \
   --primary-workers 6 \
+  --max-missing-score-mass-upper-bound 1e-6 \
   --max-retry-rounds 12
 ```
 
@@ -132,13 +137,16 @@ python -m tools.axis_repro.audit_results \
   --expected-model qwen3-30b-a3b-instruct-2507 \
   --expected-provider qwen \
   --allowed-methods final_score_top_logprobs \
+                    final_score_top_logprobs_bounded \
+  --max-missing-score-mass-upper-bound 1e-6 \
   --require-logprobs \
   --require-prompt-hashes
 ```
 
 Qwen API key、模型和 endpoint 具有地域一致性要求。401/403 应检查 key 与权限，
 404 应检查模型 ID/地域，429 与 5xx 才进行有界退避。结果必须记录实际返回
-model、endpoint host、prompt hash、seed、usage、method 与完整 1--5 分布。
+model、endpoint host、prompt hash、seed、usage、method、归一化 1--5 分布与
+缺失质量/分数误差上界。
 
 ## 聚合与完整性审计
 

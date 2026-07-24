@@ -34,6 +34,11 @@ def main() -> None:
         action="store_true",
         help="Require a valid SHA-256 prompt identity on every score row.",
     )
+    parser.add_argument(
+        "--max-missing-score-mass-upper-bound",
+        type=float,
+        help="Reject score rows whose recorded missing-mass bound exceeds this.",
+    )
     args = parser.parse_args()
 
     predictions = read_jsonl(args.predictions)
@@ -157,6 +162,29 @@ def main() -> None:
                     errors.append(
                         f"invalid logprob distribution at {row['record_id']} "
                         f"{row['mode']} {row['dimension']}"
+                    )
+                    break
+            if args.max_missing_score_mass_upper_bound is not None:
+                try:
+                    missing_mass_bound = float(
+                        row.get("missing_score_mass_upper_bound")
+                    )
+                except (TypeError, ValueError):
+                    errors.append(
+                        f"missing score-mass bound at {row['record_id']} "
+                        f"{row['mode']} {row['dimension']}"
+                    )
+                    break
+                if (
+                    not math.isfinite(missing_mass_bound)
+                    or missing_mass_bound < 0.0
+                    or missing_mass_bound
+                    > args.max_missing_score_mass_upper_bound
+                ):
+                    errors.append(
+                        f"score-mass bound exceeds limit at "
+                        f"{row['record_id']} {row['mode']} "
+                        f"{row['dimension']}"
                     )
                     break
         if args.expected_model and set(models) != {args.expected_model}:
