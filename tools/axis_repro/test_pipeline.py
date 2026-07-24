@@ -1,4 +1,6 @@
 import unittest
+import subprocess
+import sys
 from unittest import mock
 
 from .build_tables import aggregate
@@ -9,6 +11,20 @@ from .geval_deepseek import logprob_distribution, normalize_type, score_from_tex
 
 
 class TestPipeline(unittest.TestCase):
+    def test_qwen_cli_imports_in_clean_process(self):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tools.axis_repro.geval_qwen",
+                "--help",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_score_parser(self):
         self.assertEqual(score_from_text("**Score:** 4"), 4)
         self.assertEqual(normalize_type("Multiple Choice"), "multiple_choice")
