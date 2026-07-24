@@ -39,12 +39,27 @@ def test_readout_request_is_json_and_direct_logprobs():
         20,
         5,
         72,
+        None,
     )
     assert body["response_format"] == {"type": "json_object"}
     assert body["logprobs"] is True
     assert body["top_logprobs"] == 5
     assert body["seed"] == 72
     assert body["messages"][1]["role"] == "assistant"
+    assert "enable_thinking" not in body
+
+
+def test_readout_request_can_disable_hybrid_thinking():
+    body = request_body(
+        "qwen3.5-397b-a17b",
+        "author prompt",
+        "**Score:** 4",
+        20,
+        5,
+        72,
+        False,
+    )
+    assert body["enable_thinking"] is False
 
 
 def test_readout_bounded_distribution_maps_labels_to_scores():

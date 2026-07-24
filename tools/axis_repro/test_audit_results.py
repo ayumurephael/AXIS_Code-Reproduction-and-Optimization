@@ -30,6 +30,7 @@ def qwen_rows():
         "method": "final_score_top_logprobs",
         "model": "qwen3-30b-a3b-instruct-2507",
         "provider": "qwen",
+        "enable_thinking": False,
         "logprobs_returned": True,
         "distribution": distribution,
         "fallback_scores": [],
@@ -70,6 +71,7 @@ def test_qwen_fail_closed_audit(tmp_path, monkeypatch, capsys):
         "--modes", "base",
         "--expected-model", "qwen3-30b-a3b-instruct-2507",
         "--expected-provider", "qwen",
+        "--expected-enable-thinking", "false",
         "--allowed-methods", "final_score_top_logprobs",
         "--require-logprobs",
         "--require-prompt-hashes",
@@ -78,6 +80,7 @@ def test_qwen_fail_closed_audit(tmp_path, monkeypatch, capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["ok"] is True
     assert result["logprobs_returned"] == 2
+    assert result["score_enable_thinking"] == {"false": 2}
 
 
 def test_qwen_audit_rejects_missing_distribution(

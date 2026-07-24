@@ -245,6 +245,7 @@ def result_row(
     distribution: dict[str, float] | None,
     samples: list[int],
     logprob_metadata: dict | None = None,
+    enable_thinking: bool | None = None,
 ) -> dict:
     choice = primary.get("choices", [{}])[0]
     raw = choice.get("message", {}).get("content", "") or ""
@@ -282,6 +283,7 @@ def result_row(
         "top_logprobs": top_logprobs,
         "logprobs_requested": True,
         "logprobs_returned": method.startswith("final_score_top_logprobs"),
+        "enable_thinking": enable_thinking,
         "endpoint_host": urlparse(endpoint).netloc,
     }
 
@@ -492,6 +494,7 @@ def main() -> None:
                 args.endpoint, args.max_tokens, args.top_logprobs,
                 args.seed, score, metadata["method"],
                 probabilities, [], metadata,
+                args.enable_thinking,
             ))
             state = "completed"
         else:
@@ -504,6 +507,7 @@ def main() -> None:
                 "max_missing_score_mass_upper_bound": (
                     args.max_missing_score_mass_upper_bound
                 ),
+                "enable_thinking": args.enable_thinking,
             }
             append_jsonl(pending_path, journal)
             pending[task_key(row, dimension)] = journal
@@ -542,6 +546,7 @@ def main() -> None:
             sum(samples) / len(samples),
             f"exact_sample_mean_{args.fallback_samples}",
             None, samples, None,
+            args.enable_thinking,
         )
 
     finished = 0

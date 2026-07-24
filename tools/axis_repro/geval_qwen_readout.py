@@ -23,6 +23,7 @@ from .common import read_jsonl
 from .geval_qwen import (
     DEFAULT_ENDPOINT,
     DEFAULT_MODEL,
+    parse_enable_thinking,
     result_row,
     task_key,
 )
@@ -57,10 +58,11 @@ def request_body(
     max_tokens: int,
     top_logprobs: int,
     seed: int,
+    enable_thinking: bool | None,
 ) -> dict:
     if not 1 <= top_logprobs <= 5:
         raise ValueError("Qwen readout top_logprobs must be in [1,5]")
-    return {
+    body = {
         "model": model,
         "messages": [
             {"role": "user", "content": author_prompt},
@@ -74,6 +76,9 @@ def request_body(
         "top_logprobs": top_logprobs,
         "response_format": {"type": "json_object"},
     }
+    if enable_thinking is not None:
+        body["enable_thinking"] = enable_thinking
+    return body
 
 
 def api_call(
@@ -197,6 +202,16 @@ def main() -> None:
     parser.add_argument("--top-logprobs", type=int, default=5)
     parser.add_argument("--seed", type=int, default=72)
     parser.add_argument(
+        "--enable-thinking",
+        type=parse_enable_thinking,
+        default=None,
+        metavar="{auto,true,false}",
+        help=(
+            "Use the same Qwen thinking mode as the primary judgment. "
+            "A value stored in the pending journal takes precedence."
+        ),
+    )
+    parser.add_argument(
         "--max-missing-score-mass-upper-bound",
         type=float,
         default=1e-6,
@@ -207,7 +222,7 @@ def main() -> None:
 
     request_body(
         args.model, "prompt", "**Score:** 3", args.max_tokens,
-        args.top_logprobs, args.seed,
+        args.top_logprobs, args.seed, args.enable_thinking,
     )
     if not 0.0 <= args.max_missing_score_mass_upper_bound < 1.0:
         raise ValueError(
@@ -246,9 +261,24 @@ def main() -> None:
             raise ReadoutScoreLogprobsError(
                 "pending primary response has no integer score"
             )
+        journal_thinking = item.get("enable_thinking")
+        if (
+            journal_thinking is not None
+            and args.enable_thinking is not None
+            and journal_thinking != args.enable_thinking
+        ):
+            raise ReadoutScoreLogprobsError(
+                "readout thinking mode disagrees with pending primary mode"
+            )
+        enable_thinking = (
+            journal_thinking
+            if journal_thinking is not None
+            else args.enable_thinking
+        )
         body = request_body(
             args.model, item["prompt"], primary_content,
             args.max_tokens, args.top_logprobs, args.seed,
+            enable_thinking,
         )
         response = api_call(key, args.endpoint, body)
         distribution = bounded_label_distribution(
@@ -270,6 +300,7 @@ def main() -> None:
             item["prompt"], primary, args.model, args.endpoint,
             args.max_tokens, args.top_logprobs, args.seed, score,
             metadata["method"], probabilities, [], metadata,
+            enable_thinking,
         )
         serialized_messages = json.dumps(
             body["messages"],
@@ -291,6 +322,7 @@ def main() -> None:
                 args.endpoint
             ).netloc,
             "score_readout_target_label": metadata["chosen_label"],
+            "score_readout_enable_thinking": enable_thinking,
         })
         return result
 
