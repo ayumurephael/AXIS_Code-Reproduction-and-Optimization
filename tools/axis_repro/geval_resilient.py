@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import time
+import urllib.error
 from pathlib import Path
 
 from . import common
@@ -25,6 +26,21 @@ from .geval_correct import exact_samples, final_score_distribution  # noqa: E402
 from .runtime_fixes import score_from_text  # noqa: E402
 
 g.score_from_text = score_from_text
+
+
+class PermanentAPIError(RuntimeError):
+    """Raised when retrying cannot change an API request outcome."""
+
+
+class RetryExhaustedError(RuntimeError):
+    """Raised after the bounded retry budget is exhausted."""
+
+
+def is_retriable_error(exc: Exception) -> bool:
+    """Classify transport and HTTP failures without exposing response bodies."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in {408, 409, 425, 429} or 500 <= exc.code <= 599
+    return isinstance(exc, (urllib.error.URLError, TimeoutError))
 
 
 def task_key(row: dict, dimension: str) -> tuple[str, str, str]:
@@ -67,8 +83,17 @@ def result_row(row, dimension, spec, prompt, primary, score, method, probs, samp
     }
 
 
-def run_retrying(items, worker, workers, phase):
+def run_retrying(
+    items,
+    worker,
+    workers,
+    phase,
+    max_rounds=12,
+    sleep_fn=time.sleep,
+):
     """Yield successful results; retry failed items without losing progress."""
+    if max_rounds < 1:
+        raise ValueError("max_rounds must be positive")
     queue = list(items)
     round_index = 0
     while queue:
@@ -81,7 +106,23 @@ def run_retrying(items, worker, workers, phase):
                 item = futures.pop(future)
                 try:
                     yield future.result()
-                except Exception as exc:  # network/API errors are retriable
+                except Exception as exc:
+                    if not is_retriable_error(exc):
+                        status = (
+                            exc.code
+                            if isinstance(exc, urllib.error.HTTPError)
+                            else type(exc).__name__
+                        )
+                        print(json.dumps({
+                            "phase": phase,
+                            "state": "fatal",
+                            "error_type": type(exc).__name__,
+                            "status": status,
+                            "round": round_index,
+                        }), flush=True)
+                        raise PermanentAPIError(
+                            f"{phase} failed with permanent API error {status}"
+                        ) from exc
                     failed.append(item)
                     print(json.dumps({
                         "phase": phase,
@@ -91,7 +132,12 @@ def run_retrying(items, worker, workers, phase):
                     }), flush=True)
         queue = failed
         if queue:
-            time.sleep(min(60, 2 ** min(round_index, 5)))
+            if round_index >= max_rounds:
+                raise RetryExhaustedError(
+                    f"{phase} exhausted {max_rounds} retry rounds "
+                    f"with {len(queue)} item(s) pending"
+                )
+            sleep_fn(min(60, 2 ** min(round_index, 5)))
 
 
 def main() -> None:
@@ -112,6 +158,13 @@ def main() -> None:
     )
     parser.add_argument("--primary-workers", type=int, default=12)
     parser.add_argument("--fallback-workers", type=int, default=8)
+    parser.add_argument(
+        "--max-retry-rounds",
+        type=int,
+        default=12,
+        help="Bounded retry rounds for transient 408/409/425/429/5xx and "
+             "transport failures. Permanent HTTP errors fail immediately.",
+    )
     args = parser.parse_args()
     g.MAX_TOKENS = args.max_tokens
     g.API_ENDPOINT = args.endpoint
@@ -163,7 +216,11 @@ def main() -> None:
 
     processed = 0
     for item, prompt, primary, distribution in run_retrying(
-        primary_tasks, primary_work, args.primary_workers, "primary"
+        primary_tasks,
+        primary_work,
+        args.primary_workers,
+        "primary",
+        max_rounds=args.max_retry_rounds,
     ):
         row, dimension, spec = item
         processed += 1
@@ -208,7 +265,11 @@ def main() -> None:
 
     finished = 0
     for result in run_retrying(
-        fallback_items, fallback_work, args.fallback_workers, "fallback"
+        fallback_items,
+        fallback_work,
+        args.fallback_workers,
+        "fallback",
+        max_rounds=args.max_retry_rounds,
     ):
         append_jsonl(output, result)
         finished += 1
