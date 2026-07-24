@@ -108,6 +108,13 @@ runner 使用作者 prompt，并定位最终 `**Score:**` 后的单个 ASCII 数
 仍 fail-closed；不能静默把任意缺失候选当作概率 0。只有明确采用 AXIS 回退协议
 时才可传 `--fallback-samples 20`。
 
+若原始最终数字的 top-5 仍超过该上界，先写入 pending journal，再使用
+`geval_qwen_readout`：它把已经生成的作者式判断原文作为 assistant 历史，只要求
+同一模型把其中的整数分数编码为 JSON 单标签 A--E（A=1，…，E=5）。读出标签
+必须与原始整数完全一致，仍使用 top-5 直接 logprobs 和相同 `1e-6` 上界；否则
+继续 fail-closed。该二阶段只是确定性标签读出，不重新判断答案，也不是 20 次
+采样回退。
+
 ```bash
 export QWEN_API_KEY='<set outside repository>'
 export QWEN_BASE_URL='https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
@@ -121,14 +128,17 @@ python -m tools.axis_repro.geval_qwen \
   --primary-workers 6 \
   --max-missing-score-mass-upper-bound 1e-6 \
   --max-retry-rounds 12
-```
 
-`qwen3-30b-a3b-instruct-2507` 是仅非思考模式模型，默认不要发送
-`enable_thinking`。对支持混合模式的其他 Qwen3 模型，可以使用
-`--enable-thinking true|false`；`auto` 表示不发送该扩展字段。正式 Qwen
-结果应执行 fail-closed 审计：
+python -m tools.axis_repro.geval_qwen_readout \
+  --pending <score_dir>/fallback_pending.jsonl \
+  --output <score_dir>/geval_qwen3_30b_a3b_instruct_2507.jsonl \
+  --model qwen3-30b-a3b-instruct-2507 \
+  --top-logprobs 5 \
+  --seed 72 \
+  --max-missing-score-mass-upper-bound 1e-6 \
+  --workers 2 \
+  --max-retry-rounds 12
 
-```bash
 python -m tools.axis_repro.audit_results \
   --predictions <prediction_dir>/predictions.jsonl \
   --scores <score_dir>/geval_qwen3_30b_a3b_instruct_2507.jsonl \
@@ -138,10 +148,17 @@ python -m tools.axis_repro.audit_results \
   --expected-provider qwen \
   --allowed-methods final_score_top_logprobs \
                     final_score_top_logprobs_bounded \
+                    final_score_top_logprobs_readout \
+                    final_score_top_logprobs_readout_bounded \
   --max-missing-score-mass-upper-bound 1e-6 \
   --require-logprobs \
   --require-prompt-hashes
 ```
+
+`qwen3-30b-a3b-instruct-2507` 是仅非思考模式模型，默认不要发送
+`enable_thinking`。对支持混合模式的其他 Qwen3 模型，可以使用
+`--enable-thinking true|false`；`auto` 表示不发送该扩展字段。正式 Qwen
+结果应执行上述 fail-closed 审计。
 
 Qwen API key、模型和 endpoint 具有地域一致性要求。401/403 应检查 key 与权限，
 404 应检查模型 ID/地域，429 与 5xx 才进行有界退避。结果必须记录实际返回
