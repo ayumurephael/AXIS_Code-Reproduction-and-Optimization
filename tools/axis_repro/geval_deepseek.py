@@ -13,7 +13,8 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .common import append_jsonl, read_jsonl
+from .common import read_jsonl
+from .io_utils import append_jsonl
 
 # The high-thinking judge can consume more than 1,200 reasoning tokens before
 # emitting the visible ``**Score:**`` line. Formal crash-resilient evaluation
