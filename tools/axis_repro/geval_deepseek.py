@@ -79,8 +79,8 @@ Please follow this exact format for your response:
 
 def api_call(key, model, prompt, temperature, logprobs):
     body = {"model": model, "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature, "max_tokens": MAX_TOKENS,
-            "thinking": {"type": "enabled", "level": "high"}}
+            "max_tokens": MAX_TOKENS, "reasoning_effort": "high",
+            "thinking": {"type": "enabled"}}
     if logprobs: body.update({"logprobs": True, "top_logprobs": 20})
     req = urllib.request.Request(API_ENDPOINT,
         data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
@@ -133,6 +133,7 @@ def judge_one(key, model, row, dim, spec, fallback_samples):
             "dimension": dim, "weight": weight, "score": score, "method": method,
             "distribution": probs, "fallback_scores": samples,
             "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "model": model,
+            "provider": "deepseek",
             "system_fingerprint": primary.get("system_fingerprint"), "usage": primary.get("usage"),
             "endpoint_host": urlparse(API_ENDPOINT).netloc, "logprobs_requested": True,
             "logprobs_returned": bool(primary.get("choices", [{}])[0].get("logprobs", {}).get("content"))}

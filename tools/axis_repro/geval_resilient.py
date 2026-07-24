@@ -74,6 +74,7 @@ def result_row(row, dimension, spec, prompt, primary, score, method, probs, samp
         "judge_content": raw,
         "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
         "model": primary.get("model"),
+        "provider": "deepseek",
         "system_fingerprint": primary.get("system_fingerprint"),
         "usage": primary.get("usage"),
         "judge_max_tokens": g.MAX_TOKENS,
