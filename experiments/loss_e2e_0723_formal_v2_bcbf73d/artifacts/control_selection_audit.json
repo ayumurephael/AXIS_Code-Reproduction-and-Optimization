@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "experiment": "loss_e2e_0723",
+  "arm": "control",
+  "selection_result": "pass",
+  "best_checkpoint_manifest_sha256": "779f3004119736a49b842c0633269095a734f333215c1dd898afe71c1115e3f5",
+  "validation_summary_sha256_by_step": {
+    "4750": "6d6a11ac914385489474f10faa05795acec0f8edf0783542880daf9339d48f4b",
+    "9500": "4ac29546c57d685272491406caf9cb66aa41a98938aee63be753442e0c4cf3d7",
+    "14250": "c4cdc2a2f640ba6b0ea0f23f1396b19c0280591ad8cbdbff884e1930e09057a2",
+    "19000": "0c883b27c232422a0e32705e778a4e6e26b4c77fb98df63408aa6f20c3d5270f"
+  },
+  "candidate_global_token_nll": {
+    "4750": 0.7547016014581801,
+    "9500": 0.7702500476813259,
+    "14250": 0.7462734525039196,
+    "19000": 0.7437550400149372
+  },
+  "effective_answer_token_count": 376696,
+  "validation_seed": 72,
+  "validation_series": 1500,
+  "test_or_judge_metrics_consulted": false,
+  "selected_step": 19000,
+  "selected_global_token_nll": 0.7437550400149372,
+  "selected_checkpoint_sha256": "e0a90af91fae257bf39f29d34be2b9db710b9a41ebaf099cbb8ce82de0d9e959"
+}

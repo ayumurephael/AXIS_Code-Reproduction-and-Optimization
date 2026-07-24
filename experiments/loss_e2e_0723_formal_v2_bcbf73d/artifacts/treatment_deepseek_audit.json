@@ -1,0 +1,59 @@
+{
+  "schema_version": 4,
+  "experiment": "loss_e2e_0723",
+  "arm": "treatment",
+  "transport": {
+    "execution_host": "authorized_gpu_server",
+    "mode": "official_endpoint_direct_after_control_training",
+    "ssh_reverse_proxy": false,
+    "cuda_visible_devices": "",
+    "nice": 10,
+    "thread_limits": 1
+  },
+  "judge": {
+    "model": "deepseek-v4-pro",
+    "prompt_template": "repository_deepseek_geval",
+    "scoring_mode": "score_token_expectation_or_exact_sample_mean_20",
+    "primary_workers": 3,
+    "fallback_workers": 1,
+    "fallback_samples": 20,
+    "judge_max_tokens": 4096,
+    "score_rows": 335,
+    "method_counts": {
+      "exact_sample_mean_20": 1,
+      "final_score_top_logprobs": 334
+    },
+    "logprobs_requested_all": true,
+    "logprobs_returned_count": 334,
+    "endpoint_hosts": [
+      "api.deepseek.com"
+    ],
+    "unique_prompt_hashes": 335
+  },
+  "resume_history": {
+    "rows_before_after_control_resume": 59,
+    "completed_rows_reused_without_repeat": true,
+    "control_training_complete_before_resume": true
+  },
+  "final_audit": {
+    "prediction_rows": 140,
+    "records": 140,
+    "prediction_modes": {
+      "base": 140
+    },
+    "score_rows": 335,
+    "score_methods": {
+      "final_score_top_logprobs": 334,
+      "exact_sample_mean_20": 1
+    },
+    "errors": [],
+    "ok": true
+  },
+  "predictions_sha256": "bd4d3a6ab36ff84c28399764eb44770a67adb860b0dbd01fc5d8128c6dcd6bfb",
+  "scores_sha256": "d57cf4f90d89a736f9f1dc8c212a9574daf5554f821634d576033501d0bd9264",
+  "table_json_sha256": "6d30a6b265bca07646fdbf9d69dd77ecd1d1ea92bcfbd0cc86a10a1973389bc3",
+  "table_markdown_sha256": "ee5daa3f741789109e08472bff0eb307bf19cfc78a836c656edfbb122f77c1d6",
+  "control_training_audit_sha256": "5f3088b809b6525cc48c8bbaa9b2c746cd2b11d225ccfec639664ae7521619df",
+  "source_commit": "be473f15c25a21c328474558e07ff4ed72be2cac",
+  "source_dirty": false
+}

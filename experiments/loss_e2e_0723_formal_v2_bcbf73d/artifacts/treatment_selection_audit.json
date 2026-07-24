@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "experiment": "loss_e2e_0723",
+  "arm": "treatment",
+  "selection_result": "pass",
+  "post_audit_repair": {
+    "validation_rerun": false,
+    "reason": "orchestrator expected obsolete top-level keys instead of selector schema keys 'declared_candidate_steps' and 'selected'"
+  },
+  "best_checkpoint_manifest_sha256": "c0aac95f830d13953278ba47235b1113f643f1aa921ce04c341398c81b56ac7e",
+  "validation_summary_sha256_by_step": {
+    "4750": "32ce5a48d340d5bf34d1c802fc84eb5bb911f1d48bba3cd339298ca4646467d2",
+    "9500": "7a54febab3ac2a3f46dd10dff9bce47ed5b3f9cdbfd28f66bc6627100d4f3205",
+    "14250": "3e62eb238562864eb556ec2d0e2c8835f788fb8a8e2c36f6ca3596d3ac0b5bdf",
+    "19000": "eccc62c208941fa1245a832a263dc01abad75f2896abca968a6648a576a7ff74"
+  },
+  "candidate_global_token_nll": {
+    "4750": 0.7314503073051807,
+    "9500": 0.7370741326276213,
+    "14250": 0.730750035942911,
+    "19000": 0.7300642621234392
+  },
+  "effective_answer_token_count": 376696,
+  "validation_seed": 72,
+  "validation_series": 1500,
+  "test_or_judge_metrics_consulted": false,
+  "selected_step": 19000,
+  "selected_global_token_nll": 0.7300642621234392,
+  "selected_checkpoint_sha256": "3dde97c0d1f752be4546cee330cb22547862e52457f8d1bba1ab6edd6bc71ba5"
+}

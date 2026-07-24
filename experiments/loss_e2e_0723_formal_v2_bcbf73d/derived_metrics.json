@@ -1,0 +1,304 @@
+{
+  "schema_version": 1,
+  "experiment": "loss_e2e_0723",
+  "comparison_definition": {
+    "absolute_delta": "treatment - control",
+    "relative_change_pct": "(treatment - control) / control * 100"
+  },
+  "table1_comparisons": {
+    "gemini": [
+      {
+        "key": "multiple_choice/final",
+        "metric": "MC Final",
+        "control": 4.218604651162791,
+        "treatment": 4.2046511627906975,
+        "absolute_delta": -0.013953488372093759,
+        "relative_change_pct": -0.33076074972438346,
+        "direction": "declined"
+      },
+      {
+        "key": "multiple_choice/correctness",
+        "metric": "MC Corr.",
+        "control": 4.3023255813953485,
+        "treatment": 4.232558139534884,
+        "absolute_delta": -0.06976744186046435,
+        "relative_change_pct": -1.621621621621604,
+        "direction": "declined"
+      },
+      {
+        "key": "multiple_choice/reasoning_quality",
+        "metric": "MC Rsn.",
+        "control": 4.023255813953488,
+        "treatment": 4.1395348837209305,
+        "absolute_delta": 0.11627906976744207,
+        "relative_change_pct": 2.8901734104046293,
+        "direction": "improved"
+      },
+      {
+        "key": "open_ended/final",
+        "metric": "OE Final",
+        "control": 2.9000000000000004,
+        "treatment": 3.0527272727272727,
+        "absolute_delta": 0.15272727272727238,
+        "relative_change_pct": 5.266457680250771,
+        "direction": "improved"
+      },
+      {
+        "key": "open_ended/accuracy",
+        "metric": "OE Acc.",
+        "control": 2.7454545454545456,
+        "treatment": 3.018181818181818,
+        "absolute_delta": 0.2727272727272725,
+        "relative_change_pct": 9.933774834437077,
+        "direction": "improved"
+      },
+      {
+        "key": "open_ended/completeness",
+        "metric": "OE Comp.",
+        "control": 2.672727272727273,
+        "treatment": 2.727272727272727,
+        "absolute_delta": 0.05454545454545423,
+        "relative_change_pct": 2.0408163265306003,
+        "direction": "improved"
+      },
+      {
+        "key": "open_ended/relevance",
+        "metric": "OE Rel.",
+        "control": 3.3454545454545452,
+        "treatment": 3.4727272727272727,
+        "absolute_delta": 0.12727272727272743,
+        "relative_change_pct": 3.8043478260869614,
+        "direction": "improved"
+      },
+      {
+        "key": "true_false/final",
+        "metric": "TF Final",
+        "control": 3.028571428571429,
+        "treatment": 3.3380952380952387,
+        "absolute_delta": 0.30952380952380976,
+        "relative_change_pct": 10.220125786163528,
+        "direction": "improved"
+      },
+      {
+        "key": "true_false/correctness",
+        "metric": "TF Corr.",
+        "control": 3.0,
+        "treatment": 3.357142857142857,
+        "absolute_delta": 0.3571428571428572,
+        "relative_change_pct": 11.904761904761907,
+        "direction": "improved"
+      },
+      {
+        "key": "true_false/justification_quality",
+        "metric": "TF Justif.",
+        "control": 3.0714285714285716,
+        "treatment": 3.3095238095238093,
+        "absolute_delta": 0.2380952380952377,
+        "relative_change_pct": 7.75193798449611,
+        "direction": "improved"
+      },
+      {
+        "key": "macro_final",
+        "metric": "Macro Final",
+        "control": 3.382392026578074,
+        "treatment": 3.53182455787107,
+        "absolute_delta": 0.14943253129299627,
+        "relative_change_pct": 4.417954220527637,
+        "direction": "improved"
+      }
+    ],
+    "deepseek": [
+      {
+        "key": "multiple_choice/final",
+        "metric": "MC Final",
+        "control": 4.244192352664088,
+        "treatment": 4.055228682041848,
+        "absolute_delta": -0.18896367062223973,
+        "relative_change_pct": -4.4522880897145685,
+        "direction": "declined"
+      },
+      {
+        "key": "multiple_choice/correctness",
+        "metric": "MC Corr.",
+        "control": 4.348847891185747,
+        "treatment": 4.116280387481387,
+        "absolute_delta": -0.23256750370435952,
+        "relative_change_pct": -5.347795773122527,
+        "direction": "declined"
+      },
+      {
+        "key": "multiple_choice/reasoning_quality",
+        "metric": "MC Rsn.",
+        "control": 3.999996096113553,
+        "treatment": 3.9127747026829245,
+        "absolute_delta": -0.08722139343062851,
+        "relative_change_pct": -2.1805369639078878,
+        "direction": "declined"
+      },
+      {
+        "key": "open_ended/final",
+        "metric": "OE Final",
+        "control": 2.9568576528500388,
+        "treatment": 3.0800214261281305,
+        "absolute_delta": 0.12316377327809169,
+        "relative_change_pct": 4.165360248552287,
+        "direction": "improved"
+      },
+      {
+        "key": "open_ended/accuracy",
+        "metric": "OE Acc.",
+        "control": 2.8545542743349652,
+        "treatment": 3.018186307776906,
+        "absolute_delta": 0.163632033441941,
+        "relative_change_pct": 5.732314670389753,
+        "direction": "improved"
+      },
+      {
+        "key": "open_ended/completeness",
+        "metric": "OE Comp.",
+        "control": 2.6481905329601707,
+        "treatment": 2.7273350373141465,
+        "absolute_delta": 0.0791445043539758,
+        "relative_change_pct": 2.9886257566787453,
+        "direction": "improved"
+      },
+      {
+        "key": "open_ended/relevance",
+        "metric": "OE Rel.",
+        "control": 3.4363232343224746,
+        "treatment": 3.563629851154208,
+        "absolute_delta": 0.1273066168317336,
+        "relative_change_pct": 3.704733465122763,
+        "direction": "improved"
+      },
+      {
+        "key": "true_false/final",
+        "metric": "TF Final",
+        "control": 3.228566008096448,
+        "treatment": 3.4428557992267486,
+        "absolute_delta": 0.21428979113030078,
+        "relative_change_pct": 6.637305558966886,
+        "direction": "improved"
+      },
+      {
+        "key": "true_false/correctness",
+        "metric": "TF Corr.",
+        "control": 3.1904762671323743,
+        "treatment": 3.4523814982081533,
+        "absolute_delta": 0.261905231075779,
+        "relative_change_pct": 8.208969732007489,
+        "direction": "improved"
+      },
+      {
+        "key": "true_false/justification_quality",
+        "metric": "TF Justif.",
+        "control": 3.2857006195425607,
+        "treatment": 3.4285672507546407,
+        "absolute_delta": 0.1428666312120801,
+        "relative_change_pct": 4.34813294803378,
+        "direction": "improved"
+      },
+      {
+        "key": "macro_final",
+        "metric": "Macro Final",
+        "control": 3.4765386712035244,
+        "treatment": 3.526035302465576,
+        "absolute_delta": 0.049496631262051505,
+        "relative_change_pct": 1.4237330846349114,
+        "direction": "improved"
+      }
+    ]
+  },
+  "selection": {
+    "control": {
+      "schema_version": 1,
+      "experiment": "loss_e2e_0723",
+      "arm": "control",
+      "selection_result": "pass",
+      "best_checkpoint_manifest_sha256": "779f3004119736a49b842c0633269095a734f333215c1dd898afe71c1115e3f5",
+      "validation_summary_sha256_by_step": {
+        "4750": "6d6a11ac914385489474f10faa05795acec0f8edf0783542880daf9339d48f4b",
+        "9500": "4ac29546c57d685272491406caf9cb66aa41a98938aee63be753442e0c4cf3d7",
+        "14250": "c4cdc2a2f640ba6b0ea0f23f1396b19c0280591ad8cbdbff884e1930e09057a2",
+        "19000": "0c883b27c232422a0e32705e778a4e6e26b4c77fb98df63408aa6f20c3d5270f"
+      },
+      "candidate_global_token_nll": {
+        "4750": 0.7547016014581801,
+        "9500": 0.7702500476813259,
+        "14250": 0.7462734525039196,
+        "19000": 0.7437550400149372
+      },
+      "effective_answer_token_count": 376696,
+      "validation_seed": 72,
+      "validation_series": 1500,
+      "test_or_judge_metrics_consulted": false,
+      "selected_step": 19000,
+      "selected_global_token_nll": 0.7437550400149372,
+      "selected_checkpoint_sha256": "e0a90af91fae257bf39f29d34be2b9db710b9a41ebaf099cbb8ce82de0d9e959"
+    },
+    "treatment": {
+      "schema_version": 1,
+      "experiment": "loss_e2e_0723",
+      "arm": "treatment",
+      "selection_result": "pass",
+      "post_audit_repair": {
+        "validation_rerun": false,
+        "reason": "orchestrator expected obsolete top-level keys instead of selector schema keys 'declared_candidate_steps' and 'selected'"
+      },
+      "best_checkpoint_manifest_sha256": "c0aac95f830d13953278ba47235b1113f643f1aa921ce04c341398c81b56ac7e",
+      "validation_summary_sha256_by_step": {
+        "4750": "32ce5a48d340d5bf34d1c802fc84eb5bb911f1d48bba3cd339298ca4646467d2",
+        "9500": "7a54febab3ac2a3f46dd10dff9bce47ed5b3f9cdbfd28f66bc6627100d4f3205",
+        "14250": "3e62eb238562864eb556ec2d0e2c8835f788fb8a8e2c36f6ca3596d3ac0b5bdf",
+        "19000": "eccc62c208941fa1245a832a263dc01abad75f2896abca968a6648a576a7ff74"
+      },
+      "candidate_global_token_nll": {
+        "4750": 0.7314503073051807,
+        "9500": 0.7370741326276213,
+        "14250": 0.730750035942911,
+        "19000": 0.7300642621234392
+      },
+      "effective_answer_token_count": 376696,
+      "validation_seed": 72,
+      "validation_series": 1500,
+      "test_or_judge_metrics_consulted": false,
+      "selected_step": 19000,
+      "selected_global_token_nll": 0.7300642621234392,
+      "selected_checkpoint_sha256": "3dde97c0d1f752be4546cee330cb22547862e52457f8d1bba1ab6edd6bc71ba5"
+    },
+    "selected_nll_absolute_delta": -0.013690777891497974,
+    "selected_nll_relative_change_pct": -1.840764385438385
+  },
+  "training_diagnostics": {
+    "control_global_token_nll": 0.7544028113157364,
+    "treatment_global_token_nll": 0.7349807838314456,
+    "global_token_nll_relative_change_pct": -2.574490337650953,
+    "control_step19000_parameter_drift": 0.2063544990242173,
+    "treatment_step19000_parameter_drift": 0.4161096438872938,
+    "parameter_drift_relative_change_pct": 101.64796302234251
+  },
+  "judge_caveats": {
+    "treatment_gemini_author_default_3": [
+      {
+        "record_id": "series_000100:0",
+        "dimension": "relevance",
+        "score": 3.0
+      },
+      {
+        "record_id": "series_000102:0",
+        "dimension": "completeness",
+        "score": 3.0
+      }
+    ],
+    "control_deepseek_methods": {
+      "exact_sample_mean_20": 2,
+      "final_score_top_logprobs": 333
+    },
+    "treatment_deepseek_methods": {
+      "exact_sample_mean_20": 1,
+      "final_score_top_logprobs": 334
+    }
+  },
+  "source_pipeline_audit_sha256": "323ce27d99d46e55d0558fb6497a7fa7074dc7c59d460ac6053e0fa72919e990",
+  "source_download_manifest_sha256": "d81a0a202bf4b8e84338987933e74133323b36f3d929dce7d5c5beda2121f7ef"
+}

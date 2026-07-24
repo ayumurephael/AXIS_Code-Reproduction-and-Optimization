@@ -1,0 +1,119 @@
+{
+  "schema_version": 4,
+  "arm": "treatment",
+  "training_summary": {
+    "arm": "treatment",
+    "world_size": 3,
+    "completed_epochs": 2,
+    "steps": 19000,
+    "planned_steps": 19000,
+    "formal_complete": true,
+    "epoch_learning_rates": {
+      "1": 0.0001,
+      "2": 3e-05
+    },
+    "frozen_llm_storage_dtype_schedule": {
+      "1": "torch.float16",
+      "2": "torch.bfloat16"
+    },
+    "frozen_llm_storage_dtype_observed_by_epoch": {
+      "1": "torch.float16",
+      "2": "torch.bfloat16"
+    },
+    "frozen_llm_storage_dtype_runtime": {
+      "2": {
+        "before_parameter_dtypes": {
+          "torch.float16": 339
+        },
+        "after_parameter_dtypes": {
+          "torch.bfloat16": 339
+        },
+        "after_dtype": "torch.bfloat16",
+        "input_embedding_dtype": "torch.bfloat16",
+        "output_embedding_dtype": "torch.bfloat16",
+        "transition_applied": true
+      }
+    },
+    "wall_seconds_this_process": 7424.376982314512,
+    "steps_executed_this_process": 9500,
+    "steps_per_second_per_rank": 1.279568645642563,
+    "qa_rows_per_second_global": 7.675660885182394,
+    "metrics": {
+      "objective": 0.6296374336294792,
+      "global_token_nll": 0.7349807838314456,
+      "conclusion_nll": 0.2615696449889244,
+      "explanation_nll": 0.8750159213684223,
+      "mc_objective": 0.5147999753193293,
+      "tf_objective": 0.6680669343238687,
+      "oe_objective": 0.7056569183740116,
+      "objective_denominator": 113974.0,
+      "valid_rows": 113974.0,
+      "token_count": 14309412.0,
+      "both_segment_rows": 113974.0,
+      "conclusion_only_rows": 0.0,
+      "explanation_only_rows": 0.0,
+      "empty_segment_rows": 0.0
+    },
+    "raw_metric_sums": {
+      "objective_sum": 71762.29686048627,
+      "objective_count": 113974.0,
+      "token_nll_sum": 10517142.847927094,
+      "token_count": 14309412.0,
+      "valid_row_count": 113974.0,
+      "conclusion_mean_sum": 29812.138717967668,
+      "conclusion_row_count": 113974.0,
+      "explanation_mean_sum": 99729.06462204456,
+      "explanation_row_count": 113974.0,
+      "both_segment_row_count": 113974.0,
+      "conclusion_only_row_count": 0.0,
+      "explanation_only_row_count": 0.0,
+      "empty_segment_row_count": 0.0,
+      "multiple_choice_objective_sum": 19487.23826573789,
+      "multiple_choice_row_count": 37854.0,
+      "true_false_objective_sum": 25584.291316866875,
+      "true_false_row_count": 38296.0,
+      "open_ended_objective_sum": 26690.767280578613,
+      "open_ended_row_count": 37824.0
+    },
+    "optimization_diagnostics": {
+      "gradient_norm_count": 19000,
+      "gradient_l2_norm_mean": 0.056597942932680445,
+      "gradient_l2_norm_max": 102.70915985107422,
+      "gradient_l2_norm_last": 0.019746242091059685,
+      "nonfinite_gradient_steps": 0,
+      "clipped_steps": 0,
+      "max_grad_norm": null,
+      "parameter_relative_change_by_step": {
+        "4750": {
+          "all_perceiver_parameters": 0.2448304342885788,
+          "trainable_perceiver_parameters": 0.24494655647482044
+        },
+        "9500": {
+          "all_perceiver_parameters": 0.40888473232475514,
+          "trainable_perceiver_parameters": 0.40907866486903355
+        },
+        "14250": {
+          "all_perceiver_parameters": 0.41233997532503996,
+          "trainable_perceiver_parameters": 0.4125355466785307
+        },
+        "19000": {
+          "all_perceiver_parameters": 0.4159123781561082,
+          "trainable_perceiver_parameters": 0.4161096438872938
+        }
+      }
+    }
+  },
+  "post_audit_repair": {
+    "training_rerun": false,
+    "reason": "The original post-audit compared a Counter of parameter tensors against a parameter-element threshold.",
+    "corrected_semantics": "exact frozen-LLM parameter tensor count by dtype",
+    "before_parameter_tensor_count": 339,
+    "after_parameter_tensor_count": 339
+  },
+  "run_manifest_sha256": "98327d4ba4a66aef7726678c767d6e9959d75bf19f2872ecb21014fb1e847507",
+  "epoch1_run_manifest_sha256": "1580f55588601b7c0a784d534ff3c45363d2b3347d7721544e5128c3a53f0caa",
+  "failed_fp16_epoch2_run_manifest_sha256": "5f934b92d7a1e253b88498dcf20004810418eafc21e0323add8c1f9afc907de8",
+  "failed_fp16_epoch2_log_sha256": "7195b8b34ea3452ba28b403509c6c551669d35fabe16627a00828a5e3e0ecaf0",
+  "data_exclusion_manifest_sha256": "7da28a1648d51bbd56463ea4752ce8eb3d98cff5e325e980132787e182ea2bef",
+  "epoch_2_sha256": "71dfc96b6bc3d47214540f1ecaccd44b1e06875ff63eee72b817925b8da8e1db"
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": 2,
+  "experiment": "loss_e2e_0723",
+  "arm": "treatment",
+  "transport": {
+    "execution_host": "authorized_gpu_server",
+    "ssh_reverse_proxy": true,
+    "direct_endpoint_connectivity": false,
+    "score_rows_before_tunnel_resume": 0
+  },
+  "judge": {
+    "model": "gemini-2.5-pro",
+    "prompt_template": "author",
+    "scoring_mode": "author",
+    "primary_workers": 3,
+    "score_rows": 335,
+    "method_counts": {
+      "author_default_3": 2,
+      "author_temperature0_integer": 333
+    },
+    "logprobs_requested_all": true,
+    "logprobs_returned_count": 0,
+    "endpoint_hosts": [
+      "www.packyapi.com"
+    ],
+    "unique_prompt_hashes": 335
+  },
+  "final_audit": {
+    "prediction_rows": 140,
+    "records": 140,
+    "prediction_modes": {
+      "base": 140
+    },
+    "score_rows": 335,
+    "score_methods": {
+      "author_temperature0_integer": 333,
+      "author_default_3": 2
+    },
+    "errors": [],
+    "ok": true
+  },
+  "predictions_sha256": "bd4d3a6ab36ff84c28399764eb44770a67adb860b0dbd01fc5d8128c6dcd6bfb",
+  "scores_sha256": "6f7f5a191d0227297c6d81400df03fadc928210cfe1d9cb87d0397077116ce61",
+  "table_json_sha256": "a82162c698b099bae3c8bae72f31a08695e7c327f175c9756a8ea067c98f32b2",
+  "table_markdown_sha256": "7a928b9ff3cb84eb9cf9e59cc46d76b12e7d3d53bfdcd4a3a597a2e224038055",
+  "source_commit": "be473f15c25a21c328474558e07ff4ed72be2cac",
+  "source_dirty": false
+}

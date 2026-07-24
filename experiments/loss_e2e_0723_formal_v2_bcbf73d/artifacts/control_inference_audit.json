@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "experiment": "loss_e2e_0723",
+  "arm": "control",
+  "selected_step": 19000,
+  "selected_checkpoint_sha256": "e0a90af91fae257bf39f29d34be2b9db710b9a41ebaf099cbb8ce82de0d9e959",
+  "selection_manifest_sha256": "779f3004119736a49b842c0633269095a734f333215c1dd898afe71c1115e3f5",
+  "paper140_manifest_sha256": "c2aefed015869d153ab3f5632442f83ac3ffccf140685229ffab7a3a8e9cc1a6",
+  "predictions_sha256": "cc2d5a78ca5f1672db50f1c9f0994cdf4c1bd7dd347d13e3b178f29c38aa9f25",
+  "prediction_run_manifest_sha256": "270cacec4d78d060f5ab2295e050ff7449b84e7e6ff813564571d9edad927a71",
+  "prediction_audit": {
+    "prediction_rows": 140,
+    "records": 140,
+    "prediction_modes": {
+      "base": 140
+    },
+    "errors": [],
+    "ok": true
+  },
+  "protocol": {
+    "subset": "paper140",
+    "manifest_seed": 42,
+    "batching": "series",
+    "beam_size": 5,
+    "skip_loss": true,
+    "modes": [
+      "base"
+    ],
+    "world_size": 3
+  },
+  "source_commit": "be473f15c25a21c328474558e07ff4ed72be2cac",
+  "source_dirty": false
+}

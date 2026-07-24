@@ -1,0 +1,905 @@
+{
+  "schema_version": 2,
+  "seed": 72,
+  "train_ratio": 0.95,
+  "train_series": 28500,
+  "ordered_train_series_sha256": "2ed165dc679f37a05b64c8bc5aae6bd6035d7dd52d087826d3f4d5b94e5fbfab",
+  "qa_rows_total": 57000,
+  "qa_rows_included": 56987,
+  "qa_rows_excluded": 13,
+  "question_type_counts": {
+    "multiple_choice": 18934,
+    "open_ended": 18914,
+    "true_false": 19152
+  },
+  "included_question_type_counts": {
+    "multiple_choice": 18927,
+    "open_ended": 18912,
+    "true_false": 19148
+  },
+  "segmentation_rule_counts": {
+    "multiple_choice/fallback": 1701,
+    "multiple_choice/mc_blank_line": 1234,
+    "multiple_choice/mc_first_line": 6082,
+    "multiple_choice/mc_first_sentence": 1701,
+    "multiple_choice/mc_marker": 9910,
+    "open_ended/oe_first_sentence": 18879,
+    "open_ended/oe_short_merge_second": 33,
+    "true_false/tf_label_plus_first_statement": 19148
+  },
+  "segment_length_audit": {
+    "units": {
+      "chars": "Python Unicode code points after span trimming",
+      "content_words": "ASCII word/number units used by the OE short rule",
+      "percentiles": "nearest-rank"
+    },
+    "by_question_type": {
+      "multiple_choice": {
+        "conclusion_chars": {
+          "count": 18927,
+          "zero_count": 0,
+          "min": 5,
+          "p50": 111,
+          "p95": 159,
+          "p99": 189,
+          "max": 623,
+          "mean": 113.3673059650235
+        },
+        "conclusion_content_words": {
+          "count": 18927,
+          "zero_count": 0,
+          "min": 1,
+          "p50": 15,
+          "p95": 26,
+          "p99": 31,
+          "max": 101,
+          "mean": 16.92164632535531
+        },
+        "explanation_chars": {
+          "count": 18927,
+          "zero_count": 0,
+          "min": 179,
+          "p50": 474,
+          "p95": 607,
+          "p99": 670,
+          "max": 936,
+          "mean": 476.8787446504993
+        },
+        "explanation_content_words": {
+          "count": 18927,
+          "zero_count": 0,
+          "min": 30,
+          "p50": 74,
+          "p95": 97,
+          "p99": 107,
+          "max": 149,
+          "mean": 74.41459290960005
+        }
+      },
+      "open_ended": {
+        "conclusion_chars": {
+          "count": 18912,
+          "zero_count": 0,
+          "min": 38,
+          "p50": 98,
+          "p95": 236,
+          "p99": 282,
+          "max": 402,
+          "mean": 121.35168147208122
+        },
+        "conclusion_content_words": {
+          "count": 18912,
+          "zero_count": 0,
+          "min": 7,
+          "p50": 18,
+          "p95": 41,
+          "p99": 49,
+          "max": 70,
+          "mean": 21.792089678510997
+        },
+        "explanation_chars": {
+          "count": 18912,
+          "zero_count": 0,
+          "min": 255,
+          "p50": 522,
+          "p95": 690,
+          "p99": 752,
+          "max": 855,
+          "mean": 529.7884940778342
+        },
+        "explanation_content_words": {
+          "count": 18912,
+          "zero_count": 0,
+          "min": 39,
+          "p50": 79,
+          "p95": 107,
+          "p99": 116,
+          "max": 134,
+          "mean": 80.38573392554991
+        }
+      },
+      "true_false": {
+        "conclusion_chars": {
+          "count": 19148,
+          "zero_count": 0,
+          "min": 60,
+          "p50": 166,
+          "p95": 260,
+          "p99": 297,
+          "max": 431,
+          "mean": 173.2048777940255
+        },
+        "conclusion_content_words": {
+          "count": 19148,
+          "zero_count": 0,
+          "min": 10,
+          "p50": 27,
+          "p95": 45,
+          "p99": 52,
+          "max": 86,
+          "mean": 29.088991017338625
+        },
+        "explanation_chars": {
+          "count": 19148,
+          "zero_count": 0,
+          "min": 93,
+          "p50": 367,
+          "p95": 518,
+          "p99": 584,
+          "max": 715,
+          "mean": 373.0814706496762
+        },
+        "explanation_content_words": {
+          "count": 19148,
+          "zero_count": 0,
+          "min": 14,
+          "p50": 55,
+          "p95": 81,
+          "p99": 93,
+          "max": 114,
+          "mean": 56.65662210152497
+        }
+      }
+    },
+    "by_rule": {
+      "multiple_choice/mc_blank_line": {
+        "conclusion_chars": {
+          "count": 1234,
+          "zero_count": 0,
+          "min": 66,
+          "p50": 107,
+          "p95": 133,
+          "p99": 151,
+          "max": 623,
+          "mean": 106.80064829821718
+        },
+        "conclusion_content_words": {
+          "count": 1234,
+          "zero_count": 0,
+          "min": 10,
+          "p50": 15,
+          "p95": 21,
+          "p99": 25,
+          "max": 101,
+          "mean": 15.65964343598055
+        },
+        "explanation_chars": {
+          "count": 1234,
+          "zero_count": 0,
+          "min": 179,
+          "p50": 496,
+          "p95": 642,
+          "p99": 692,
+          "max": 832,
+          "mean": 502.6685575364668
+        },
+        "explanation_content_words": {
+          "count": 1234,
+          "zero_count": 0,
+          "min": 30,
+          "p50": 77,
+          "p95": 101,
+          "p99": 108,
+          "max": 136,
+          "mean": 78.04132901134521
+        }
+      },
+      "multiple_choice/mc_first_line": {
+        "conclusion_chars": {
+          "count": 6082,
+          "zero_count": 0,
+          "min": 66,
+          "p50": 103,
+          "p95": 123,
+          "p99": 139,
+          "max": 183,
+          "mean": 101.69056231502795
+        },
+        "conclusion_content_words": {
+          "count": 6082,
+          "zero_count": 0,
+          "min": 10,
+          "p50": 14,
+          "p95": 18,
+          "p99": 22,
+          "max": 30,
+          "mean": 14.450345281157514
+        },
+        "explanation_chars": {
+          "count": 6082,
+          "zero_count": 0,
+          "min": 250,
+          "p50": 456,
+          "p95": 568,
+          "p99": 618,
+          "max": 740,
+          "mean": 457.9421243012167
+        },
+        "explanation_content_words": {
+          "count": 6082,
+          "zero_count": 0,
+          "min": 36,
+          "p50": 70,
+          "p95": 89,
+          "p99": 98,
+          "max": 123,
+          "mean": 70.57152252548504
+        }
+      },
+      "multiple_choice/mc_first_sentence": {
+        "conclusion_chars": {
+          "count": 1701,
+          "zero_count": 0,
+          "min": 5,
+          "p50": 110,
+          "p95": 206,
+          "p99": 247,
+          "max": 334,
+          "mean": 122.25161669606113
+        },
+        "conclusion_content_words": {
+          "count": 1701,
+          "zero_count": 0,
+          "min": 1,
+          "p50": 16,
+          "p95": 35,
+          "p99": 42,
+          "max": 60,
+          "mean": 18.649029982363317
+        },
+        "explanation_chars": {
+          "count": 1701,
+          "zero_count": 0,
+          "min": 204,
+          "p50": 405,
+          "p95": 524,
+          "p99": 592,
+          "max": 741,
+          "mean": 406.60552616108174
+        },
+        "explanation_content_words": {
+          "count": 1701,
+          "zero_count": 0,
+          "min": 31,
+          "p50": 62,
+          "p95": 82,
+          "p99": 93,
+          "max": 117,
+          "mean": 62.532627865961196
+        }
+      },
+      "multiple_choice/mc_marker": {
+        "conclusion_chars": {
+          "count": 9910,
+          "zero_count": 0,
+          "min": 56,
+          "p50": 115,
+          "p95": 162,
+          "p99": 181,
+          "max": 313,
+          "mean": 119.8263370332997
+        },
+        "conclusion_content_words": {
+          "count": 9910,
+          "zero_count": 0,
+          "min": 10,
+          "p50": 18,
+          "p95": 26,
+          "p99": 29,
+          "max": 50,
+          "mean": 18.29899091826438
+        },
+        "explanation_chars": {
+          "count": 9910,
+          "zero_count": 0,
+          "min": 240,
+          "p50": 495,
+          "p95": 623,
+          "p99": 689,
+          "max": 936,
+          "mean": 497.3512613521695
+        },
+        "explanation_content_words": {
+          "count": 9910,
+          "zero_count": 0,
+          "min": 37,
+          "p50": 78,
+          "p95": 99,
+          "p99": 110,
+          "max": 149,
+          "mean": 78.36104944500505
+        }
+      },
+      "open_ended/oe_first_sentence": {
+        "conclusion_chars": {
+          "count": 18879,
+          "zero_count": 0,
+          "min": 38,
+          "p50": 98,
+          "p95": 237,
+          "p99": 282,
+          "max": 402,
+          "mean": 121.36018856930981
+        },
+        "conclusion_content_words": {
+          "count": 18879,
+          "zero_count": 0,
+          "min": 7,
+          "p50": 18,
+          "p95": 41,
+          "p99": 49,
+          "max": 70,
+          "mean": 21.794586577678903
+        },
+        "explanation_chars": {
+          "count": 18879,
+          "zero_count": 0,
+          "min": 255,
+          "p50": 522,
+          "p95": 690,
+          "p99": 752,
+          "max": 855,
+          "mean": 529.9227183643202
+        },
+        "explanation_content_words": {
+          "count": 18879,
+          "zero_count": 0,
+          "min": 39,
+          "p50": 79,
+          "p95": 107,
+          "p99": 116,
+          "max": 134,
+          "mean": 80.40891996398115
+        }
+      },
+      "open_ended/oe_short_merge_second": {
+        "conclusion_chars": {
+          "count": 33,
+          "zero_count": 0,
+          "min": 61,
+          "p50": 100,
+          "p95": 222,
+          "p99": 234,
+          "max": 234,
+          "mean": 116.48484848484848
+        },
+        "conclusion_content_words": {
+          "count": 33,
+          "zero_count": 0,
+          "min": 11,
+          "p50": 18,
+          "p95": 35,
+          "p99": 37,
+          "max": 37,
+          "mean": 20.363636363636363
+        },
+        "explanation_chars": {
+          "count": 33,
+          "zero_count": 0,
+          "min": 267,
+          "p50": 460,
+          "p95": 586,
+          "p99": 632,
+          "max": 632,
+          "mean": 453.0
+        },
+        "explanation_content_words": {
+          "count": 33,
+          "zero_count": 0,
+          "min": 42,
+          "p50": 65,
+          "p95": 86,
+          "p99": 94,
+          "max": 94,
+          "mean": 67.12121212121212
+        }
+      },
+      "true_false/tf_label_plus_first_statement": {
+        "conclusion_chars": {
+          "count": 19148,
+          "zero_count": 0,
+          "min": 60,
+          "p50": 166,
+          "p95": 260,
+          "p99": 297,
+          "max": 431,
+          "mean": 173.2048777940255
+        },
+        "conclusion_content_words": {
+          "count": 19148,
+          "zero_count": 0,
+          "min": 10,
+          "p50": 27,
+          "p95": 45,
+          "p99": 52,
+          "max": 86,
+          "mean": 29.088991017338625
+        },
+        "explanation_chars": {
+          "count": 19148,
+          "zero_count": 0,
+          "min": 93,
+          "p50": 367,
+          "p95": 518,
+          "p99": 584,
+          "max": 715,
+          "mean": 373.0814706496762
+        },
+        "explanation_content_words": {
+          "count": 19148,
+          "zero_count": 0,
+          "min": 14,
+          "p50": 55,
+          "p95": 81,
+          "p99": 93,
+          "max": 114,
+          "mean": 56.65662210152497
+        }
+      }
+    },
+    "deterministic_first_three_samples_by_rule": {
+      "multiple_choice/mc_blank_line": [
+        {
+          "series_file": "series_023894.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 92,
+          "explanation_chars": 578,
+          "conclusion_content_words": 14,
+          "explanation_content_words": 95,
+          "conclusion_excerpt": "A) A sudden and isolated upward deviation that sharply contrasts with the surrounding values",
+          "explanation_excerpt": "Within the time series window from step 241 to 271, the pattern is mostly stable and slightly increasing, with values ranging from -1.19 to around -0.24. However, at one point, there is a sharp and isolated spike to 1.68, which stands out dramatically compared to the neighboring values. This sudden upward deviation is not accompanied by similar fluctuations …",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_020939.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 118,
+          "explanation_chars": 472,
+          "conclusion_content_words": 17,
+          "explanation_content_words": 77,
+          "conclusion_excerpt": "A) The window displays consistent patterns typical of normal system operation, with no evidence of unusual deviations.",
+          "explanation_excerpt": "The time series window from step 491 to 524 shows a gradual and smooth decrease in values from around -0.41 to -0.54, without any sudden spikes, abrupt drops, or irregular fluctuations. The decrease is steady and falls within a narrow range, which is characteristic of normal behavior. There are no signs of abrupt changes or anomalous trends, and the pattern …",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_027945.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 112,
+          "explanation_chars": 451,
+          "conclusion_content_words": 15,
+          "explanation_content_words": 72,
+          "conclusion_excerpt": "A) The window exhibits consistent patterns with no evidence of unusual fluctuations, indicating normal behavior.",
+          "explanation_excerpt": "The time series window from step 51 to 70 displays mostly stable values, with a gradual decrease followed by a temporary rise between steps 63 and 67. However, there are no sudden spikes, abrupt drops, or irregular fluctuations that would suggest the presence of anomalies. The observed variations are moderate and consistent with normal time series behavior, …",
+          "excerpt_shortened": true
+        }
+      ],
+      "multiple_choice/mc_first_line": [
+        {
+          "series_file": "series_029710.json",
+          "window_index": 1,
+          "fallback": false,
+          "conclusion_chars": 85,
+          "explanation_chars": 501,
+          "conclusion_content_words": 11,
+          "explanation_content_words": 77,
+          "conclusion_excerpt": "A) The window displays consistent normal behavior without any significant deviations.",
+          "explanation_excerpt": "The time series window from step 42 to 79 shows values that fluctuate moderately around zero without any abrupt spikes, sustained trends, or irregular patterns. There are a few minor peaks and troughs, but these fall within the expected range of normal variation. No sudden jumps, persistent drifts, or multiple irregular fluctuations are observed that would i…",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_012993.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 104,
+          "explanation_chars": 505,
+          "conclusion_content_words": 14,
+          "explanation_content_words": 82,
+          "conclusion_excerpt": "A) The window displays consistent normal behavior with no significant deviations from expected patterns.",
+          "explanation_excerpt": "The time series window from step 24 to 45 exhibits mostly stable values with a brief, smooth decrease between steps 28 and 33, followed by a return to the previous level. There are no abrupt spikes, sudden drops, or irregular fluctuations. Overall, the pattern remains within a consistent range and does not display any signs of anomaly such as sharp trend cha…",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_027816.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 96,
+          "explanation_chars": 442,
+          "conclusion_content_words": 14,
+          "explanation_content_words": 67,
+          "conclusion_excerpt": "A) The window displays consistent patterns with no signs of unusual fluctuations or disruptions.",
+          "explanation_excerpt": "The time series window from step 120 to 150 shows a perfectly constant value of -0.03 at every step, indicating complete stability. There are no sudden spikes, gradual drifts, or abrupt changes observed within this interval. This consistency suggests the absence of any anomalous events or irregularities in the monitored process during this window. Therefore,…",
+          "excerpt_shortened": true
+        }
+      ],
+      "multiple_choice/mc_first_sentence": [
+        {
+          "series_file": "series_012228.json",
+          "window_index": 1,
+          "fallback": true,
+          "conclusion_chars": 126,
+          "explanation_chars": 383,
+          "conclusion_content_words": 20,
+          "explanation_content_words": 57,
+          "conclusion_excerpt": "B) The data within the window shows a smooth and consistent pattern, suggesting normal behavior with no evidence of anomalies.",
+          "explanation_excerpt": "The time series moves gradually from positive to negative values, reaches a trough, and then steadily rises again. There are no sudden spikes, irregular fluctuations, or abrupt changes; the transitions between values are smooth and continuous. This pattern is characteristic of a typical oscillatory or cyclical process and does not indicate any anomalies with…",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_021766.json",
+          "window_index": 1,
+          "fallback": true,
+          "conclusion_chars": 230,
+          "explanation_chars": 335,
+          "conclusion_content_words": 34,
+          "explanation_content_words": 47,
+          "conclusion_excerpt": "B) The time series window displays a localized region of rapid, irregular amplitude fluctuations, with values swinging sharply between positive and negative extremes (e.g., 1.22, -0.78, 1.57, -1.11, 2.12, -1.16) within the window.",
+          "explanation_excerpt": "This \"shake\" pattern is distinct from typical minor oscillations or smooth trends, and is concentrated within the window rather than extending far beyond its boundaries. The erratic behavior and high amplitude variation clearly indicate a local shake anomaly, significantly disrupting the otherwise stable or gradually changing series.",
+          "excerpt_shortened": false
+        },
+        {
+          "series_file": "series_009761.json",
+          "window_index": 1,
+          "fallback": true,
+          "conclusion_chars": 145,
+          "explanation_chars": 311,
+          "conclusion_content_words": 23,
+          "explanation_content_words": 53,
+          "conclusion_excerpt": "B) Two consecutive sharp increases in values occur within the window, forming a localized upward spike that stands out from the surrounding data.",
+          "explanation_excerpt": "The time series is mostly stable and slightly increasing, but there is a clear anomaly where values jump sharply from -0.26 to 0.15 and then to 0.55 and 0.95 near the end of the window. These consecutive upward spikes break the typical pattern and indicate a local, continuous anomaly within the examined steps.",
+          "excerpt_shortened": false
+        }
+      ],
+      "multiple_choice/mc_marker": [
+        {
+          "series_file": "series_013550.json",
+          "window_index": 1,
+          "fallback": false,
+          "conclusion_chars": 166,
+          "explanation_chars": 511,
+          "conclusion_content_words": 28,
+          "explanation_content_words": 80,
+          "conclusion_excerpt": "B) The window contains a pronounced downward dip forming a convex pattern, as well as a sharp drop followed by a gradual decrease, both indicative of local anomalies.",
+          "explanation_excerpt": "The time series window from step 23 to 39 shows multiple negative spikes and drops in current_values (e.g., -2.20, -2.09, -2.57), resulting in a clear downward convex shape. Additionally, there are sharp decreases and a sequence of lower values, not characteristic of normal fluctuations or smooth trends. These features are consistent with the presence of loc…",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_019534.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 114,
+          "explanation_chars": 425,
+          "conclusion_content_words": 16,
+          "explanation_content_words": 63,
+          "conclusion_excerpt": "A) The window exhibits a consistent pattern with no evidence of abnormal fluctuations, indicating normal behavior.",
+          "explanation_excerpt": "The time series window shows mostly small, gradual fluctuations in values, with no abrupt spikes, sharp drops, or sustained shifts that would indicate anomalous behavior. While there are some minor increases and decreases, these are within a narrow range and appear consistent with normal variation. There is no evidence of sudden anomalies or irregular patter…",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_020980.json",
+          "window_index": 1,
+          "fallback": false,
+          "conclusion_chars": 149,
+          "explanation_chars": 521,
+          "conclusion_content_words": 24,
+          "explanation_content_words": 82,
+          "conclusion_excerpt": "A) The series exhibits a sudden and pronounced upward deviation from its usual pattern, suggesting a localized anomaly near the center of the window.",
+          "explanation_excerpt": "Within the time series window from step 172 to 212, the overall pattern is characterized by moderate fluctuations around zero, with values staying mostly within a typical range. However, there is a clear and sharp upward spike, notably with a jump to an amplitude of approximately 9.31, which significantly deviates from the surrounding values. This abrupt and…",
+          "excerpt_shortened": true
+        }
+      ],
+      "open_ended/oe_first_sentence": [
+        {
+          "series_file": "series_013550.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 89,
+          "explanation_chars": 582,
+          "conclusion_content_words": 17,
+          "explanation_content_words": 84,
+          "conclusion_excerpt": "There is no clear evidence of an undetected anomaly within the window from step 56 to 78.",
+          "explanation_excerpt": "The current_values primarily fluctuate within a moderate negative range, with minor oscillations and a single noticeable dip to -0.97 at the start. However, this sharp negative value quickly returns to the prior range, and the rest of the sequence demonstrates relatively consistent, small negative values without sudden spikes, drastic drifts, or irregular vo…",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_019534.json",
+          "window_index": 1,
+          "fallback": false,
+          "conclusion_chars": 91,
+          "explanation_chars": 650,
+          "conclusion_content_words": 17,
+          "explanation_content_words": 98,
+          "conclusion_excerpt": "There is no clear evidence of anomalies within the time series window from step 332 to 372.",
+          "explanation_excerpt": "The data shows expected fluctuations, with alternating periods of small negative and positive values, interspersed with a few larger positive spikes (notably at the beginning: 2.39, 2.52, 2.83; and near the end: 2.20, 1.98, 2.54, 2.12, 1.65). These spikes are separated by several steps of lower-magnitude oscillations, suggesting a cyclical or bursty pattern …",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_017456.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 79,
+          "explanation_chars": 368,
+          "conclusion_content_words": 16,
+          "explanation_content_words": 52,
+          "conclusion_excerpt": "There is no evidence of anomalies in the time series window from step 29 to 44.",
+          "explanation_excerpt": "The current_values display a consistent pattern of moderate negative values, with no sudden spikes, abrupt changes, or irregular fluctuations. The variations between consecutive steps are gradual, and the overall trend remains stable without any unusual drifts or deviations. This indicates that the observed pattern reflects normal system behavior within this…",
+          "excerpt_shortened": true
+        }
+      ],
+      "open_ended/oe_short_merge_second": [
+        {
+          "series_file": "series_005552.json",
+          "window_index": 1,
+          "fallback": false,
+          "conclusion_chars": 78,
+          "explanation_chars": 460,
+          "conclusion_content_words": 15,
+          "explanation_content_words": 71,
+          "conclusion_excerpt": "True. The time series window from step 8 to 29 does not exhibit any anomalies.",
+          "explanation_excerpt": "The current_values show a smooth and gradual downward trend, with values steadily decreasing from 2.92 to 1.13 without any sudden jumps, spikes, or irregular fluctuations. The decline is consistent, and there are no abrupt changes or reversals in direction that would suggest abnormal behavior. The pattern is stable and aligns with what would be expected from…",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_013306.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 74,
+          "explanation_chars": 389,
+          "conclusion_content_words": 15,
+          "explanation_content_words": 60,
+          "conclusion_excerpt": "False. There is no anomaly in the time series window from step 592 to 613.",
+          "explanation_excerpt": "The current_values exhibit small, regular fluctuations around zero, with no sudden spikes, unusual trends, or irregular patterns. The amplitude changes are mild and consistent, without any rapid or erratic movements. This indicates stable and expected behavior for this segment of the time series, with no evidence of a local shake anomaly or any other abnorma…",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_004804.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 90,
+          "explanation_chars": 510,
+          "conclusion_content_words": 17,
+          "explanation_content_words": 83,
+          "conclusion_excerpt": "True. The time series window from step 264 to 282 does not show any evidence of anomalies.",
+          "explanation_excerpt": "The data exhibits a gradual decrease from 0.13 to 0.04, followed by a sharp, yet smooth, increase to 0.99 at step 272. After this, the values stabilize in the range of 0.92 to 0.99. While there is a sudden jump between steps 271 and 272, the subsequent values remain stable, indicating a transition rather than an irregular spike or erratic fluctuation. The ov…",
+          "excerpt_shortened": true
+        }
+      ],
+      "true_false/tf_label_plus_first_statement": [
+        {
+          "series_file": "series_017456.json",
+          "window_index": 1,
+          "fallback": false,
+          "conclusion_chars": 219,
+          "explanation_chars": 393,
+          "conclusion_content_words": 39,
+          "explanation_content_words": 57,
+          "conclusion_excerpt": "True. Within the time series window from step 353 to 380, there is a distinct and abrupt upward spike at step 370, where the value jumps sharply to 1.23 from consistently negative or low values in the surrounding steps.",
+          "explanation_excerpt": "This sudden, isolated increase is uncharacteristic of the typical fluctuations observed in the rest of the window, which generally show moderate negative values and minor variations. The magnitude and abruptness of this positive spike stand out as an anomalous event, rather than a normal fluctuation, indicating a local upward anomaly that significantly devia…",
+          "excerpt_shortened": true
+        },
+        {
+          "series_file": "series_007758.json",
+          "window_index": 1,
+          "fallback": false,
+          "conclusion_chars": 213,
+          "explanation_chars": 295,
+          "conclusion_content_words": 39,
+          "explanation_content_words": 44,
+          "conclusion_excerpt": "False. The time series window from step 275 to 307 displays a clear anomaly: there is a sudden spike from -0.72 to 3.00 at step 286, which persists for several steps before returning abruptly to -0.72 at step 296.",
+          "explanation_excerpt": "This abrupt switch to a much higher value and equally sudden return indicates an unusual deviation from the otherwise stable pattern, suggesting the presence of a significant anomaly within this window. The overall pattern is predominantly stable, except for this distinct and irregular segment.",
+          "excerpt_shortened": false
+        },
+        {
+          "series_file": "series_020980.json",
+          "window_index": 0,
+          "fallback": false,
+          "conclusion_chars": 174,
+          "explanation_chars": 393,
+          "conclusion_content_words": 29,
+          "explanation_content_words": 59,
+          "conclusion_excerpt": "True. The time series window from step 57 to 74 displays fluctuations, including both positive and negative values, as well as some noticeable spikes (such as 1.80 and 2.23).",
+          "explanation_excerpt": "However, these changes appear as part of the overall variability and do not indicate any irregular patterns or unexpected deviations that would suggest the presence of anomalies. The pattern does not exhibit sudden, isolated spikes or persistent drifts that deviate sharply from the surrounding data. Therefore, this segment does not contain any anomalies base…",
+          "excerpt_shortened": true
+        }
+      ]
+    }
+  },
+  "exclusions": [
+    {
+      "series_file": "series_024060.json",
+      "window_index": 0,
+      "question_type": "true_false",
+      "window_start": 635,
+      "window_end": 668,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_024331.json",
+      "window_index": 0,
+      "question_type": "multiple_choice",
+      "window_start": 135,
+      "window_end": 169,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_023066.json",
+      "window_index": 0,
+      "question_type": "multiple_choice",
+      "window_start": 221,
+      "window_end": 247,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_023271.json",
+      "window_index": 0,
+      "question_type": "multiple_choice",
+      "window_start": 107,
+      "window_end": 144,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_020826.json",
+      "window_index": 1,
+      "question_type": "multiple_choice",
+      "window_start": 382,
+      "window_end": 408,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_013710.json",
+      "window_index": 1,
+      "question_type": "multiple_choice",
+      "window_start": 62,
+      "window_end": 90,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_013995.json",
+      "window_index": 0,
+      "question_type": "open_ended",
+      "window_start": 270,
+      "window_end": 300,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_018791.json",
+      "window_index": 0,
+      "question_type": "open_ended",
+      "window_start": 241,
+      "window_end": 281,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_013039.json",
+      "window_index": 1,
+      "question_type": "true_false",
+      "window_start": 306,
+      "window_end": 344,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_014503.json",
+      "window_index": 0,
+      "question_type": "true_false",
+      "window_start": 10,
+      "window_end": 50,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_013979.json",
+      "window_index": 1,
+      "question_type": "multiple_choice",
+      "window_start": 92,
+      "window_end": 132,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_028270.json",
+      "window_index": 0,
+      "question_type": "multiple_choice",
+      "window_start": 109,
+      "window_end": 127,
+      "reason": "exact_generation_error_label"
+    },
+    {
+      "series_file": "series_012145.json",
+      "window_index": 0,
+      "question_type": "true_false",
+      "window_start": 35,
+      "window_end": 71,
+      "reason": "exact_generation_error_label"
+    }
+  ],
+  "answer_tokenization": {
+    "policy": "standalone answer encoding uses truncation=False; any mismatch with the baseline full input fails closed",
+    "tokenizer_is_fast": true,
+    "tokenizer_model_max_length": 16384,
+    "answer_rows_audited": 56987,
+    "truncated_answer_count": 0,
+    "untruncated_token_lengths": {
+      "count": 56987,
+      "zero_count": 0,
+      "min": 58,
+      "p50": 121,
+      "p95": 170,
+      "p99": 189,
+      "max": 234,
+      "mean": 124.54979205783775
+    },
+    "ten_longest_answer_identifiers": [
+      {
+        "series_file": "series_000852.json",
+        "window_index": 1,
+        "tokens_with_answer_prefix_and_specials": 234
+      },
+      {
+        "series_file": "series_029322.json",
+        "window_index": 0,
+        "tokens_with_answer_prefix_and_specials": 228
+      },
+      {
+        "series_file": "series_011907.json",
+        "window_index": 1,
+        "tokens_with_answer_prefix_and_specials": 222
+      },
+      {
+        "series_file": "series_022286.json",
+        "window_index": 0,
+        "tokens_with_answer_prefix_and_specials": 222
+      },
+      {
+        "series_file": "series_013351.json",
+        "window_index": 0,
+        "tokens_with_answer_prefix_and_specials": 221
+      },
+      {
+        "series_file": "series_021335.json",
+        "window_index": 1,
+        "tokens_with_answer_prefix_and_specials": 220
+      },
+      {
+        "series_file": "series_026011.json",
+        "window_index": 0,
+        "tokens_with_answer_prefix_and_specials": 219
+      },
+      {
+        "series_file": "series_001540.json",
+        "window_index": 0,
+        "tokens_with_answer_prefix_and_specials": 218
+      },
+      {
+        "series_file": "series_008686.json",
+        "window_index": 0,
+        "tokens_with_answer_prefix_and_specials": 218
+      },
+      {
+        "series_file": "series_008295.json",
+        "window_index": 1,
+        "tokens_with_answer_prefix_and_specials": 216
+      }
+    ],
+    "over_limit_identifiers": []
+  }
+}

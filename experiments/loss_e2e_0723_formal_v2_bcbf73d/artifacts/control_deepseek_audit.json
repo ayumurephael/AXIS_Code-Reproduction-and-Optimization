@@ -1,0 +1,54 @@
+{
+  "schema_version": 5,
+  "experiment": "loss_e2e_0723",
+  "arm": "control",
+  "transport": {
+    "execution_host": "authorized_gpu_server",
+    "mode": "official_endpoint_direct",
+    "ssh_reverse_proxy": false,
+    "cuda_visible_devices": "",
+    "nice": 10,
+    "thread_limits": 1
+  },
+  "judge": {
+    "model": "deepseek-v4-pro",
+    "prompt_template": "repository_deepseek_geval",
+    "scoring_mode": "score_token_expectation_or_exact_sample_mean_20",
+    "primary_workers": 3,
+    "fallback_workers": 1,
+    "fallback_samples": 20,
+    "judge_max_tokens": 4096,
+    "max_retry_rounds": 12,
+    "score_rows": 335,
+    "method_counts": {
+      "exact_sample_mean_20": 2,
+      "final_score_top_logprobs": 333
+    },
+    "logprobs_requested_all": true,
+    "logprobs_returned_count": 333,
+    "endpoint_hosts": [
+      "api.deepseek.com"
+    ],
+    "unique_prompt_hashes": 335
+  },
+  "final_audit": {
+    "prediction_rows": 140,
+    "records": 140,
+    "prediction_modes": {
+      "base": 140
+    },
+    "score_rows": 335,
+    "score_methods": {
+      "final_score_top_logprobs": 333,
+      "exact_sample_mean_20": 2
+    },
+    "errors": [],
+    "ok": true
+  },
+  "predictions_sha256": "cc2d5a78ca5f1672db50f1c9f0994cdf4c1bd7dd347d13e3b178f29c38aa9f25",
+  "scores_sha256": "a820d8a96ea500e64b50c9e113975ceec92212ed74d6e3af95ec9929664e3a43",
+  "table_json_sha256": "ddef71824120f2496f89b4d2cf3790861a51d8ab1336c27828d0aca195f635e2",
+  "table_markdown_sha256": "e74e36aecf1ceeb5faf78e212bd406266cdd97635229ee5bb9430034c173e1dc",
+  "source_commit": "c6ec846c6c7bde9097cd400fae715baa6e772d71",
+  "source_dirty": false
+}

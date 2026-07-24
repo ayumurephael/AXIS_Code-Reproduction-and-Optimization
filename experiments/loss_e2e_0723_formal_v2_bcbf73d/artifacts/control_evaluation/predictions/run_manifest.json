@@ -1,0 +1,12 @@
+{
+  "checkpoint": "<remote-root>/axis_repro/loss_e2e_0723_formal_v2_bcbf73d/control/step_19000.pth",
+  "checkpoint_sha256": "e0a90af91fae257bf39f29d34be2b9db710b9a41ebaf099cbb8ce82de0d9e959",
+  "subset": "paper140",
+  "world_size": 3,
+  "modes": [
+    "base"
+  ],
+  "rows": 140,
+  "batching": "series",
+  "skip_loss": true
+}

@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "experiment": "loss_e2e_0723",
+  "pipeline_complete": true,
+  "arms": {
+    "treatment": {
+      "training_summary_sha256": "8cf50137c357d784383cf3296a0a7a397c716674373d39ffa6ecef901b142bf3",
+      "training_audit_sha256": "abc1c1ddaa00d76f19d97014784dca0498508d03cba5ae9e320493cf9ae0cc7c",
+      "selected_step": 19000,
+      "selected_validation_global_token_nll": 0.7300642621234392,
+      "selected_checkpoint_sha256": "3dde97c0d1f752be4546cee330cb22547862e52457f8d1bba1ab6edd6bc71ba5",
+      "predictions_sha256": "bd4d3a6ab36ff84c28399764eb44770a67adb860b0dbd01fc5d8128c6dcd6bfb",
+      "prediction_rows": 140,
+      "judges": {
+        "gemini": {
+          "model": "gemini-2.5-pro",
+          "score_rows": 335,
+          "method_counts": {
+            "author_default_3": 2,
+            "author_temperature0_integer": 333
+          },
+          "scores_sha256": "6f7f5a191d0227297c6d81400df03fadc928210cfe1d9cb87d0397077116ce61",
+          "table_json_sha256": "a82162c698b099bae3c8bae72f31a08695e7c327f175c9756a8ea067c98f32b2",
+          "table": {
+            "open_ended/final": 3.0527272727272727,
+            "open_ended/accuracy": 3.018181818181818,
+            "open_ended/completeness": 2.727272727272727,
+            "open_ended/relevance": 3.4727272727272727,
+            "multiple_choice/final": 4.2046511627906975,
+            "multiple_choice/correctness": 4.232558139534884,
+            "multiple_choice/reasoning_quality": 4.1395348837209305,
+            "true_false/final": 3.3380952380952387,
+            "true_false/correctness": 3.357142857142857,
+            "true_false/justification_quality": 3.3095238095238093,
+            "macro_final": 3.53182455787107
+          }
+        },
+        "deepseek": {
+          "model": "deepseek-v4-pro",
+          "score_rows": 335,
+          "method_counts": {
+            "exact_sample_mean_20": 1,
+            "final_score_top_logprobs": 334
+          },
+          "scores_sha256": "d57cf4f90d89a736f9f1dc8c212a9574daf5554f821634d576033501d0bd9264",
+          "table_json_sha256": "6d30a6b265bca07646fdbf9d69dd77ecd1d1ea92bcfbd0cc86a10a1973389bc3",
+          "table": {
+            "open_ended/final": 3.0800214261281305,
+            "open_ended/accuracy": 3.018186307776906,
+            "open_ended/completeness": 2.7273350373141465,
+            "open_ended/relevance": 3.563629851154208,
+            "multiple_choice/final": 4.055228682041848,
+            "multiple_choice/correctness": 4.116280387481387,
+            "multiple_choice/reasoning_quality": 3.9127747026829245,
+            "true_false/final": 3.4428557992267486,
+            "true_false/correctness": 3.4523814982081533,
+            "true_false/justification_quality": 3.4285672507546407,
+            "macro_final": 3.526035302465576
+          }
+        }
+      }
+    },
+    "control": {
+      "training_summary_sha256": "85431110d8c3424acee5fa6e123706c67e21a93954d7e3aeeece6593f5efeef8",
+      "training_audit_sha256": "5f3088b809b6525cc48c8bbaa9b2c746cd2b11d225ccfec639664ae7521619df",
+      "selected_step": 19000,
+      "selected_validation_global_token_nll": 0.7437550400149372,
+      "selected_checkpoint_sha256": "e0a90af91fae257bf39f29d34be2b9db710b9a41ebaf099cbb8ce82de0d9e959",
+      "predictions_sha256": "cc2d5a78ca5f1672db50f1c9f0994cdf4c1bd7dd347d13e3b178f29c38aa9f25",
+      "prediction_rows": 140,
+      "judges": {
+        "gemini": {
+          "model": "gemini-2.5-pro",
+          "score_rows": 335,
+          "method_counts": {
+            "author_temperature0_integer": 335
+          },
+          "scores_sha256": "7485d5a9e1f7798f2447e6e1b518bd87a0021f4fd844b993c118a8b2a03a32d1",
+          "table_json_sha256": "ee98cd82ff9aaaa298a100f8cc676a48b6616ef5a63599e58c08a97b0dd8389d",
+          "table": {
+            "open_ended/final": 2.9000000000000004,
+            "open_ended/accuracy": 2.7454545454545456,
+            "open_ended/completeness": 2.672727272727273,
+            "open_ended/relevance": 3.3454545454545452,
+            "multiple_choice/final": 4.218604651162791,
+            "multiple_choice/correctness": 4.3023255813953485,
+            "multiple_choice/reasoning_quality": 4.023255813953488,
+            "true_false/final": 3.028571428571429,
+            "true_false/correctness": 3.0,
+            "true_false/justification_quality": 3.0714285714285716,
+            "macro_final": 3.382392026578074
+          }
+        },
+        "deepseek": {
+          "model": "deepseek-v4-pro",
+          "score_rows": 335,
+          "method_counts": {
+            "exact_sample_mean_20": 2,
+            "final_score_top_logprobs": 333
+          },
+          "scores_sha256": "a820d8a96ea500e64b50c9e113975ceec92212ed74d6e3af95ec9929664e3a43",
+          "table_json_sha256": "ddef71824120f2496f89b4d2cf3790861a51d8ab1336c27828d0aca195f635e2",
+          "table": {
+            "open_ended/final": 2.9568576528500388,
+            "open_ended/accuracy": 2.8545542743349652,
+            "open_ended/completeness": 2.6481905329601707,
+            "open_ended/relevance": 3.4363232343224746,
+            "multiple_choice/final": 4.244192352664088,
+            "multiple_choice/correctness": 4.348847891185747,
+            "multiple_choice/reasoning_quality": 3.999996096113553,
+            "true_false/final": 3.228566008096448,
+            "true_false/correctness": 3.1904762671323743,
+            "true_false/justification_quality": 3.2857006195425607,
+            "macro_final": 3.4765386712035244
+          }
+        }
+      }
+    }
+  },
+  "cross_arm": {
+    "paper140_manifest_sha256": "c2aefed015869d153ab3f5632442f83ac3ffccf140685229ffab7a3a8e9cc1a6",
+    "common_validation_effective_answer_token_count": 376696,
+    "selection_used_test_or_judge_metrics": false,
+    "temporary_secret_files_absent": true
+  }
+}

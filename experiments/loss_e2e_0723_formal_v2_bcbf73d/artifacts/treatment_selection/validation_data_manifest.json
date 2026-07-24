@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "purpose": "loss_e2e_0723_checkpoint_selection",
+  "split": {
+    "seed": 72,
+    "train_ratio": 0.95,
+    "train_series": 28500,
+    "validation_series": 1500,
+    "ordered_validation_series_sha256": "462f3137c24e7a8f993fbcd880945699441c1d3a40afd3c13cd4a12c1e8732e0"
+  },
+  "split_manifest_sha256": "a8c3f6ce08f7e99a9f3705f6493f5dbf55c520e75e3eed121a5f45392af2ec28",
+  "qa_rows_total": 3000,
+  "qa_rows_included": 3000,
+  "qa_rows_excluded": 0,
+  "question_type_counts": {
+    "multiple_choice": 951,
+    "open_ended": 997,
+    "true_false": 1052
+  },
+  "included_question_type_counts": {
+    "multiple_choice": 951,
+    "open_ended": 997,
+    "true_false": 1052
+  },
+  "exclusions": []
+}

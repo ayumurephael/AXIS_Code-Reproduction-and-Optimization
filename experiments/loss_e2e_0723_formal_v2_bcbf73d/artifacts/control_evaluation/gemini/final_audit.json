@@ -1,0 +1,13 @@
+{
+  "prediction_rows": 140,
+  "records": 140,
+  "prediction_modes": {
+    "base": 140
+  },
+  "score_rows": 335,
+  "score_methods": {
+    "author_temperature0_integer": 335
+  },
+  "errors": [],
+  "ok": true
+}
