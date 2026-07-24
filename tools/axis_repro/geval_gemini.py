@@ -299,6 +299,7 @@ def judge_task(task: tuple) -> dict:
         "prompt_template": prompt_template,
         "scoring_mode": scoring_mode,
         "model": primary.get("model", model),
+        "provider": "gemini",
         "system_fingerprint": primary.get("system_fingerprint"),
         "usage": primary.get("usage"),
         "judge_max_tokens": max_tokens,

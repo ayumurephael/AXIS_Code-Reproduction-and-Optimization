@@ -1,6 +1,6 @@
-# AXIS 双评测协议
+# AXIS 三评测协议
 
-本仓库同时支持 DeepSeek v4-pro 和 Gemini 2.5 Pro。二者评估同一份 AXIS predictions，但用途和统计口径不同。
+本仓库同时支持 DeepSeek v4-pro、Gemini 2.5 Pro 和 Qwen 系列。三者评估同一份 AXIS predictions，但用途和统计口径不同。
 
 ## 固定职责
 
@@ -8,13 +8,14 @@
 |---|---|---|---|
 | 日常迭代、消融筛选 | DeepSeek v4-pro | 低成本、同裁判的相对比较 | 否 |
 | 最终正式评测 | Gemini 2.5 Pro | 作者 prompt/rubric 下的 Table 1 | 是，仍需报告接口限制 |
+| 独立交叉评测 | Qwen 系列 | 直接读取 score-token logprobs，检验结论的 Judge 稳健性 | 否 |
 | Gemini 稳定性检查 | Gemini strict sampling | 估计无 logprobs 时的采样波动 | 否，仅诊断 |
 
-日常 DeepSeek 分数不得与 Gemini 分数拼成一张“混合”表。比较两个 checkpoint 时，必须固定 predictions 子集、judge、prompt、model id、endpoint、scoring mode 和脚本 commit。
+不同 Judge 的分数不得拼成一张“混合”表或当作同一量尺。比较两个 checkpoint 时，必须固定 predictions 子集、judge、prompt、model id、endpoint、scoring mode 和脚本 commit。
 
 ## 输入协议
 
-两种 judge 均只接收已经完成并审计的 JSONL：
+三种 judge 均只接收已经完成并审计的 JSONL：
 
 ```bash
 python -m tools.axis_repro.audit_results \
@@ -89,6 +90,56 @@ python -m tools.axis_repro.geval_gemini \
 
 strict 结果估计服务端无 logprobs 时的波动，不替代论文/作者代码的 author-mode 结果。
 
+
+## Qwen 系列：直接 logprobs 交叉评测
+
+Qwen 使用阿里云百炼 OpenAI 兼容接口。中国内地（北京）默认完整 endpoint 为
+`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`；其他地域的
+API key 必须配套对应地域或 Workspace endpoint，并通过 `QWEN_BASE_URL` 或
+`--endpoint` 显式覆盖。模型 ID 可自由指定；本实验固定
+`qwen3-30b-a3b-instruct-2507`。
+
+Qwen3 开源模型支持输出 token logprobs，但百炼 `top_logprobs` 上限为 5。
+runner 使用作者 prompt，并只在最终 `**Score:**` token 的候选恰好覆盖 1--5 时
+计算归一化期望。默认缺少完整分布即失败；只有明确采用 AXIS 回退协议时才可传
+`--fallback-samples 20`。
+
+```bash
+export QWEN_API_KEY='<set outside repository>'
+export QWEN_BASE_URL='https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+
+python -m tools.axis_repro.geval_qwen \
+  --predictions <prediction_dir>/predictions.jsonl \
+  --output <score_dir>/geval_qwen3_30b_a3b_instruct_2507.jsonl \
+  --model qwen3-30b-a3b-instruct-2507 \
+  --top-logprobs 5 \
+  --seed 72 \
+  --primary-workers 6 \
+  --max-retry-rounds 12
+```
+
+`qwen3-30b-a3b-instruct-2507` 是仅非思考模式模型，默认不要发送
+`enable_thinking`。对支持混合模式的其他 Qwen3 模型，可以使用
+`--enable-thinking true|false`；`auto` 表示不发送该扩展字段。正式 Qwen
+结果应执行 fail-closed 审计：
+
+```bash
+python -m tools.axis_repro.audit_results \
+  --predictions <prediction_dir>/predictions.jsonl \
+  --scores <score_dir>/geval_qwen3_30b_a3b_instruct_2507.jsonl \
+  --manifest experiments/reproduction/manifests_author42/paper140.json \
+  --modes base \
+  --expected-model qwen3-30b-a3b-instruct-2507 \
+  --expected-provider qwen \
+  --allowed-methods final_score_top_logprobs \
+  --require-logprobs \
+  --require-prompt-hashes
+```
+
+Qwen API key、模型和 endpoint 具有地域一致性要求。401/403 应检查 key 与权限，
+404 应检查模型 ID/地域，429 与 5xx 才进行有界退避。结果必须记录实际返回
+model、endpoint host、prompt hash、seed、usage、method 与完整 1--5 分布。
+
 ## 聚合与完整性审计
 
 ```bash
@@ -110,4 +161,5 @@ python -m tools.axis_repro.table_runner \
 - 基线 predictions 和 judge scores 生成一次后按 checkpoint hash、prompt hash 和 judge 配置缓存。
 - 日常首先比较完整 validation loss、forced-choice 准确率、数值/文本代理指标和因果诊断。
 - 里程碑候选使用固定小样本 DeepSeek；只有唯一最终候选运行完整 Gemini 335 维评分。
+- Qwen 只对已选定 checkpoint 的既有 paper140 predictions 做独立交叉评测，不得参与选模。
 - 不能用任何测试 judge 分数选择 epoch、seed、学习率或架构。

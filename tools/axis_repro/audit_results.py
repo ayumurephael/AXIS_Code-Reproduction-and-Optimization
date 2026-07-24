@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -18,6 +20,19 @@ def main() -> None:
     parser.add_argument(
         "--modes", nargs="+",
         default=["base", "wo_fixed_hint", "wo_local_hint", "wo_windows"],
+    )
+    parser.add_argument("--expected-model")
+    parser.add_argument("--expected-provider")
+    parser.add_argument("--allowed-methods", nargs="+")
+    parser.add_argument(
+        "--require-logprobs",
+        action="store_true",
+        help="Require a normalized complete 1--5 distribution on every row.",
+    )
+    parser.add_argument(
+        "--require-prompt-hashes",
+        action="store_true",
+        help="Require a valid SHA-256 prompt identity on every score row.",
     )
     args = parser.parse_args()
 
@@ -69,16 +84,104 @@ def main() -> None:
             errors.append(f"missing scores: {len(missing_scores)}")
         if unexpected_scores:
             errors.append(f"unexpected scores: {len(unexpected_scores)}")
+        methods = Counter(str(row.get("method", "")) for row in scores)
+        models = Counter(str(row.get("model", "")) for row in scores)
+        providers = Counter(str(row.get("provider", "")) for row in scores)
+        logprobs_returned = sum(
+            bool(row.get("logprobs_returned")) for row in scores
+        )
+        prompt_hashes = [
+            str(row.get("prompt_sha256", "")) for row in scores
+        ]
         for row in scores:
             method = str(row.get("method", ""))
-            if method.startswith("exact_sample_mean_") and len(row.get("fallback_scores", [])) != 20:
+            try:
+                score = float(row.get("score"))
+            except (TypeError, ValueError):
                 errors.append(
-                    f"non-20 fallback at {row['record_id']} {row['mode']} {row['dimension']}"
+                    f"non-numeric score at {row.get('record_id')} "
+                    f"{row.get('mode')} {row.get('dimension')}"
                 )
                 break
+            if not math.isfinite(score) or not 1.0 <= score <= 5.0:
+                errors.append(
+                    f"score outside [1,5] at {row.get('record_id')} "
+                    f"{row.get('mode')} {row.get('dimension')}"
+                )
+                break
+            fallback_match = re.fullmatch(
+                r"exact_sample_mean_(\d+)", method
+            )
+            if fallback_match:
+                requested_samples = int(fallback_match.group(1))
+                if (
+                    requested_samples != 20
+                    or len(row.get("fallback_scores", [])) != 20
+                ):
+                    errors.append(
+                        f"fallback must contain exactly 20 samples at "
+                        f"{row['record_id']} {row['mode']} "
+                        f"{row['dimension']}"
+                    )
+                    break
+            if args.require_logprobs:
+                distribution = row.get("distribution")
+                if (
+                    not row.get("logprobs_returned")
+                    or not isinstance(distribution, dict)
+                    or set(distribution) != set("12345")
+                ):
+                    errors.append(
+                        f"incomplete logprobs at {row['record_id']} "
+                        f"{row['mode']} {row['dimension']}"
+                    )
+                    break
+                try:
+                    probabilities = [
+                        float(distribution[key]) for key in "12345"
+                    ]
+                except (TypeError, ValueError):
+                    errors.append(
+                        f"non-numeric logprob distribution at "
+                        f"{row['record_id']} {row['mode']} "
+                        f"{row['dimension']}"
+                    )
+                    break
+                if (
+                    any(not math.isfinite(value) or value < 0.0
+                        for value in probabilities)
+                    or not math.isclose(
+                        sum(probabilities), 1.0, rel_tol=1e-8, abs_tol=1e-8
+                    )
+                ):
+                    errors.append(
+                        f"invalid logprob distribution at {row['record_id']} "
+                        f"{row['mode']} {row['dimension']}"
+                    )
+                    break
+        if args.expected_model and set(models) != {args.expected_model}:
+            errors.append(f"model mismatch: {dict(models)}")
+        if args.expected_provider and set(providers) != {args.expected_provider}:
+            errors.append(f"provider mismatch: {dict(providers)}")
+        if args.allowed_methods and not set(methods).issubset(
+            set(args.allowed_methods)
+        ):
+            errors.append(f"unexpected score methods: {dict(methods)}")
+        if args.require_prompt_hashes and any(
+            re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in prompt_hashes
+        ):
+            errors.append("missing or invalid prompt SHA-256")
         summary.update({
             "score_rows": len(scores),
-            "score_methods": dict(Counter(x["method"] for x in scores)),
+            "score_methods": dict(methods),
+            "score_models": dict(models),
+            "score_providers": dict(providers),
+            "logprobs_returned": logprobs_returned,
+            "valid_prompt_hashes": sum(
+                re.fullmatch(r"[0-9a-f]{64}", value) is not None
+                for value in prompt_hashes
+            ),
         })
 
     summary["errors"] = errors

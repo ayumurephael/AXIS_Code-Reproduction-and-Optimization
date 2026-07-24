@@ -35,6 +35,7 @@ class TestPipeline(unittest.TestCase):
         def fake_urlopen(request, timeout):
             seen["url"] = request.full_url
             seen["timeout"] = timeout
+            seen["body"] = __import__("json").loads(request.data)
             return FakeResponse()
 
         from . import geval_deepseek
@@ -44,7 +45,12 @@ class TestPipeline(unittest.TestCase):
             response = geval_deepseek.api_call("secret", "deepseek-v4-pro", "prompt", 0, True)
 
         self.assertEqual(response, {"choices": []})
-        self.assertEqual(seen, {"url": endpoint, "timeout": 180})
+        self.assertEqual(seen["url"], endpoint)
+        self.assertEqual(seen["timeout"], 180)
+        self.assertEqual(seen["body"]["thinking"], {"type": "enabled"})
+        self.assertEqual(seen["body"]["reasoning_effort"], "high")
+        self.assertNotIn("temperature", seen["body"])
+
     def test_weighted_table(self):
         rows = [{"record_id":"r", "mode":"base", "question_type":"multiple_choice",
                  "dimension":d, "weight":w, "score":s}
