@@ -40,10 +40,15 @@ python -m tools.axis_repro.geval_resilient \
   --max-tokens 4096 \
   --fallback-samples 20 \
   --primary-workers 8 \
-  --fallback-workers 1
+  --fallback-workers 1 \
+  --max-retry-rounds 12
 ```
 
 runner 会优先读取最终 Score token 的 1–5 概率分布；服务端没有完整候选概率时，使用恰好 20 个有效采样分数的均值。`*.fallback_pending.jsonl` 是断点 journal，不是最终 score 文件。原命令重跑会跳过已完成键。
+
+HTTP 401/403/404 等永久请求错误会立即失败；408/409/425/429、5xx
+和传输层故障只在有界轮次内重试。这样可以保留断点恢复能力，同时避免认证、
+模型名或端点配置错误导致无限请求。
 
 若服务端不支持 logprobs，结果仍可用于同一 DeepSeek 配置下的日常相对比较，但必须记录 `method`，不能宣称与论文 Gemini G-Eval 等价。
 
