@@ -34,6 +34,7 @@ def qwen_rows():
         "distribution": distribution,
         "fallback_scores": [],
         "prompt_sha256": "a" * 64,
+        "missing_score_mass_upper_bound": 0.0,
     }
     return [
         {
@@ -138,5 +139,39 @@ def test_audit_rejects_non_twenty_sample_fallback(
     assert result["ok"] is False
     assert any(
         "fallback must contain exactly 20 samples" in error
+        for error in result["errors"]
+    )
+
+
+def test_audit_rejects_excessive_missing_score_mass(
+    tmp_path, monkeypatch, capsys,
+):
+    predictions = tmp_path / "predictions.jsonl"
+    scores = tmp_path / "scores.jsonl"
+    write_jsonl(predictions, [{
+        "record_id": "r1",
+        "mode": "base",
+        "question_type": "multiple_choice",
+        "response": "answer",
+    }])
+    rows = qwen_rows()
+    for row in rows:
+        row["method"] = "final_score_top_logprobs_bounded"
+        row["missing_score_mass_upper_bound"] = 1e-3
+    write_jsonl(scores, rows)
+    monkeypatch.setattr(sys, "argv", [
+        "audit_results",
+        "--predictions", str(predictions),
+        "--scores", str(scores),
+        "--modes", "base",
+        "--require-logprobs",
+        "--max-missing-score-mass-upper-bound", "1e-6",
+    ])
+    with pytest.raises(SystemExit):
+        main()
+    result = json.loads(capsys.readouterr().out)
+    assert result["ok"] is False
+    assert any(
+        "score-mass bound exceeds limit" in error
         for error in result["errors"]
     )

@@ -17,6 +17,7 @@ import argparse
 import concurrent.futures
 import hashlib
 import json
+import math
 import os
 import urllib.request
 from pathlib import Path
@@ -24,7 +25,7 @@ from urllib.parse import urlparse
 
 from .io_utils import append_jsonl
 from .common import read_jsonl
-from .geval_correct import final_score_distribution
+from .geval_correct import SCORE_RE
 from .geval_deepseek import normalize_type
 from .geval_gemini import AUTHOR_RUBRICS, author_prompt_for
 from .geval_resilient import run_retrying
@@ -41,7 +42,107 @@ MAX_QWEN_TOP_LOGPROBS = 5
 
 
 class MissingScoreLogprobsError(RuntimeError):
-    """Raised when a response cannot provide the complete 1--5 distribution."""
+    """Raised when score-token logprobs fail the configured error bound."""
+
+
+def bounded_final_score_distribution(
+    response: dict,
+    requested_top_logprobs: int,
+    max_missing_mass_upper_bound: float,
+) -> tuple[float, dict[str, float], dict] | None:
+    """Return a rigorously bounded 1--5 distribution from Qwen top-k.
+
+    Model Studio caps ``top_logprobs`` at five, so an irrelevant token can
+    displace one or more score digits. Because the returned alternatives are
+    the top-k tokens, every omitted exact ASCII digit has logprob no greater
+    than the returned cutoff. We accept truncated score support only when the
+    resulting worst-case missing categorical mass is below the configured
+    bound. Missing digits remain explicit zeroes in the reported conditional
+    distribution and the approximation error bound is persisted for audit.
+    """
+    if not 0.0 <= max_missing_mass_upper_bound < 1.0:
+        raise ValueError(
+            "max_missing_mass_upper_bound must be in [0,1)"
+        )
+    choice = response.get("choices", [{}])[0]
+    content = (
+        choice.get("message", {}).get("content", "") or ""
+    )
+    matches = list(SCORE_RE.finditer(content))
+    if not matches:
+        return None
+    score_offset = matches[-1].start(1)
+    entries = (
+        choice.get("logprobs", {}).get("content", []) or []
+    )
+    cursor = 0
+    target = None
+    for entry in entries:
+        token = str(entry.get("token", ""))
+        end = cursor + len(token)
+        if cursor <= score_offset < end:
+            target = entry
+            break
+        cursor = end
+    if target is None:
+        return None
+    alternatives = target.get("top_logprobs", []) or []
+    if len(alternatives) != requested_top_logprobs:
+        return None
+    ranked = []
+    for item in alternatives:
+        try:
+            logprob = float(item["logprob"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not math.isfinite(logprob):
+            return None
+        ranked.append((str(item.get("token", "")), logprob))
+    digit_logs: dict[str, float] = {}
+    for token, logprob in ranked:
+        if len(token) == 1 and token in "12345":
+            digit_logs[token] = max(
+                digit_logs.get(token, -math.inf), logprob
+            )
+    if not digit_logs:
+        return None
+    missing = [digit for digit in "12345" if digit not in digit_logs]
+    peak = max(digit_logs.values())
+    weights = {
+        digit: math.exp(logprob - peak)
+        for digit, logprob in digit_logs.items()
+    }
+    observed_weight = sum(weights.values())
+    cutoff = min(logprob for _token, logprob in ranked)
+    missing_weight_upper = (
+        len(missing) * math.exp(cutoff - peak)
+    )
+    missing_mass_upper = missing_weight_upper / (
+        observed_weight + missing_weight_upper
+    )
+    if missing_mass_upper > max_missing_mass_upper_bound:
+        return None
+    probabilities = {
+        digit: weights.get(digit, 0.0) / observed_weight
+        for digit in "12345"
+    }
+    score = sum(
+        int(digit) * probability
+        for digit, probability in probabilities.items()
+    )
+    metadata = {
+        "method": (
+            "final_score_top_logprobs_bounded"
+            if missing else "final_score_top_logprobs"
+        ),
+        "observed_score_tokens": sorted(digit_logs),
+        "missing_score_tokens": missing,
+        "top_logprobs_cutoff": cutoff,
+        "missing_score_mass_upper_bound": missing_mass_upper,
+        "score_error_upper_bound": 4.0 * missing_mass_upper,
+        "distribution_is_truncated": bool(missing),
+    }
+    return score, probabilities, metadata
 
 
 def request_body(
@@ -143,10 +244,18 @@ def result_row(
     method: str,
     distribution: dict[str, float] | None,
     samples: list[int],
+    logprob_metadata: dict | None = None,
 ) -> dict:
     choice = primary.get("choices", [{}])[0]
     raw = choice.get("message", {}).get("content", "") or ""
+    metadata = logprob_metadata or {}
     return {
+        "observed_score_tokens": metadata.get("observed_score_tokens"),
+        "missing_score_tokens": metadata.get("missing_score_tokens"),
+        "top_logprobs_cutoff": metadata.get("top_logprobs_cutoff"),
+        "missing_score_mass_upper_bound": metadata.get("missing_score_mass_upper_bound"),
+        "score_error_upper_bound": metadata.get("score_error_upper_bound"),
+        "distribution_is_truncated": metadata.get("distribution_is_truncated"),
         "record_id": row["record_id"],
         "mode": row["mode"],
         "question_type": normalize_type(row["question_type"]),
@@ -172,9 +281,7 @@ def result_row(
         "seed": seed,
         "top_logprobs": top_logprobs,
         "logprobs_requested": True,
-        "logprobs_returned": (
-            method == "final_score_top_logprobs"
-        ),
+        "logprobs_returned": method.startswith("final_score_top_logprobs"),
         "endpoint_host": urlparse(endpoint).netloc,
     }
 
@@ -268,6 +375,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--max-missing-score-mass-upper-bound",
+        type=float,
+        default=1e-6,
+        help=(
+            "Fail closed unless omitted score digits carry at most this "
+            "worst-case conditional probability mass."
+        ),
+    )
+    parser.add_argument(
         "--fallback-samples",
         type=int,
         default=0,
@@ -287,6 +403,10 @@ def main() -> None:
     if args.fallback_samples not in {0, 20}:
         raise ValueError(
             "AXIS Qwen G-Eval permits only no fallback or exactly 20 samples"
+        )
+    if not 0.0 <= args.max_missing_score_mass_upper_bound < 1.0:
+        raise ValueError(
+            "--max-missing-score-mass-upper-bound must be in [0,1)"
         )
     # Validate before spending any API calls.
     request_body(
@@ -349,7 +469,11 @@ def main() -> None:
             args.max_tokens, True, args.top_logprobs, args.seed,
             args.enable_thinking,
         )
-        return item, prompt, primary, final_score_distribution(primary)
+        distribution = bounded_final_score_distribution(
+            primary, args.top_logprobs,
+            args.max_missing_score_mass_upper_bound,
+        )
+        return item, prompt, primary, distribution
 
     processed = 0
     for item, prompt, primary, distribution in run_retrying(
@@ -362,12 +486,12 @@ def main() -> None:
         row, dimension, spec = item
         processed += 1
         if distribution is not None:
-            score, probabilities = distribution
+            score, probabilities, metadata = distribution
             append_jsonl(output, result_row(
                 row, dimension, spec, prompt, primary, args.model,
                 args.endpoint, args.max_tokens, args.top_logprobs,
-                args.seed, score, "final_score_top_logprobs",
-                probabilities, [],
+                args.seed, score, metadata["method"],
+                probabilities, [], metadata,
             ))
             state = "completed"
         else:
@@ -377,6 +501,9 @@ def main() -> None:
                 "spec": spec,
                 "prompt": prompt,
                 "primary": compact_primary(primary),
+                "max_missing_score_mass_upper_bound": (
+                    args.max_missing_score_mass_upper_bound
+                ),
             }
             append_jsonl(pending_path, journal)
             pending[task_key(row, dimension)] = journal
@@ -388,17 +515,18 @@ def main() -> None:
             "state": state,
         }), flush=True)
 
+    completed_rows = read_jsonl(output) if output.exists() else []
     completed = {
-        task_key(row, row["dimension"]) for row in read_jsonl(output)
+        task_key(row, row["dimension"]) for row in completed_rows
     }
     fallback_items = [
         item for key_, item in pending.items() if key_ not in completed
     ]
     if fallback_items and args.fallback_samples == 0:
         raise MissingScoreLogprobsError(
-            f"{len(fallback_items)} Qwen task(s) lack a complete final-score "
-            "1-5 distribution; rerun with --fallback-samples 20 only if "
-            "sampling fallback is authorized"
+            f"{len(fallback_items)} Qwen task(s) lack an admissible "
+            "score-token distribution under the configured missing-mass "
+            "bound; sampling fallback remains disabled"
         )
 
     def fallback_work(item):
@@ -413,7 +541,7 @@ def main() -> None:
             args.max_tokens, args.top_logprobs, args.seed,
             sum(samples) / len(samples),
             f"exact_sample_mean_{args.fallback_samples}",
-            None, samples,
+            None, samples, None,
         )
 
     finished = 0
