@@ -300,6 +300,10 @@ def build_report(
         "",
         f"- 实验代码提交：`{experiment_commit}`",
         f"- 代码基点：`origin/main@e8c1aee59bb98cda9b37445bf2eb23619f374d54`",
+        "- Baseline 预测先使用同 checkpoint、同 paper140、同 3-rank "
+        "series batching、同 torch/CUDA 协议的历史锁定产物；其 SHA-256 为 "
+        "`fc687e2ad4c24e66ef00fc4a381885df90c18e26d4edcc6eb230ce94052fa71e`。"
+        "本次同运行 base 必须 140/140 逐条完全一致，否则替换并重评。",
         f"- checkpoint SHA-256：`{manifest['checkpoint_sha256']}`",
         f"- prompt 规范 SHA-256：`{manifest['prompt_spec_sha256']}`",
         f"- 子集：`{manifest['subset']}`",
@@ -321,6 +325,9 @@ def build_report(
         "- Judge：仅 DeepSeek；请求模型 `deepseek-v4-pro`；"
         "thinking enabled；reasoning effort high；max tokens 4096；"
         "请求 top-20 logprobs；缺失完整 1–5 分布时执行 20 次精确分数回退",
+        "- TLS：保持证书验证开启，并显式使用 GPU 节点的系统 CA bundle；"
+        "批量前真实 G-Eval 探活必须同时满足模型 ID、非空正文、可解析分数与"
+        "完整 1–5 score-token 分布。",
         f"- Judge 行数：{score_meta['rows']}",
         f"- Judge 返回模型：`{score_meta['models']}`",
         f"- Judge provider：`{score_meta['providers']}`",
