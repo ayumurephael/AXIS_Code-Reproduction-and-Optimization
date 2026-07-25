@@ -13,6 +13,7 @@ import torch
 from .common import load_axis_records, read_jsonl
 from .io_utils import append_jsonl
 from .model_utils import build_model, load_axis_checkpoint, sha256_file
+from src.models.AXIS.prompt_stage_a import MODE_SPECS, mode_manifest
 
 def dist_info():
     rank, world = int(os.getenv("RANK", "0")), int(os.getenv("WORLD_SIZE", "1"))
@@ -33,7 +34,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--subset", choices=["paper140", "full"], default="paper140")
     parser.add_argument("--series-split-manifest")
     parser.add_argument("--series-split-key", default="val_series")
-    parser.add_argument("--modes", nargs="+", default=["base"])
+    parser.add_argument(
+        "--modes",
+        nargs="+",
+        choices=sorted(MODE_SPECS),
+        default=["base"],
+    )
     parser.add_argument("--output", required=True)
     parser.add_argument("--max-records", type=int)
     parser.add_argument(
@@ -94,6 +100,7 @@ def main() -> None:
                 ablation = None if mode == "base" else mode
                 questions = [r.question for r in group]
                 answers = [r.answer for r in group]
+                question_types = [r.question_type for r in group]
                 starts = [r.start_index for r in group]
                 ends = [r.end_index for r in group]
                 loss = None
@@ -101,10 +108,12 @@ def main() -> None:
                     loss = model.axis(
                         local_embeddings, ts, questions, answers, starts, ends,
                         ablation_mode=ablation,
+                        question_types=question_types,
                     )
                 responses = model.axis.generate(
                     local_embeddings, ts, questions, answers, starts, ends,
                     ablation_mode=ablation,
+                    question_types=question_types,
                 )
                 if len(responses) != len(group):
                     raise RuntimeError(
@@ -129,11 +138,18 @@ def main() -> None:
         rows.sort(key=lambda x: (x["record_id"], x["mode"]))
         merged = out / "predictions.jsonl"
         merged.write_text("".join(json.dumps(x, ensure_ascii=False)+"\n" for x in rows), encoding="utf-8")
+        prompt_spec_path = Path(__file__).resolve().parents[2] / "src" / "models" / "AXIS" / "prompt_stage_a.py"
         (out / "run_manifest.json").write_text(json.dumps({
             "checkpoint": str(Path(a.checkpoint).resolve()), "checkpoint_sha256": sha256_file(a.checkpoint),
+            "data": str(Path(a.data).resolve()),
             "subset": a.subset, "world_size": world, "modes": a.modes, "rows": len(rows),
             "batching": a.batching, "skip_loss": a.skip_loss,
-
+            "record_count": len(records),
+            "series_count": len({record.series_file for record in records}),
+            "question_type_counts": dict(collections.Counter(record.question_type for record in records)),
+            "prompt_spec": str(prompt_spec_path),
+            "prompt_spec_sha256": sha256_file(prompt_spec_path),
+            "mode_definitions": mode_manifest(),
         }, indent=2), encoding="utf-8")
         print(f"wrote {len(rows)} rows to {merged}")
 

@@ -182,7 +182,8 @@ def test_model_forward(model: nn.Module,
                 questions=batch['questions'],
                 answers=batch['answers'],
                 start_indices=batch['start_indices'],
-                end_indices=batch['end_indices']
+                end_indices=batch['end_indices'],
+                question_types=batch['question_types'],
             )
             # Direct generation through ts_pretrain_model and axis.generate to avoid CombinedModel.generate return value inconsistency
             try:
@@ -196,7 +197,8 @@ def test_model_forward(model: nn.Module,
                     questions=batch['questions'],
                     answers=batch['answers'],
                     start_indices=batch['start_indices'],
-                    end_indices=batch['end_indices']
+                    end_indices=batch['end_indices'],
+                    question_types=batch['question_types'],
                 )
                 # Ablations
                 # responses_wo_windows = model.axis.generate(

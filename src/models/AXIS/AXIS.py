@@ -5,6 +5,7 @@ import math
 from typing import Tuple, List, Optional, Dict, Any, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaTokenizer
 from src.models.AXIS.Pretrain_ts_encoder import TimeSeriesPretrainModel
+from src.models.AXIS.prompt_stage_a import build_question_prompt, get_condition
 
 class MultiheadAttention(nn.Module):
     """Standard Multi-head Attention module, non-causal by default.
@@ -272,10 +273,15 @@ class AXIS(nn.Module):
                                       time_series: torch.Tensor,
                                       start_indices: List[int], 
                                       end_indices: List[int],
-                                      ablation_mode: Optional[str] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+                                      ablation_mode: Optional[str] = None,
+                                      question_types: Optional[List[str]] = None
+                                      ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
         batch_size = len(questions)
         question_prompts = []
         answer_prompts = []
+        condition = get_condition(ablation_mode)
+        if question_types is None:
+            question_types = [None] * batch_size
         
         # Verify input lengths
         if len(answers) != batch_size:
@@ -286,46 +292,48 @@ class AXIS(nn.Module):
             raise ValueError(f"End indices length ({len(end_indices)}) does not match batch size ({batch_size})")
         if time_series.size(0) != batch_size:
             raise ValueError(f"Time series batch size ({time_series.size(0)}) does not match batch size ({batch_size})")
+        if len(question_types) != batch_size:
+            raise ValueError(
+                f"Question types length ({len(question_types)}) does not match "
+                f"batch size ({batch_size})"
+            )
         
         for i in range(batch_size):
             num_local_hint_tokens = end_indices[i] - start_indices[i]
             num_fixed_hint_tokens = self.num_fixed_tokens
 
             # Create special token sequences for each hint type (may be removed by ablation)
-            if ablation_mode == "wo_local_hint":
+            if condition.remove_local_hint:
                 local_hint_tokens = ""
             else:
                 local_hint_tokens = "<|local_hint|>" * num_local_hint_tokens
             
-            if ablation_mode == "wo_fixed_hint":
+            if condition.remove_fixed_hint:
                 fixed_hint_tokens = ""
             else:
                 fixed_hint_tokens = "<|fixed_hint|>" * num_fixed_hint_tokens
 
             # Time series values text (may be removed by ablation)
             str_time_series = ', '.join(f'{(x * 100):.0f}' for x in time_series[i][start_indices[i]:end_indices[i]].tolist())
-            if ablation_mode == "wo_windows":
+            if condition.remove_window_values:
                 str_time_series_text = "(removed)"
             else:
                 str_time_series_text = str_time_series
 
-            # Build prompt with optional ablations (prompt stays in English)
-            question_prompt = f"""
-            You are an expert time series analyst. Analyze the provided data and answer the question.
-
-            ### Time Series Data
-            - **Window:** Steps {start_indices[i]} to {end_indices[i]}
-            - **Values (scaled by 100):** {str_time_series_text}
-
-            ### Contextual Hints
-            - **Per-Step Analysis:** {local_hint_tokens}
-            - **Overall Summary Hints:** {fixed_hint_tokens}
-
-            ### Question
-            {questions[i]}
-            """
+            question_prompt = build_question_prompt(
+                question=questions[i],
+                question_type=question_types[i],
+                start=start_indices[i],
+                end=end_indices[i],
+                serialized_values=str_time_series_text,
+                local_hint_tokens=local_hint_tokens,
+                fixed_hint_tokens=fixed_hint_tokens,
+                mode=ablation_mode,
+            )
             question_prompts.append(question_prompt)
-            answer_prompts.append(f"Answer: {answers[i]}")
+            answer_prompts.append(
+                answers[i] if condition.answer_boundary else f"Answer: {answers[i]}"
+            )
         question_input = self.tokenizer(
             question_prompts,
             return_tensors="pt",
@@ -340,24 +348,70 @@ class AXIS(nn.Module):
             truncation=True,
             add_special_tokens=True
         )
-        full_input_ids = torch.cat([question_input['input_ids'], 
-                                    torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0),
-                                    answer_input['input_ids'], 
-                                    torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0)],
+        eos_ids = torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0)
+        eos_mask = torch.ones(batch_size, 1)
+        if condition.answer_boundary:
+            answer_boundary_input = self.tokenizer(
+                ["Answer:"] * batch_size,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                add_special_tokens=True,
+            )
+            generation_prefix_ids = torch.cat(
+                [
+                    question_input["input_ids"],
+                    eos_ids,
+                    answer_boundary_input["input_ids"],
+                ],
+                dim=1,
+            )
+            generation_prefix_mask = torch.cat(
+                [
+                    question_input["attention_mask"],
+                    eos_mask,
+                    answer_boundary_input["attention_mask"],
+                ],
+                dim=1,
+            )
+            full_input_ids = torch.cat(
+                [generation_prefix_ids, answer_input["input_ids"], eos_ids],
+                dim=1,
+            )
+            full_attention_mask = torch.cat(
+                [generation_prefix_mask, answer_input["attention_mask"], eos_mask],
+                dim=1,
+            )
+            full_labels = torch.cat(
+                [
+                    torch.full_like(generation_prefix_ids, -100),
+                    answer_input["input_ids"],
+                    eos_ids,
+                ],
+                dim=1,
+            )
+            question_length = generation_prefix_ids.shape[1]
+        else:
+            # Keep the released code path structurally unchanged for a
+            # byte-for-byte compatible baseline prompt and token boundary.
+            full_input_ids = torch.cat([question_input['input_ids'],
+                                        eos_ids,
+                                        answer_input['input_ids'],
+                                        eos_ids],
+                                        dim=1)
+            full_attention_mask = torch.cat([question_input['attention_mask'],
+                                             eos_mask,
+                                             answer_input['attention_mask'],
+                                             eos_mask],
+                                             dim=1)
+            full_labels = torch.cat([torch.full_like(question_input['input_ids'], -100),
+                                    eos_ids,
+                                    answer_input['input_ids'],
+                                    eos_ids],
                                     dim=1)
-        full_attention_mask = torch.cat([question_input['attention_mask'], 
-                                         torch.ones(batch_size, 1),
-                                         answer_input['attention_mask'], 
-                                         torch.ones(batch_size, 1)],
-                                         dim=1)
-        full_labels = torch.cat([torch.full_like(question_input['input_ids'], -100), 
-                                torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0),
-                                answer_input['input_ids'], 
-                                torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0)],
-                                dim=1)
+            question_length = question_input['input_ids'].shape[1]
 
         full_labels[full_labels == self.tokenizer.pad_token_id] = -100
-        question_length = question_input['input_ids'].shape[1]
         full_labels[:, -1] = self.tokenizer.eos_token_id
 
         return full_input_ids, full_attention_mask, full_labels, question_length
@@ -421,7 +475,9 @@ class AXIS(nn.Module):
                 start_indices: List[int],
                 end_indices: List[int],
                 return_logits: Optional[bool] = False,
-                ablation_mode: Optional[str] = None) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+                ablation_mode: Optional[str] = None,
+                question_types: Optional[List[str]] = None
+                ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Forward pass for AXIS model.
         
         Args:
@@ -444,7 +500,8 @@ class AXIS(nn.Module):
             time_series=time_series,
             start_indices=start_indices,
             end_indices=end_indices,
-            ablation_mode=ablation_mode
+            ablation_mode=ablation_mode,
+            question_types=question_types,
         )
         
         # Move tensors to model device for multi-GPU compatibility
@@ -479,14 +536,16 @@ class AXIS(nn.Module):
                  answers: List[str],
                  start_indices: List[int],
                  end_indices: List[int],
-                 ablation_mode: Optional[str] = None) -> List[str]:
+                 ablation_mode: Optional[str] = None,
+                 question_types: Optional[List[str]] = None) -> List[str]:
         input_ids, attention_mask, labels, question_length = self.generate_input_ids_and_labels(
             questions=questions,
             answers=answers,
             time_series=time_series,
             start_indices=start_indices,
             end_indices=end_indices,
-            ablation_mode=ablation_mode
+            ablation_mode=ablation_mode,
+            question_types=question_types,
         )
         
         # Move tensors to model device for multi-GPU compatibility
@@ -565,7 +624,8 @@ class AXISCombinedModel(nn.Module):
                 start_indices: List[int],
                 end_indices: List[int],
                 return_logits: Optional[bool] = False,
-                ablation_mode: Optional[str] = None) -> torch.Tensor:
+                ablation_mode: Optional[str] = None,
+                question_types: Optional[List[str]] = None) -> torch.Tensor:
         """Forward pass for the combined model.
         
         Args:
@@ -604,7 +664,8 @@ class AXISCombinedModel(nn.Module):
             start_indices=start_indices,
             end_indices=end_indices,
             return_logits=return_logits,
-            ablation_mode=ablation_mode
+            ablation_mode=ablation_mode,
+            question_types=question_types,
         )
     
     def generate(self,
@@ -615,7 +676,9 @@ class AXISCombinedModel(nn.Module):
                  start_indices: List[int],
                  end_indices: List[int],
                  return_logits: Optional[bool] = False,
-                 ablation_mode: Optional[str] = None) -> Tuple[List[str], Optional[List[torch.Tensor]]]:
+                 ablation_mode: Optional[str] = None,
+                 question_types: Optional[List[str]] = None
+                 ) -> Tuple[List[str], Optional[List[torch.Tensor]]]:
         """Generate responses using the combined model.
         
         Args:
@@ -644,7 +707,8 @@ class AXISCombinedModel(nn.Module):
                 answers=answers,
                 start_indices=start_indices,
                 end_indices=end_indices,
-                ablation_mode=ablation_mode
+                ablation_mode=ablation_mode,
+                question_types=question_types,
             )
         if return_logits:
             return answer
