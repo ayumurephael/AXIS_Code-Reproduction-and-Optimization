@@ -64,6 +64,8 @@ data/                             外部数据，默认不提交
 - `tools.axis_repro.run_inference_cli`：验证推理与作者兼容正式推理；
 - `tools.axis_repro.geval_resilient`：DeepSeek v4-pro 断点续跑评测；
 - `tools.axis_repro.geval_gemini`：Gemini 2.5 Pro 作者兼容评测；
+- `tools.axis_repro.geval_qwen`：Qwen 原生 score-token logprobs 交叉评测；
+- `tools.axis_repro.geval_qwen_readout`：Qwen top-5 截断时的确定性 JSON 标签读出；
 - `tools.axis_repro.audit_results`：prediction/score/manifest 的 fail-closed 审计；
 - `tools.axis_repro.table_runner`：生成 Table 1 指标。
 
@@ -71,11 +73,12 @@ data/                             外部数据，默认不提交
 
 ## 评测模型政策
 
-DeepSeek 与 Gemini 都受支持，但职责不同：
+DeepSeek、Gemini 与 Qwen 都受支持，但职责不同：
 
 - 日常开发默认用 DeepSeek v4-pro；基线 predictions 和 scores 应缓存，不重复付费。
 - 只有预先通过验证集和免费诊断的最终候选，才用 Gemini 2.5 Pro 做完整正式评测。
-- 两个 judge 的绝对分数不可混合、拼接或直接当作同一量尺；跨模型比较时，候选与对应基线必须使用同一 judge、同一 prompt、同一脚本版本。
+- Qwen 只对已选定 checkpoint 的同一份 `paper140` predictions 做独立交叉评测，使用可审计的 score-token logprobs；不得用 Qwen 测试分数选模。
+- 不同 judge 的绝对分数不可混合、拼接或直接当作同一量尺；跨模型比较时，候选与对应基线必须使用同一 judge、同一 prompt、同一脚本版本。
 - PackyAPI 的 Gemini 2.5 Pro 兼容接口已知不返回可用 logprobs。正式作者兼容模式因此记录 temperature=0 的单次整数分；多次采样仅作校准，必须另存目录。
 - API key 只从环境变量读取，禁止写入仓库、命令历史、日志或结果文件。
 

@@ -147,7 +147,7 @@ python -m tools.axis_repro.audit_results \
 
 ## 7. 评分
 
-日常默认 DeepSeek，正式使用 Gemini。完整参数、endpoint 与无 logprobs 处理见 `EVALUATION_PROTOCOL.md`。
+日常默认 DeepSeek，论文对齐的正式结果使用 Gemini；Qwen 对验证集已选出的同一 checkpoint 和同一份 `paper140` predictions 做独立交叉评测。完整参数、地域匹配 endpoint、logprobs/readout 与无 logprobs 处理见 `EVALUATION_PROTOCOL.md`。
 
 日常：
 
@@ -171,7 +171,19 @@ python -m tools.axis_repro.geval_gemini \
   --scoring-mode author
 ```
 
-两个输出必须分目录或明确命名，不能覆盖、合并或跨 judge 计算差值后声称为同一评价量尺。
+Qwen 交叉评测：
+
+```bash
+export QWEN_API_KEY='<set outside repository>'
+python -m tools.axis_repro.geval_qwen \
+  --predictions <prediction_dir>/predictions.jsonl \
+  --output <score_dir>/geval_qwen.jsonl \
+  --model qwen3-30b-a3b-instruct-2507 \
+  --top-logprobs 5 \
+  --max-missing-score-mass-upper-bound 1e-6
+```
+
+三个输出必须分目录或明确命名，不能覆盖、合并或跨 judge 计算差值后声称为同一评价量尺。Qwen pending journal 的确定性 readout 和严格审计命令见 `EVALUATION_PROTOCOL.md`。
 
 ## 8. 最终审计与 Table 1
 
