@@ -179,6 +179,44 @@ def factor_table(mode_definitions):
     )
 
 
+CONTRASTS = (
+    ("边界对齐", "answer_boundary", "base"),
+    ("边界对齐下移除 Fixed", "answer_boundary_wo_fixed", "answer_boundary"),
+    ("仅题型协议", "task_protocol", "base"),
+    ("仅 Fixed 角色重命名", "fixed_role", "base"),
+    (
+        "在角色重命名上增加 Evidence Contract",
+        "fixed_role_evidence_contract",
+        "fixed_role",
+    ),
+    ("综合 2+3+4", "combined_234", "base"),
+    (
+        "在综合 2+3+4 上增加边界对齐",
+        "answer_boundary_combined_234",
+        "combined_234",
+    ),
+)
+
+
+def contrast_table(models):
+    headers = ["预注册对比", "Treatment", "Control"]
+    headers += [label for label, _ in METRICS] + ["Macro Final"]
+    rows = []
+    for label, treatment, control in CONTRASTS:
+        values = [
+            models[treatment][key] - models[control][key]
+            for _, key in METRICS
+        ]
+        values.append(
+            models[treatment]["macro_final"] - models[control]["macro_final"]
+        )
+        rows.append(
+            [label, MODE_LABELS[treatment], MODE_LABELS[control]]
+            + [f"{value:+.4f}" for value in values]
+        )
+    return markdown_table(headers, rows)
+
+
 def build_report(
     *,
     scores_path: Path,
@@ -295,6 +333,41 @@ def build_report(
             f"[{interval['low']:+.4f}, {interval['high']:+.4f}]"
         )
     lines += [
+        "",
+        "## 预注册机制对比",
+        "",
+        "下表按实验设计中可直接解释的 Treatment − Control 计算。"
+        "`Evidence Contract` 没有脱离角色重命名单独运行，因此其增量只能解释为"
+        "“在已重命名条件上加入 Contract”，不能声称是完全独立主效应。",
+        "",
+        contrast_table(models),
+        "",
+        "## 面向下一阶段的改进建议",
+        "",
+        (
+            f"1. **优先复现最优组合。** 当前宏平均最优条件为 "
+            f"{MODE_LABELS[best_macro_mode]}（"
+            f"{models[best_macro_mode]['macro_final']:.4f}）。Phase II 应先只"
+            "重新训练该 prompt/边界组合，并保留相同 checkpoint 选择与测试清单，"
+            "避免同时引入架构或 loss 改动。"
+        ),
+        (
+            "2. **把格式收益与证据收益拆开。** 下一轮同时报告程序化 MC/TF "
+            "正确率、首行可解析率、答案长度，以及 G-Eval 内容维度；若 Final "
+            "提升主要随 parse 改善而非 Accuracy/Justification 改善，应将结论"
+            "限定为输出控制收益。"
+        ),
+        (
+            "3. **修正 Evidence Contract 与布局矛盾。** Stage A 按规范保留了"
+            "“same row”文字和两块式 Values/Local 布局。Phase II 应预注册两条"
+            "互斥路线：将文字改为“corresponds by order”，或真正采用逐步交错"
+            "序列化；两者不能在同一条件中同时改变。"
+        ),
+        (
+            "4. **扩展稳健性验证。** 在 284 条完整测试集上复核方向，并对多个"
+            "训练 seed/checkpoint 重复最佳条件。单 Judge 结果还应在不用于选择"
+            "方案的前提下，增加独立 Judge 或人工盲评作为确认性分析。"
+        ),
         "",
         "## 完整实验配置与可审计数据",
         "",
