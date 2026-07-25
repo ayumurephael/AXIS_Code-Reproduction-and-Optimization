@@ -1,0 +1,395 @@
+"""Build the auditable Chinese Markdown report for AXIS prompt Stage A."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from collections import Counter
+from pathlib import Path
+
+from .build_tables import aggregate
+from .common import read_jsonl
+from src.models.AXIS.prompt_stage_a import STAGE_A_MODES
+
+
+METRICS = (
+    ("MC Final", "multiple_choice/final"),
+    ("MC Corr.", "multiple_choice/correctness"),
+    ("MC Rsn.", "multiple_choice/reasoning_quality"),
+    ("OE Final", "open_ended/final"),
+    ("OE Acc.", "open_ended/accuracy"),
+    ("OE Comp.", "open_ended/completeness"),
+    ("OE Rel.", "open_ended/relevance"),
+    ("TF Final", "true_false/final"),
+    ("TF Corr.", "true_false/correctness"),
+    ("TF Justif.", "true_false/justification_quality"),
+)
+
+MODE_LABELS = {
+    "base": "Baseline",
+    "answer_boundary": "EOS + Answer:",
+    "answer_boundary_wo_fixed": "EOS + Answer: / w/o Fixed",
+    "task_protocol": "题型协议",
+    "fixed_role": "Fixed 角色重命名",
+    "fixed_role_evidence_contract": "角色重命名 + Evidence Contract",
+    "combined_234": "综合 2+3+4",
+    "answer_boundary_combined_234": "EOS + Answer: + 综合 2+3+4",
+}
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(8 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def markdown_table(headers, rows):
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "|" + "|".join("---" for _ in headers) + "|",
+    ]
+    lines.extend("| " + " | ".join(row) + " |" for row in rows)
+    return "\n".join(lines)
+
+
+def format_metric_table(models):
+    return markdown_table(
+        ["实验"] + [label for label, _ in METRICS],
+        [
+            [MODE_LABELS[mode]]
+            + [f"{models[mode][key]:.4f}" for _, key in METRICS]
+            for mode in STAGE_A_MODES
+        ],
+    )
+
+
+def format_delta_table(models, relative=False):
+    baseline = models["base"]
+    rows = []
+    for mode in STAGE_A_MODES[1:]:
+        values = []
+        for _, key in METRICS:
+            delta = models[mode][key] - baseline[key]
+            if relative:
+                value = delta / baseline[key] * 100.0
+                values.append(f"{value:+.2f}%")
+            else:
+                values.append(f"{delta:+.4f}")
+        rows.append([MODE_LABELS[mode]] + values)
+    return markdown_table(
+        ["实验"] + [label for label, _ in METRICS],
+        rows,
+    )
+
+
+def score_metadata(scores):
+    usage_fields = Counter()
+    for row in scores:
+        for key, value in (row.get("usage") or {}).items():
+            if isinstance(value, (int, float)):
+                usage_fields[key] += value
+    return {
+        "rows": len(scores),
+        "models": dict(Counter(str(row.get("model")) for row in scores)),
+        "providers": dict(Counter(str(row.get("provider")) for row in scores)),
+        "methods": dict(Counter(str(row.get("method")) for row in scores)),
+        "judge_max_tokens": dict(
+            Counter(str(row.get("judge_max_tokens")) for row in scores)
+        ),
+        "endpoint_hosts": dict(
+            Counter(str(row.get("endpoint_host")) for row in scores)
+        ),
+        "system_fingerprints": dict(
+            Counter(str(row.get("system_fingerprint")) for row in scores)
+        ),
+        "unique_prompt_hashes": len(
+            {row.get("prompt_sha256") for row in scores}
+        ),
+        "usage_totals": dict(usage_fields),
+    }
+
+
+def diagnostic_table(diagnostics):
+    rows = []
+    for mode in STAGE_A_MODES:
+        entry = diagnostics["modes"][mode]
+        overall = entry["overall"]
+        mc = entry["by_question_type"]["multiple_choice"]
+        tf = entry["by_question_type"]["true_false"]
+        oe = entry["by_question_type"]["open_ended"]
+        none_rate = (
+            overall["think_states"].get("none", 0) / overall["count"]
+        )
+        rows.append(
+            [
+                MODE_LABELS[mode],
+                f"{mc['raw_answer_first_rate']:.2%}",
+                f"{tf['raw_answer_first_rate']:.2%}",
+                f"{mc['strict_parse_rate']:.2%}",
+                f"{tf['strict_parse_rate']:.2%}",
+                f"{oe['strict_parse_rate']:.2%}",
+                f"{none_rate:.2%}",
+                f"{overall['response_chars_mean']:.1f}",
+                f"{overall['response_at_least_3000_chars_rate']:.2%}",
+            ]
+        )
+    return markdown_table(
+        [
+            "实验",
+            "MC answer-first",
+            "TF answer-first",
+            "MC strict parse",
+            "TF strict parse",
+            "OE direct-start",
+            "无 think 标签",
+            "平均字符数",
+            "≥3000 字符",
+        ],
+        rows,
+    )
+
+
+def factor_table(mode_definitions):
+    rows = []
+    for mode in STAGE_A_MODES:
+        item = mode_definitions[mode]
+        rows.append(
+            [
+                MODE_LABELS[mode],
+                "✓" if item["answer_boundary"] else "—",
+                "✓" if item["remove_fixed_hint"] else "—",
+                "✓" if item["add_output_protocol"] else "—",
+                "✓" if item["rename_fixed_hint"] else "—",
+                "✓" if item["add_evidence_contract"] else "—",
+            ]
+        )
+    return markdown_table(
+        [
+            "实验",
+            "EOS + Answer:",
+            "移除 Fixed",
+            "题型协议",
+            "角色重命名",
+            "Evidence Contract",
+        ],
+        rows,
+    )
+
+
+def build_report(
+    *,
+    scores_path: Path,
+    predictions_path: Path,
+    run_manifest_path: Path,
+    diagnostics_path: Path,
+    environment_path: Path,
+    audit_path: Path | None,
+    experiment_commit: str,
+):
+    scores = read_jsonl(scores_path)
+    predictions = read_jsonl(predictions_path)
+    manifest = json.loads(run_manifest_path.read_text(encoding="utf-8"))
+    diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+    environment = json.loads(environment_path.read_text(encoding="utf-8"))
+    audit = (
+        json.loads(audit_path.read_text(encoding="utf-8"))
+        if audit_path is not None
+        else None
+    )
+    models, paired = aggregate(scores)
+    missing_modes = [mode for mode in STAGE_A_MODES if mode not in models]
+    if missing_modes:
+        raise RuntimeError(f"missing aggregate modes: {missing_modes}")
+    for mode in STAGE_A_MODES:
+        missing_metrics = [
+            key for _, key in METRICS if key not in models[mode]
+        ]
+        if missing_metrics:
+            raise RuntimeError(
+                f"missing metrics for {mode}: {missing_metrics}"
+            )
+
+    baseline = models["base"]
+    best_macro_mode = max(
+        STAGE_A_MODES, key=lambda mode: models[mode]["macro_final"]
+    )
+    metric_winners = []
+    for label, key in METRICS:
+        best_mode = max(STAGE_A_MODES, key=lambda mode: models[mode][key])
+        delta = models[best_mode][key] - baseline[key]
+        metric_winners.append((label, best_mode, delta))
+    score_meta = score_metadata(scores)
+    prediction_type_counts = Counter(
+        row["question_type"] for row in predictions
+        if row["mode"] == "base"
+    )
+    prediction_mode_counts = Counter(row["mode"] for row in predictions)
+
+    lines = [
+        "# AXIS Prompt 阶段 A 消融实验结果与分析",
+        "",
+        "## 结论摘要",
+        "",
+        (
+            f"本报告在作者发布 checkpoint、固定 `paper140` 清单和同一云端"
+            f"运行环境下比较 1 个 Baseline 与 7 个 prompt-only 条件。按三类"
+            f"题型 Final 的未加权宏平均，最佳条件为 "
+            f"`{best_macro_mode}`（{MODE_LABELS[best_macro_mode]}），宏平均 "
+            f"{models[best_macro_mode]['macro_final']:.4f}，相对 Baseline 的"
+            f"绝对变化为 "
+            f"{models[best_macro_mode]['macro_final'] - baseline['macro_final']:+.4f}。"
+        ),
+        "",
+        "各单项指标的最高值及其相对 Baseline 的绝对变化如下：",
+        "",
+    ]
+    lines.extend(
+        f"- {label}: {MODE_LABELS[mode]}，Δ={delta:+.4f}"
+        for label, mode, delta in metric_winners
+    )
+    lines += [
+        "",
+        "## Table-I 指标汇总",
+        "",
+        "所有分数均由唯一 Judge `deepseek-v4-pro` 按论文 G-Eval 量表给出。",
+        "",
+        format_metric_table(models),
+        "",
+        "## 相对 Baseline 的绝对差值",
+        "",
+        format_delta_table(models, relative=False),
+        "",
+        "## 相对 Baseline 的相对变化",
+        "",
+        "相对变化定义为 `(variant - baseline) / baseline × 100%`。",
+        "",
+        format_delta_table(models, relative=True),
+        "",
+        "## 实验因素矩阵",
+        "",
+        factor_table(manifest["mode_definitions"]),
+        "",
+        "## 输出行为与中间诊断",
+        "",
+        diagnostic_table(diagnostics),
+        "",
+        "该表的格式指标由确定性规则计算，不替代 G-Eval。`answer-first` "
+        "只检查原始生成是否直接以题型规定答案起始；`strict parse` 对 MC "
+        "要求首行以 `A)`–`D)` 起始，对 TF 要求首 token 为 `True.` 或 "
+        "`False.`。`OE direct-start` 还排除选项字母、True/False、"
+        "`Answer:` 与 `<think>` 起始。",
+        "",
+        "## 配对差异",
+        "",
+        "下列区间对每条 QA 的题型 Final 差值（variant − Baseline）执行 "
+        "10,000 次 bootstrap（seed=72），然后跨题型汇总：",
+        "",
+    ]
+    for mode in STAGE_A_MODES[1:]:
+        interval = paired[mode]
+        lines.append(
+            f"- {MODE_LABELS[mode]}: {interval['mean']:+.4f} "
+            f"[{interval['low']:+.4f}, {interval['high']:+.4f}]"
+        )
+    lines += [
+        "",
+        "## 完整实验配置与可审计数据",
+        "",
+        f"- 实验代码提交：`{experiment_commit}`",
+        f"- 代码基点：`origin/main@e8c1aee59bb98cda9b37445bf2eb23619f374d54`",
+        f"- checkpoint SHA-256：`{manifest['checkpoint_sha256']}`",
+        f"- prompt 规范 SHA-256：`{manifest['prompt_spec_sha256']}`",
+        f"- 子集：`{manifest['subset']}`",
+        f"- batching：`{manifest['batching']}`",
+        f"- skip loss：`{manifest['skip_loss']}`",
+        f"- world size：`{manifest['world_size']}`",
+        f"- QA 数：{manifest['record_count']}",
+        f"- series 数：{manifest['series_count']}",
+        f"- 题型数：`{dict(prediction_type_counts)}`",
+        f"- 各模式预测数：`{dict(prediction_mode_counts)}`",
+        "- 生成：`do_sample=False`, `num_beams=5`, "
+        "`max_new_tokens=1000`, `repetition_penalty=1.15`, "
+        "`no_repeat_ngram_size=3`, `length_penalty=1`",
+        f"- Python：`{environment.get('python')}`",
+        f"- PyTorch：`{environment.get('torch')}`",
+        f"- PyTorch CUDA：`{environment.get('torch_cuda')}`",
+        f"- Transformers：`{environment.get('transformers')}`",
+        "- GPU：3×NVIDIA A100 40GB（每个分布式 rank 独占一张卡）",
+        "- Judge：仅 DeepSeek；请求模型 `deepseek-v4-pro`；"
+        "thinking enabled；reasoning effort high；max tokens 4096；"
+        "请求 top-20 logprobs；缺失完整 1–5 分布时执行 20 次精确分数回退",
+        f"- Judge 行数：{score_meta['rows']}",
+        f"- Judge 返回模型：`{score_meta['models']}`",
+        f"- Judge provider：`{score_meta['providers']}`",
+        f"- Judge 评分方法：`{score_meta['methods']}`",
+        f"- Judge endpoint host：`{score_meta['endpoint_hosts']}`",
+        f"- Judge system fingerprint：`{score_meta['system_fingerprints']}`",
+        f"- 唯一 Judge prompt 哈希数：{score_meta['unique_prompt_hashes']}",
+        f"- Judge token 用量汇总：`{score_meta['usage_totals']}`",
+        f"- predictions SHA-256：`{sha256_file(predictions_path)}`",
+        f"- scores SHA-256：`{sha256_file(scores_path)}`",
+        f"- run manifest SHA-256：`{sha256_file(run_manifest_path)}`",
+        f"- diagnostics SHA-256：`{sha256_file(diagnostics_path)}`",
+    ]
+    if audit is not None:
+        lines.append(f"- 完整性审计：`ok={audit.get('ok')}`，`{audit}`")
+    lines += [
+        "",
+        "## 解释边界与局限性",
+        "",
+        "- 阶段 A 只改变推理 prompt，旧 checkpoint 未针对新文字或新边界重新"
+        "训练；因此结果只能回答“旧权重能否即时受益”，不能替代 Phase II "
+        "重新训练后的结论。",
+        "- Evidence Contract 按控制文档逐字保留“same row”，但本阶段又按"
+        "要求保留原始 Values/Local 两块式排布。该文字与实际布局不完全一致，"
+        "是实验条件的一部分，也是解释结果时必须披露的混杂因素。",
+        "- 题型协议同时改变格式、长度与内容约束。Final 提升若伴随 parse/"
+        "answer-first 改善，不能全部归因于时间序列证据利用增强。",
+        "- 正式集为论文口径的 140 条 QA，而非 284 条全测试集；未执行多 seed "
+        "模型训练或 checkpoint 重复。",
+        "- 按用户要求只使用一个 Judge。虽然保留分布、回退样本、system "
+        "fingerprint 与 prompt 哈希，评分仍可能包含单 Judge 偏差和托管 API "
+        "的服务端非确定性。",
+        "",
+        "## 文件索引",
+        "",
+        f"- 推理结果：`{predictions_path.name}`",
+        f"- G-Eval 明细：`{scores_path.name}`",
+        f"- 推理 manifest：`{run_manifest_path.name}`",
+        f"- 输出诊断：`{diagnostics_path.name}`",
+        f"- 运行环境：`{environment_path.name}`",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--scores", required=True)
+    parser.add_argument("--predictions", required=True)
+    parser.add_argument("--run-manifest", required=True)
+    parser.add_argument("--diagnostics", required=True)
+    parser.add_argument("--environment", required=True)
+    parser.add_argument("--audit")
+    parser.add_argument("--experiment-commit", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+    report = build_report(
+        scores_path=Path(args.scores),
+        predictions_path=Path(args.predictions),
+        run_manifest_path=Path(args.run_manifest),
+        diagnostics_path=Path(args.diagnostics),
+        environment_path=Path(args.environment),
+        audit_path=Path(args.audit) if args.audit else None,
+        experiment_commit=args.experiment_commit,
+    )
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(report, encoding="utf-8")
+    print(output)
+
+
+if __name__ == "__main__":
+    main()
