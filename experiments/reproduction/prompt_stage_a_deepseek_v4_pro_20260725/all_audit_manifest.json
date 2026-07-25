@@ -1,0 +1,32 @@
+{
+  "prediction_rows": 1120,
+  "records": 140,
+  "prediction_modes": {
+    "answer_boundary": 140,
+    "answer_boundary_combined_234": 140,
+    "answer_boundary_wo_fixed": 140,
+    "base": 140,
+    "combined_234": 140,
+    "fixed_role": 140,
+    "fixed_role_evidence_contract": 140,
+    "task_protocol": 140
+  },
+  "score_rows": 2680,
+  "score_methods": {
+    "final_score_top_logprobs": 2658,
+    "exact_sample_mean_20": 22
+  },
+  "score_models": {
+    "deepseek-v4-pro": 2680
+  },
+  "score_providers": {
+    "deepseek": 2680
+  },
+  "score_enable_thinking": {
+    "auto": 2680
+  },
+  "logprobs_returned": 2658,
+  "valid_prompt_hashes": 2680,
+  "errors": [],
+  "ok": true
+}

@@ -290,6 +290,54 @@ def build_report(
     )
     lines += [
         "",
+        "## 关键判断",
+        "",
+        (
+            "- **没有任何 prompt-only 条件超过 Baseline 的总体分数。** "
+            f"Baseline 的三题型未加权 Macro Final 为 "
+            f"{baseline['macro_final']:.4f}；最接近的是 Fixed 角色重命名 "
+            f"{models['fixed_role']['macro_final']:.4f}（Δ="
+            f"{models['fixed_role']['macro_final'] - baseline['macro_final']:+.4f}），"
+            f"其 140 条 QA 配对差异区间为 "
+            f"[{paired['fixed_role']['low']:+.4f}, "
+            f"{paired['fixed_role']['high']:+.4f}]，不能据此声称总体提升。"
+        ),
+        (
+            "- **`EOS + Answer:` 是强格式控制，不是内容增益。** MC/TF "
+            f"strict-parse 从 Baseline 的 "
+            f"{diagnostics['modes']['base']['by_question_type']['multiple_choice']['strict_parse_rate']:.2%}/"
+            f"{diagnostics['modes']['base']['by_question_type']['true_false']['strict_parse_rate']:.2%} "
+            f"升至 {diagnostics['modes']['answer_boundary']['by_question_type']['multiple_choice']['strict_parse_rate']:.2%}/"
+            f"{diagnostics['modes']['answer_boundary']['by_question_type']['true_false']['strict_parse_rate']:.2%}，"
+            f"但 Macro Final 下降 "
+            f"{models['answer_boundary']['macro_final'] - baseline['macro_final']:+.4f}。"
+        ),
+        (
+            "- **Fixed hint 对旧 checkpoint 是必要条件。** 在相同答案边界下移除 "
+            f"Fixed 后 Macro Final 从 {models['answer_boundary']['macro_final']:.4f} "
+            f"降至 {models['answer_boundary_wo_fixed']['macro_final']:.4f}；"
+            f"平均输出从 {diagnostics['modes']['answer_boundary']['overall']['response_chars_mean']:.1f} "
+            f"增至 {diagnostics['modes']['answer_boundary_wo_fixed']['overall']['response_chars_mean']:.1f} "
+            f"字符，且 {diagnostics['modes']['answer_boundary_wo_fixed']['overall']['response_at_least_3000_chars_rate']:.2%} "
+            "回答不少于 3000 字符。该条件应视为明确的负面对照。"
+        ),
+        (
+            "- **Evidence Contract 呈题型迁移而非全局提升。** 相对 Fixed "
+            f"角色重命名，它使 OE Final 改变 "
+            f"{models['fixed_role_evidence_contract']['open_ended/final'] - models['fixed_role']['open_ended/final']:+.4f}，"
+            f"但 MC/TF Final 分别改变 "
+            f"{models['fixed_role_evidence_contract']['multiple_choice/final'] - models['fixed_role']['multiple_choice/final']:+.4f}/"
+            f"{models['fixed_role_evidence_contract']['true_false/final'] - models['fixed_role']['true_false/final']:+.4f}；"
+            "不能把 OE 收益外推为通用收益。"
+        ),
+        (
+            "- **组合存在明显交互。** 在综合 2+3+4 上加入边界对齐会恢复 "
+            f"MC Final（Δ={models['answer_boundary_combined_234']['multiple_choice/final'] - models['combined_234']['multiple_choice/final']:+.4f}）"
+            f"并略升 TF Final（Δ={models['answer_boundary_combined_234']['true_false/final'] - models['combined_234']['true_false/final']:+.4f}），"
+            f"同时降低 OE Final（Δ={models['answer_boundary_combined_234']['open_ended/final'] - models['combined_234']['open_ended/final']:+.4f}）。"
+            "因此不应按单因素结果做简单加和预测。"
+        ),
+        "",
         "## Table-I 指标汇总",
         "",
         "所有分数均由唯一 Judge `deepseek-v4-pro` 按论文 G-Eval 量表给出。",
@@ -322,8 +370,9 @@ def build_report(
         "",
         "## 配对差异",
         "",
-        "下列区间对每条 QA 的题型 Final 差值（variant − Baseline）执行 "
-        "10,000 次 bootstrap（seed=72），然后跨题型汇总：",
+        "下列区间把 140 条 QA 的题型 Final 差值（variant − Baseline）合并后"
+        "执行 10,000 次配对 bootstrap（seed=72）。该均值按 QA 数量加权，"
+        "与上文三题型等权的 `Macro Final` 不是同一统计量：",
         "",
     ]
     for mode in STAGE_A_MODES[1:]:
@@ -345,26 +394,37 @@ def build_report(
         "## 面向下一阶段的改进建议",
         "",
         (
-            f"1. **优先复现最优组合。** 当前宏平均最优条件为 "
-            f"{MODE_LABELS[best_macro_mode]}（"
-            f"{models[best_macro_mode]['macro_final']:.4f}）。Phase II 应先只"
-            "重新训练该 prompt/边界组合，并保留相同 checkpoint 选择与测试清单，"
-            "避免同时引入架构或 loss 改动。"
+            "1. **把 Fixed 角色重命名作为唯一的通用确认候选，Baseline 作为"
+            "主控制。** 它的总体分数与 Baseline 实质持平，同时改善 MC 三项、"
+            "OE Accuracy/Completeness 和 TF Justification；下一阶段应在完整 "
+            "284 条测试集和重新训练后确认，而不是宣称本阶段已提升。"
         ),
         (
-            "2. **把格式收益与证据收益拆开。** 下一轮同时报告程序化 MC/TF "
+            "2. **将 `EOS + Answer:` 定位为可选的部署格式层。** 它把 MC/TF "
+            "首行可解析率推近 100%，但未提升总体内容分；若下游必须稳定解析，"
+            "可启用该边界，否则不应把它列为质量优化。"
+        ),
+        (
+            "3. **保留 Fixed 或设计有监督替代，停止直接移除。** `w/o Fixed` "
+            "在所有题型上显著崩溃并产生超长回答。若要减少固定提示依赖，应在"
+            "训练阶段逐步 dropout/蒸馏，而不是只在推理时删除。"
+        ),
+        (
+            "4. **把格式收益与证据收益拆开。** 下一轮同时报告程序化 MC/TF "
             "正确率、首行可解析率、答案长度，以及 G-Eval 内容维度；若 Final "
             "提升主要随 parse 改善而非 Accuracy/Justification 改善，应将结论"
             "限定为输出控制收益。"
         ),
         (
-            "3. **修正 Evidence Contract 与布局矛盾。** Stage A 按规范保留了"
+            "5. **修正 Evidence Contract 与布局矛盾，并做题型专用版本。** "
+            "Stage A 按规范保留了"
             "“same row”文字和两块式 Values/Local 布局。Phase II 应预注册两条"
             "互斥路线：将文字改为“corresponds by order”，或真正采用逐步交错"
-            "序列化；两者不能在同一条件中同时改变。"
+            "序列化；两者不能在同一条件中同时改变。鉴于当前收益集中在 OE，"
+            "还应比较 OE-only Contract 与全题型 Contract。"
         ),
         (
-            "4. **扩展稳健性验证。** 在 284 条完整测试集上复核方向，并对多个"
+            "6. **扩展稳健性验证。** 在 284 条完整测试集上复核方向，并对多个"
             "训练 seed/checkpoint 重复最佳条件。单 Judge 结果还应在不用于选择"
             "方案的前提下，增加独立 Judge 或人工盲评作为确认性分析。"
         ),
@@ -378,7 +438,19 @@ def build_report(
         "`fc687e2ad4c24e66ef00fc4a381885df90c18e26d4edcc6eb230ce94052fa71e`。"
         "本次同运行 base 必须 140/140 逐条完全一致，否则替换并重评。",
         f"- checkpoint SHA-256：`{manifest['checkpoint_sha256']}`",
+        "- checkpoint 元数据：epoch 33，保存时训练平均 loss "
+        "`0.7127881973981858`，文件大小 `482319394` bytes",
+        "- 原训练集：30000 条 series JSON、每条 2 个窗口 QA，共 60000 QA；"
+        "题型分布为 TF=20204、MC=19885、OE=19911；本阶段不重新训练，"
+        "该信息仅用于 checkpoint 数据血缘",
+        "- 原训练集没有官方 train/validation/test 划分；任何后续重训应按"
+        "`sample_id` 做样本级切分，避免同一 series 的两个窗口跨集合泄漏",
         f"- prompt 规范 SHA-256：`{manifest['prompt_spec_sha256']}`",
+        "- local hint 与数值序列保持论文/作者代码的原始两块式 prompt 布局，"
+        "没有在本阶段改成交错布局",
+        "- tokenizer 边界审计：LlamaTokenizerFast；EOS token id `151643`；"
+        "字面量 `Answer:` 为 3 tokens；Baseline 前缀 141 tokens，"
+        "`EOS + Answer:` 前缀 145 tokens；移除 Fixed 后固定占位符 30→0",
         f"- 子集：`{manifest['subset']}`",
         f"- batching：`{manifest['batching']}`",
         f"- skip loss：`{manifest['skip_loss']}`",
@@ -386,6 +458,11 @@ def build_report(
         f"- QA 数：{manifest['record_count']}",
         f"- series 数：{manifest['series_count']}",
         f"- 题型数：`{dict(prediction_type_counts)}`",
+        "- paper140 异常标签分布：`has_anomaly=false` 94，"
+        "`has_anomaly=true` 46；完整候选测试集为 284 条 QA",
+        "- 论文 Final 聚合权重：MC=`0.7×Correctness + 0.3×Reasoning`；"
+        "OE=`0.35×Accuracy + 0.35×Completeness + 0.3×Relevance`；"
+        "TF=`0.6×Correctness + 0.4×Justification`",
         f"- 各模式预测数：`{dict(prediction_mode_counts)}`",
         "- 生成：`do_sample=False`, `num_beams=5`, "
         "`max_new_tokens=1000`, `repetition_penalty=1.15`, "
@@ -394,7 +471,13 @@ def build_report(
         f"- PyTorch：`{environment.get('torch')}`",
         f"- PyTorch CUDA：`{environment.get('torch_cuda')}`",
         f"- Transformers：`{environment.get('transformers')}`",
-        "- GPU：3×NVIDIA A100 40GB（每个分布式 rank 独占一张卡）",
+        "- GPU：3×NVIDIA A100 40GB，`CUDA_VISIBLE_DEVICES=0,1,2`，"
+        "每个分布式 rank 固定映射一张卡；启动时三卡空闲并已预留，运行期间"
+        "后来出现其他用户共享进程，导致吞吐波动，但本任务未终止或修改任何"
+        "外部进程",
+        "- 推理运行时警告：Transformers 重复报告 "
+        "`Setting pad_token_id to eos_token_id:None`；未出现 OOM、空输出或"
+        "缺 shard，最终合并 1120/1120",
         "- Judge：仅 DeepSeek；请求模型 `deepseek-v4-pro`；"
         "thinking enabled；reasoning effort high；max tokens 4096；"
         "请求 top-20 logprobs；缺失完整 1–5 分布时执行 20 次精确分数回退",
@@ -441,6 +524,11 @@ def build_report(
         f"- 推理 manifest：`{run_manifest_path.name}`",
         f"- 输出诊断：`{diagnostics_path.name}`",
         f"- 运行环境：`{environment_path.name}`",
+        "- GPU 节点固定清单审计：`all_audit_manifest.json`",
+        "- 聚合指标：`all_table.json` / `all_table.md`",
+        "- 回退条目：`all_fallback_pending.jsonl`",
+        "- 推理日志：`formal_inference.log`",
+        "- Judge 终轮日志：`all_judge.log`",
     ]
     return "\n".join(lines) + "\n"
 
