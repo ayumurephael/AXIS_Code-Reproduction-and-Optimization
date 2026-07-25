@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "ok": true,
+  "experiment": "loss_e2e_0723_full284_discrete_label_diagnostic",
+  "source_commit": "969c618fafdcc3d19e7f620901f40c11adc4efc4",
+  "source_archive_sha256": "7801d1282c40c8c627993e7bbcafc9b7e7720c0b17f5850b40148be9ce87a783",
+  "manifest_generation_seed": 42,
+  "full_manifest_sha256": "0cec752667e71c39f7d2a6c39f0c462f1d4614ccd56ec11e7e404bcd2f1cec64",
+  "full_manifest_record_count": 284,
+  "full_manifest_series_count": 142,
+  "protocol": {
+    "subset": "full",
+    "batching": "series",
+    "beam_size": 5,
+    "max_new_tokens": 1000,
+    "skip_loss": true,
+    "modes": [
+      "base"
+    ],
+    "world_size": 3,
+    "cuda_visible_devices_count": 3
+  },
+  "environment": {
+    "python": "3.10.5",
+    "torch": "2.5.1+cu124",
+    "transformers": "4.45.2",
+    "numpy": "1.26.1",
+    "cuda": "12.4",
+    "cudnn": 90100,
+    "gpu_name": "NVIDIA A100-PCIE-40GB"
+  },
+  "arms": {
+    "released": {
+      "checkpoint_sha256": "d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7",
+      "predictions_sha256": "f094c67e3c06c3c8340065150d15e7a4978225e222fab3e8893e94c3c673731d",
+      "run_manifest_sha256": "9a7d9fd1ab4ad78d386f17b6059bc614a8d1d765b1a207cd3f0ed26d7015913b",
+      "prediction_audit_sha256": "4c2d315bfd220817679c86bdc653ec6cf9f9da6e886f01acd7bd3ba5ef441b90",
+      "question_type_counts": {
+        "open_ended": 99,
+        "multiple_choice": 94,
+        "true_false": 91
+      },
+      "run_manifest": {
+        "checkpoint": "<remote-root>/axis_repro/baseline/experiments/checkpoints/deepseek-ai_DeepSeek-R1-Distill-Qwen-7B/axis_qa_by_pretrain_best_accelerate/model_optimizer.pth",
+        "checkpoint_sha256": "d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7",
+        "subset": "full",
+        "world_size": 3,
+        "modes": [
+          "base"
+        ],
+        "rows": 284,
+        "batching": "series",
+        "skip_loss": true
+      },
+      "prediction_audit": {
+        "prediction_rows": 284,
+        "records": 284,
+        "prediction_modes": {
+          "base": 284
+        },
+        "errors": [],
+        "ok": true
+      }
+    },
+    "control": {
+      "checkpoint_sha256": "e0a90af91fae257bf39f29d34be2b9db710b9a41ebaf099cbb8ce82de0d9e959",
+      "predictions_sha256": "75d1dc500d4019f3edf4db73a720c925882d2295cf5a4eb39446f867de9467e6",
+      "run_manifest_sha256": "20d91039e42c0f3258953a14bf96e4302540061bcfe98aff23e89f85c33bd7ae",
+      "prediction_audit_sha256": "4c2d315bfd220817679c86bdc653ec6cf9f9da6e886f01acd7bd3ba5ef441b90",
+      "question_type_counts": {
+        "open_ended": 99,
+        "multiple_choice": 94,
+        "true_false": 91
+      },
+      "run_manifest": {
+        "checkpoint": "<remote-root>/axis_repro/full284_diag_969c618/checkpoints/control_step_19000.pth",
+        "checkpoint_sha256": "e0a90af91fae257bf39f29d34be2b9db710b9a41ebaf099cbb8ce82de0d9e959",
+        "subset": "full",
+        "world_size": 3,
+        "modes": [
+          "base"
+        ],
+        "rows": 284,
+        "batching": "series",
+        "skip_loss": true
+      },
+      "prediction_audit": {
+        "prediction_rows": 284,
+        "records": 284,
+        "prediction_modes": {
+          "base": 284
+        },
+        "errors": [],
+        "ok": true
+      }
+    },
+    "treatment": {
+      "checkpoint_sha256": "3dde97c0d1f752be4546cee330cb22547862e52457f8d1bba1ab6edd6bc71ba5",
+      "predictions_sha256": "f9ee7befe9ad3edb9ba5c4511dd0dcc57f0a9e89587faa8716fbe25a59b32397",
+      "run_manifest_sha256": "55ea02081b5badbae5ae17bbb2dae99bcd6039cd70443fe814431eb1921b4a59",
+      "prediction_audit_sha256": "4c2d315bfd220817679c86bdc653ec6cf9f9da6e886f01acd7bd3ba5ef441b90",
+      "question_type_counts": {
+        "open_ended": 99,
+        "multiple_choice": 94,
+        "true_false": 91
+      },
+      "run_manifest": {
+        "checkpoint": "<remote-root>/axis_repro/full284_diag_969c618/checkpoints/treatment_step_19000.pth",
+        "checkpoint_sha256": "3dde97c0d1f752be4546cee330cb22547862e52457f8d1bba1ab6edd6bc71ba5",
+        "subset": "full",
+        "world_size": 3,
+        "modes": [
+          "base"
+        ],
+        "rows": 284,
+        "batching": "series",
+        "skip_loss": true
+      },
+      "prediction_audit": {
+        "prediction_rows": 284,
+        "records": 284,
+        "prediction_modes": {
+          "base": 284
+        },
+        "errors": [],
+        "ok": true
+      }
+    }
+  }
+}

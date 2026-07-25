@@ -1,0 +1,12 @@
+{
+  "checkpoint": "<remote-root>/axis_repro/baseline/experiments/checkpoints/deepseek-ai_DeepSeek-R1-Distill-Qwen-7B/axis_qa_by_pretrain_best_accelerate/model_optimizer.pth",
+  "checkpoint_sha256": "d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7",
+  "subset": "full",
+  "world_size": 3,
+  "modes": [
+    "base"
+  ],
+  "rows": 284,
+  "batching": "series",
+  "skip_loss": true
+}

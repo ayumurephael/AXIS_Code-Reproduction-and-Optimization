@@ -1,0 +1,180 @@
+{
+    "schema_version":  1,
+    "experiment":  "loss_e2e_0723_full284_discrete_label_diagnostic",
+    "source_commit":  "969c618fafdcc3d19e7f620901f40c11adc4efc4",
+    "scope":  {
+                  "prediction_models":  [
+                                            "released",
+                                            "control",
+                                            "treatment"
+                                        ],
+                  "full_qa_records_per_model":  284,
+                  "discrete_records_per_model":  185,
+                  "semantic_explanation_categories_evaluated":  false,
+                  "figure_png_dpi":  600
+              },
+    "file_count":  32,
+    "total_bytes":  15659839,
+    "files":  [
+                  {
+                      "path":  "figures/discrete_label_confusion_matrices.pdf",
+                      "bytes":  32994,
+                      "sha256":  "0c17f07cb0c1289f1bb2977f3153effaa0a097165ca22af664ec1b3b5a06cfe8"
+                  },
+                  {
+                      "path":  "figures/discrete_label_confusion_matrices_600dpi.png",
+                      "bytes":  754808,
+                      "sha256":  "363ae2dda2e0fc1ab9ca60adf1dc08a8f8194869f303347fd2427fa35f5849ed"
+                  },
+                  {
+                      "path":  "figures/plot_discrete_label_confusions.py",
+                      "bytes":  7181,
+                      "sha256":  "c3388bd6842bed7f49a5d21bbd1f705b0410d0a4b7c78efedb929e697ab8789a"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/artifact_manifest.json",
+                      "bytes":  8916,
+                      "sha256":  "f085a6437a4fb578d754e85b6ce981095261329626f3c4ebd4a8d7073429a046"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/full.json",
+                      "bytes":  10315,
+                      "sha256":  "0cec752667e71c39f7d2a6c39f0c462f1d4614ccd56ec11e7e404bcd2f1cec64"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/full284_inference_audit.json",
+                      "bytes":  4431,
+                      "sha256":  "6a01c44528ec38ea948aa1f54bb8b7b196069d0dc8b9fc2012419f0e2cd4b08c"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/make_manifests.log",
+                      "bytes":  74,
+                      "sha256":  "3988ccb6a3b7bd9cf0089a167a2fd4661e1bdc541655a07abeb54f36b2de8b01"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/control/inference.log",
+                      "bytes":  11608,
+                      "sha256":  "e2f78acee1d1ace70868f7756a6e76b8374bac2c4741e9ed6722d764de29fd3a"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/control/prediction_audit.json",
+                      "bytes":  122,
+                      "sha256":  "4c2d315bfd220817679c86bdc653ec6cf9f9da6e886f01acd7bd3ba5ef441b90"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/control/predictions/predictions.jsonl",
+                      "bytes":  2251259,
+                      "sha256":  "75d1dc500d4019f3edf4db73a720c925882d2295cf5a4eb39446f867de9467e6"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/control/predictions/rank0.jsonl",
+                      "bytes":  794171,
+                      "sha256":  "16b3748798a0d704e3a7ba10b0188ee8923b96fbe679e99ba05c3fc9d0ce203a"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/control/predictions/rank1.jsonl",
+                      "bytes":  799832,
+                      "sha256":  "d998674d5beeddc1900262ba3705a941c2bf8d68458293ffce77c57ea3dd715c"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/control/predictions/rank2.jsonl",
+                      "bytes":  657256,
+                      "sha256":  "f3d58a88493274d5f5015cf0a66ccb0e9b0018d7411d658c37a261079f469c60"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/control/predictions/run_manifest.json",
+                      "bytes":  321,
+                      "sha256":  "4c3d98eeae0038c6a02309057b9aa934629d75d90b883b832fef128ed0c0cc0b"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/released/inference.log",
+                      "bytes":  11609,
+                      "sha256":  "8f3a69934d962a8f9ca7fd8d18255464a9e247b3f45ce5153b1778b748dbae6e"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/released/prediction_audit.json",
+                      "bytes":  122,
+                      "sha256":  "4c2d315bfd220817679c86bdc653ec6cf9f9da6e886f01acd7bd3ba5ef441b90"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/released/predictions/predictions.jsonl",
+                      "bytes":  2276527,
+                      "sha256":  "f094c67e3c06c3c8340065150d15e7a4978225e222fab3e8893e94c3c673731d"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/released/predictions/rank0.jsonl",
+                      "bytes":  804462,
+                      "sha256":  "33c3fa43f99d96ad0b3e8b6b304ca24353c6397f6b89f16e1490806908eaa4bf"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/released/predictions/rank1.jsonl",
+                      "bytes":  807130,
+                      "sha256":  "981b24e04c0ee1ab7c74fa107b8b90e06e28099542b1b3392dddfeafcc52950a"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/released/predictions/rank2.jsonl",
+                      "bytes":  664935,
+                      "sha256":  "ac8cb2d5fb3e042b93c9f6795e74e39166e719fb480df80631c5476af4cb14c3"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/released/predictions/run_manifest.json",
+                      "bytes":  394,
+                      "sha256":  "da50902ac49a7d97ea89a9cdf8bb7daa6ff93f84e7e0ee81cd04ee097fb8bee9"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/treatment/inference.log",
+                      "bytes":  11610,
+                      "sha256":  "27ac502cc6f63c451d171e87bd83b80cf5d044ce2c3c897eb200124f95733c1b"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/treatment/prediction_audit.json",
+                      "bytes":  122,
+                      "sha256":  "4c2d315bfd220817679c86bdc653ec6cf9f9da6e886f01acd7bd3ba5ef441b90"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/treatment/predictions/predictions.jsonl",
+                      "bytes":  2252537,
+                      "sha256":  "f9ee7befe9ad3edb9ba5c4511dd0dcc57f0a9e89587faa8716fbe25a59b32397"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/treatment/predictions/rank0.jsonl",
+                      "bytes":  794860,
+                      "sha256":  "714aff8e239620cc94c0de53be1bdf52cd0938e42a814feb8cdb578aded346ca"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/treatment/predictions/rank1.jsonl",
+                      "bytes":  798433,
+                      "sha256":  "2a365f569aeb95919aff5835ecd336528f5c9007b25dd204480b229a338e0d90"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/treatment/predictions/rank2.jsonl",
+                      "bytes":  659244,
+                      "sha256":  "385cf646745626d6e81c9329685cd3c0123b1260d5686158f4c965e29f9b556e"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/outputs/treatment/predictions/run_manifest.json",
+                      "bytes":  323,
+                      "sha256":  "b5b9eca66ab7e1fff6a23c3028839e6fca223bb9cece83ee471b299f6acc0c19"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/artifacts/status",
+                      "bytes":  300,
+                      "sha256":  "80836e923fa72e6f63467d73b24a083fb1485a7ce837fad37b1debf458ddca21"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/metrics/discrete_label_audit.json",
+                      "bytes":  527,
+                      "sha256":  "169383eb5258c6faf30c1dcc7f49537e76493a27cd1f68941c7cabc53fdf45d9"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/metrics/discrete_label_samples.jsonl",
+                      "bytes":  1211708,
+                      "sha256":  "54f6375cbf2ccbac4e61add549a8ac5fd1e2dfa6212529ff1b7d70a1c1c66e70"
+                  },
+                  {
+                      "path":  "full284_discrete_diagnostics/metrics/discrete_label_summary.json",
+                      "bytes":  31708,
+                      "sha256":  "685f8f15c543ddc3d8658d40116bea75d73b8db5c7f81800421d9577d61275a3"
+                  }
+              ]
+}

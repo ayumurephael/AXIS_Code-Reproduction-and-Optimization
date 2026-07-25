@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "summary_sha256": "685f8f15c543ddc3d8658d40116bea75d73b8db5c7f81800421d9577d61275a3",
+  "samples_sha256": "54f6375cbf2ccbac4e61add549a8ac5fd1e2dfa6212529ff1b7d70a1c1c66e70",
+  "model_count": 3,
+  "models": [
+    "released",
+    "control",
+    "treatment"
+  ],
+  "prediction_records_per_model": {
+    "released": 284,
+    "control": 284,
+    "treatment": 284
+  },
+  "discrete_records_per_model": {
+    "released": 185,
+    "control": 185,
+    "treatment": 185
+  },
+  "sample_rows": 555
+}
