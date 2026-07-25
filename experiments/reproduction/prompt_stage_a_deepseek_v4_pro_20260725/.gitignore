@@ -1,0 +1,17 @@
+# Large/raw runtime artifacts are retained locally but not committed.
+all_audit.json
+all_fallback_pending.jsonl
+all_judge.log
+all_scores.jsonl
+baseline_fallback_pending.jsonl
+baseline_predictions.jsonl
+baseline_scores.jsonl
+formal_inference.log
+historical_baseline_output_diagnostics.json
+historical_baseline_output_diagnostics.jsonl
+output_diagnostics.jsonl
+predictions.jsonl
+
+# Contains machine-specific remote paths; its audited configuration is
+# summarized in the committed report instead.
+run_manifest.json
