@@ -143,3 +143,30 @@ routes as conservative OE/TF controls; and test short, positive OE obligations
 that require qualitative observed evidence without eliciting unsupported
 numeric decoding. Component-level artifact reuse is preregistered for prompts
 that are byte-identical to already audited GPU/Judge runs.
+## Development Round 3
+
+Eight component-routed candidates were evaluated. The combined audit passed
+for 864 predictions and 1,989 scores.
+
+- R3-04 and R3-03 were numerically strongest at 10/10, but both inherited one
+  unresolved TF correct→wrong anomaly suppression and were ineligible.
+- R3-02 and R3-01 passed every guard: 10/10 nonnegative dimensions, worst
+  delta 0, and zero correct→wrong decisions.
+- R3-02 improved development MC Final/Correctness/Reasoning by
+  +0.264/+0.294/+0.193; R3-01 improved them by +0.229/+0.265/+0.147.
+- Both conservative routes reuse exact Baseline OE/TF and therefore tie those
+  seven dimensions by construction.
+- Every new positive OE rule failed. Q1 deltas were
+  -0.221/-0.378/-0.165/-0.103; Q2 were
+  -0.312/-0.586/-0.276/-0.034; Q3 were
+  -0.247/-0.552/-0.241/+0.103 for Final/Accuracy/Completeness/Relevance.
+- Added OE text changes content decisions more than it improves coverage. The
+  released checkpoint's OE behavior is most robust under its trained Baseline
+  prompt.
+
+## Outer-loop Cycle 5 Decision
+
+Direction: **confirm**. Freeze R3-02 and R3-01 unchanged. Evaluate them once on
+the untouched internal holdout using fresh Baseline plus candidate MC
+components. Do not tune from holdout outcomes; lock the top confirming route
+for one final `paper140` run.

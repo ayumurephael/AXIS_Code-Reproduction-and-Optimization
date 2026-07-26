@@ -1,0 +1,27 @@
+{
+  "prediction_rows": 87,
+  "records": 29,
+  "prediction_modes": {
+    "route_r3_05_oe_q1": 29,
+    "route_r3_06_oe_q2": 29,
+    "route_r3_07_oe_q3": 29
+  },
+  "score_rows": 261,
+  "score_methods": {
+    "final_score_top_logprobs": 260,
+    "exact_sample_mean_20": 1
+  },
+  "score_models": {
+    "deepseek-v4-pro": 261
+  },
+  "score_providers": {
+    "deepseek": 261
+  },
+  "score_enable_thinking": {
+    "auto": 261
+  },
+  "logprobs_returned": 260,
+  "valid_prompt_hashes": 261,
+  "errors": [],
+  "ok": true
+}

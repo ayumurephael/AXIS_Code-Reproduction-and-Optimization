@@ -1,0 +1,89 @@
+{
+  "record_count": 96,
+  "candidate_count": 8,
+  "prediction_rows": 864,
+  "score_rows": 1989,
+  "routes": {
+    "route_r3_01_mc_f0_safe": {
+      "multiple_choice": "route_r2_01_minimal",
+      "true_false": "base",
+      "open_ended": "base"
+    },
+    "route_r3_02_mc_f1_safe": {
+      "multiple_choice": "route_r2_02_mc_stable",
+      "true_false": "base",
+      "open_ended": "base"
+    },
+    "route_r3_03_mc_f0_tf_p0": {
+      "multiple_choice": "route_r2_01_minimal",
+      "true_false": "route_r2_01_minimal",
+      "open_ended": "base"
+    },
+    "route_r3_04_mc_f1_tf_p0": {
+      "multiple_choice": "route_r2_02_mc_stable",
+      "true_false": "route_r2_01_minimal",
+      "open_ended": "base"
+    },
+    "route_r3_05_oe_q1": {
+      "multiple_choice": "route_r2_01_minimal",
+      "true_false": "route_r2_01_minimal",
+      "open_ended": "route_r3_05_oe_q1"
+    },
+    "route_r3_06_oe_q2": {
+      "multiple_choice": "route_r2_01_minimal",
+      "true_false": "route_r2_01_minimal",
+      "open_ended": "route_r3_06_oe_q2"
+    },
+    "route_r3_07_oe_q3": {
+      "multiple_choice": "route_r2_01_minimal",
+      "true_false": "route_r2_01_minimal",
+      "open_ended": "route_r3_07_oe_q3"
+    },
+    "route_r3_08_historical": {
+      "multiple_choice": "route_r2_01_minimal",
+      "true_false": "base",
+      "open_ended": "route_r2_04_oe_old_contract"
+    }
+  },
+  "component_counts": {
+    "route_r3_01_mc_f0_safe": {
+      "base": 62,
+      "route_r2_01_minimal": 34
+    },
+    "route_r3_02_mc_f1_safe": {
+      "base": 62,
+      "route_r2_02_mc_stable": 34
+    },
+    "route_r3_03_mc_f0_tf_p0": {
+      "base": 29,
+      "route_r2_01_minimal": 67
+    },
+    "route_r3_04_mc_f1_tf_p0": {
+      "base": 29,
+      "route_r2_02_mc_stable": 34,
+      "route_r2_01_minimal": 33
+    },
+    "route_r3_05_oe_q1": {
+      "route_r3_05_oe_q1": 29,
+      "route_r2_01_minimal": 67
+    },
+    "route_r3_06_oe_q2": {
+      "route_r3_06_oe_q2": 29,
+      "route_r2_01_minimal": 67
+    },
+    "route_r3_07_oe_q3": {
+      "route_r3_07_oe_q3": 29,
+      "route_r2_01_minimal": 67
+    },
+    "route_r3_08_historical": {
+      "route_r2_04_oe_old_contract": 29,
+      "route_r2_01_minimal": 34,
+      "base": 33
+    }
+  },
+  "new_component_modes": [
+    "route_r3_05_oe_q1",
+    "route_r3_06_oe_q2",
+    "route_r3_07_oe_q3"
+  ]
+}

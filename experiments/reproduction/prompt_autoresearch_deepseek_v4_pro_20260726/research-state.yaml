@@ -50,12 +50,12 @@ experiments:
     tf_final: 3.642142370108918
     macro_final: 3.661296085775103
   best_value:
-    split: screening
-    mode: pareto_p01_boundary
-    nonnegative_dimensions: 9
-    worst_delta: -0.28571198067779013
-    mean_delta: 0.2526346384750413
-  total_runs: 25
+    split: development96
+    mode: route_r3_02_mc_f1_safe
+    nonnegative_dimensions: 10
+    worst_delta: 0.0
+    mean_delta: 0.07504416589361132
+  total_runs: 33
   trajectory:
     - round: screening_round_1
       modes: 13
@@ -88,11 +88,27 @@ experiments:
       winner_worst_delta: -0.38103402416788823
       winner_mean_delta: 0.20529373031711926
       holdout_touched: false
+    - round: development_round_3
+      modes: 8
+      new_gpu_predictions: 288
+      new_judge_scores: 261
+      assembled_predictions: 864
+      assembled_scores: 1989
+      audit_ok: true
+      gate_passed: true
+      numerical_winner: route_r3_04_mc_f1_tf_p0
+      numerical_winner_nonnegative_dimensions: 10
+      numerical_winner_worst_delta: 0.0
+      numerical_winner_mean_delta: 0.20243767568967647
+      decision_guard_eligible:
+        - route_r3_02_mc_f1_safe
+        - route_r3_01_mc_f0_safe
+      holdout_touched: false
 
 outer_loop:
-  cycle: 4
-  last_direction: deepen
-  last_reflection: "Round 2 validated task routing for MC and TF but isolated OE as the bottleneck. Negative OE constraints prime forbidden phrases, while long coverage rules change diagnoses and invite unsupported numeric or out-of-window claims. Round 3 preserves audited byte-identical components, adds two conservative Baseline-OE/TF controls, and tests short positive qualitative OE obligations; holdout remains untouched."
+  cycle: 5
+  last_direction: confirm
+  last_reflection: "Four Round-3 routes reached 10/10 numerically. TF-P0 routes retained one unresolved Baseline-correct real-anomaly regression and failed the paired-decision guard. R3-02/R3-01 passed every guard with improved MC and exact Baseline OE/TF. New OE text consistently hurt content accuracy, so freeze the two conservative routes for one untouched-holdout confirmation without tuning."
 
 workspace:
   findings: "findings.md"

@@ -1,0 +1,11 @@
+{
+  "prediction_rows": 288,
+  "records": 96,
+  "prediction_modes": {
+    "route_r3_05_oe_q1": 96,
+    "route_r3_06_oe_q2": 96,
+    "route_r3_07_oe_q3": 96
+  },
+  "errors": [],
+  "ok": true
+}
