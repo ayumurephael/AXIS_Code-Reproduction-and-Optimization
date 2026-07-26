@@ -71,6 +71,7 @@ def main() -> None:
     parser.add_argument("--scores", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--baseline-mode", default="base")
+    parser.add_argument("--title", default="Screening round 1 results")
     args = parser.parse_args()
 
     predictions = read_jsonl(args.predictions)
@@ -196,7 +197,7 @@ def main() -> None:
 
     headers = ["Rank", "Mode", "Nonneg.", "Worst", "Mean"] + [name for name, _ in METRICS]
     lines = [
-        "# Screening round 1 results",
+        f"# {args.title}",
         "",
         "## Delta versus split Baseline",
         "",
