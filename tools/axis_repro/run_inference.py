@@ -149,7 +149,7 @@ def main() -> None:
             "question_type_counts": dict(collections.Counter(record.question_type for record in records)),
             "prompt_spec": str(prompt_spec_path),
             "prompt_spec_sha256": sha256_file(prompt_spec_path),
-            "mode_definitions": mode_manifest(),
+            "mode_definitions": mode_manifest(a.modes),
         }, indent=2), encoding="utf-8")
         print(f"wrote {len(rows)} rows to {merged}")
 

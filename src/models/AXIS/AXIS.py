@@ -5,7 +5,11 @@ import math
 from typing import Tuple, List, Optional, Dict, Any, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaTokenizer
 from src.models.AXIS.Pretrain_ts_encoder import TimeSeriesPretrainModel
-from src.models.AXIS.prompt_stage_a import build_question_prompt, get_condition
+from src.models.AXIS.prompt_stage_a import (
+    build_aligned_rows,
+    build_question_prompt,
+    get_condition,
+)
 
 class MultiheadAttention(nn.Module):
     """Standard Multi-head Attention module, non-causal by default.
@@ -314,7 +318,16 @@ class AXIS(nn.Module):
                 fixed_hint_tokens = "<|fixed_hint|>" * num_fixed_hint_tokens
 
             # Time series values text (may be removed by ablation)
-            str_time_series = ', '.join(f'{(x * 100):.0f}' for x in time_series[i][start_indices[i]:end_indices[i]].tolist())
+            window_values = time_series[i][
+                start_indices[i]:end_indices[i]
+            ].tolist()
+            str_time_series = ', '.join(
+                f'{(x * 100):.0f}' for x in window_values
+            )
+            aligned_rows = build_aligned_rows(
+                start_indices[i],
+                window_values,
+            )
             if condition.remove_window_values:
                 str_time_series_text = "(removed)"
             else:
@@ -329,6 +342,7 @@ class AXIS(nn.Module):
                 local_hint_tokens=local_hint_tokens,
                 fixed_hint_tokens=fixed_hint_tokens,
                 mode=ablation_mode,
+                aligned_rows=aligned_rows,
             )
             question_prompts.append(question_prompt)
             answer_prompts.append(

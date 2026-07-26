@@ -1,14 +1,14 @@
 """Prompt-only ablations for the released AXIS checkpoint.
 
-Stage A deliberately preserves the released prompt's ordering and its
-serialization of window values and local-hint tokens.  Each mode below changes
-only the factor named by the experiment specification.
+The original Stage-A modes preserve the released prompt's ordering and value /
+local-hint serialization.  Follow-up modes change only the explicitly declared
+prompt factors and continue to use the released generation boundary.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Dict, Optional
+from typing import Dict, Iterable, Optional, Sequence
 
 
 OUTPUT_PROTOCOLS = {
@@ -77,6 +77,101 @@ EVIDENCE_CONTRACT = """### Evidence Contract
    increasing, decreasing, or variable."""
 
 
+EVIDENCE_CONTRACT_FIRST_THREE = """### Evidence Contract
+1. Window values are exact sample-specific observations for the half-open
+   interval [{start}, {end}), i.e. steps {start} through {end_minus_1}.
+   They are serialized as model-input values multiplied by 100.
+   Do not infer physical units.
+
+2. Each Per-Step Context token is sample-specific and corresponds to the
+   value on the same row. Use it to determine whether that local behavior
+   is unexpected relative to the full temporal pattern.
+
+3. Shared Task-Control tokens are identical across samples. They specify
+   how to answer, but they are NOT evidence that the current sample is
+   normal or anomalous."""
+
+
+EVIDENCE_CONTRACT_REVISED = """### Evidence Contract
+1. Window Values are rounded integer encodings of sample-specific
+   observations for the half-open interval [{start}, {end}), listed in
+   chronological order from step {start} through step {end_minus_1}.
+   Use the displayed scale consistently when comparing shape, direction,
+   relative change, and local deviations. Do not infer physical units.
+   If the question explicitly requires an approximate unscaled numerical
+   value, divide the displayed integer by 100 exactly once; otherwise,
+   do not rescale the values.
+
+2. Per-Step Context tokens are sample-specific and align one-to-one with
+   Window Values by sequence position, not by text row. The first token
+   corresponds to the first value at step {start}; each subsequent token
+   corresponds to the next value; and the last token corresponds to the
+   last value at step {end_minus_1}. Use each token only with its aligned
+   value when judging whether that local behavior is unexpected relative
+   to the complete temporal pattern.
+
+3. Shared Task-Control tokens are identical across samples. They specify
+   how to answer, but they are NOT evidence that the current sample is
+   normal or anomalous.
+
+4. An anomaly is an unexpected deviation relative to the global temporal
+   pattern. A value is not anomalous merely because it is large, small,
+   increasing, decreasing, or variable."""
+
+
+PARETO_TASK_RULES = {
+    "multiple_choice": (
+        "Compare the complete meaning of every option with the evidence. "
+        "The selected option must match anomaly status, shape, direction, "
+        "temporal location, persistence or recovery, and boundary relation. "
+        "Reject an option that requires an unsupported event."
+    ),
+    "true_false": (
+        "Evaluate the truth of the complete proposition, including negation "
+        "and every required clause. Decide the underlying evidence claim "
+        "first, then map it to True or False. Anomaly presence does not "
+        "mechanically imply either label."
+    ),
+    "open_ended": (
+        "Answer every component requested by the question. Start from a "
+        "diagnostic conclusion, then state the observed shape and location "
+        "and why they support or refute an anomaly. Discuss boundary "
+        "uncertainty only when relevant, and distinguish observed evidence "
+        "from evidence that would still be needed."
+    ),
+}
+
+PARETO_BOUNDARY_RULE = (
+    "Use only evidence inside the half-open window [{start}, {end}); never "
+    "invent or cite a step outside it."
+)
+
+PARETO_CALIBRATION_RULE = (
+    "Call a behavior anomalous only when it is unexpected relative to the "
+    "complete window and supported by Per-Step Analysis. A large or small "
+    "value, sign change, smooth trend, ordinary peak or trough, or variability "
+    "is not anomalous by itself; check local contrast, persistence, and "
+    "recovery."
+)
+
+PARETO_NUMERIC_RULE = (
+    "Use displayed values for qualitative shape, order, direction, relative "
+    "change, and local contrast. Do not convert or quote exact numbers unless "
+    "the question explicitly asks for an approximate numerical value in the "
+    "original scale."
+)
+
+PARETO_SINGLE_ANSWER_RULE = (
+    "Give one final answer only. Do not repeat, revise, or contradict it; stop "
+    "after the shortest explanation that fully supports the answer."
+)
+
+EXPERT_ANOMALY_ANALYST_OPENING = (
+    "You are an expert time-series anomaly analyst. Produce one precise, "
+    "evidence-grounded answer to the question."
+)
+
+
 @dataclass(frozen=True)
 class PromptCondition:
     description: str
@@ -87,6 +182,12 @@ class PromptCondition:
     add_evidence_contract: bool = False
     remove_local_hint: bool = False
     remove_window_values: bool = False
+    use_expert_anomaly_analyst_opening: bool = False
+    use_first_three_contract_items: bool = False
+    use_revised_evidence_contract: bool = False
+    standalone_fixed_hint: bool = False
+    interleave_time_series_evidence: bool = False
+    pareto_factors: str = ""
 
 
 MODE_SPECS: Dict[str, PromptCondition] = {
@@ -113,6 +214,12 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         rename_fixed_hint=True,
         add_evidence_contract=True,
     ),
+    "fixed_role_evidence_contract_revised": PromptCondition(
+        "Rename the fixed-hint role and add the revised four-item Evidence "
+        "Contract with explicit rounded-value and positional-alignment rules.",
+        rename_fixed_hint=True,
+        use_revised_evidence_contract=True,
+    ),
     "combined_234": PromptCondition(
         "Combine task protocol, fixed-hint role rename, and Evidence Contract.",
         add_output_protocol=True,
@@ -125,6 +232,78 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         add_output_protocol=True,
         rename_fixed_hint=True,
         add_evidence_contract=True,
+    ),
+    "expert_contract3_fixed_section": PromptCondition(
+        "Use the anomaly-analyst opening, the first three Evidence Contract "
+        "items, and a standalone renamed fixed-hint section.",
+        rename_fixed_hint=True,
+        use_expert_anomaly_analyst_opening=True,
+        use_first_three_contract_items=True,
+        standalone_fixed_hint=True,
+    ),
+    "expert_contract3_interleaved": PromptCondition(
+        "Apply expert_contract3_fixed_section and replace the released "
+        "value/local blocks with step-interleaved time-series evidence.",
+        rename_fixed_hint=True,
+        use_expert_anomaly_analyst_opening=True,
+        use_first_three_contract_items=True,
+        standalone_fixed_hint=True,
+        interleave_time_series_evidence=True,
+    ),
+    "pareto_p01_boundary": PromptCondition(
+        "P01: fixed role plus boundary guard (A).",
+        rename_fixed_hint=True,
+        pareto_factors="A",
+    ),
+    "pareto_p02_calibration": PromptCondition(
+        "P02: fixed role plus anomaly calibration (B).",
+        rename_fixed_hint=True,
+        pareto_factors="B",
+    ),
+    "pareto_p03_task_rule": PromptCondition(
+        "P03: fixed role plus question-type-conditioned decision rule (C).",
+        rename_fixed_hint=True,
+        pareto_factors="C",
+    ),
+    "pareto_p04_numeric_guard": PromptCondition(
+        "P04: fixed role plus qualitative numeric guard (D).",
+        rename_fixed_hint=True,
+        pareto_factors="D",
+    ),
+    "pareto_p05_single_answer": PromptCondition(
+        "P05: fixed role plus single-answer concise guard (E).",
+        rename_fixed_hint=True,
+        pareto_factors="E",
+    ),
+    "pareto_p06_abc": PromptCondition(
+        "P06: boundary, calibration, and task rules (ABC).",
+        rename_fixed_hint=True,
+        pareto_factors="ABC",
+    ),
+    "pareto_p07_abd": PromptCondition(
+        "P07: boundary, calibration, and numeric rules (ABD).",
+        rename_fixed_hint=True,
+        pareto_factors="ABD",
+    ),
+    "pareto_p08_acde": PromptCondition(
+        "P08: boundary, task, numeric, and answer rules (ACDE).",
+        rename_fixed_hint=True,
+        pareto_factors="ACDE",
+    ),
+    "pareto_p09_bce": PromptCondition(
+        "P09: calibration, task, and answer rules (BCE).",
+        rename_fixed_hint=True,
+        pareto_factors="BCE",
+    ),
+    "pareto_p10_abcde": PromptCondition(
+        "P10: full Pareto-v1 rules (ABCDE).",
+        rename_fixed_hint=True,
+        pareto_factors="ABCDE",
+    ),
+    "pareto_p11_abce": PromptCondition(
+        "P11: Pareto-v1 without the numeric guard (ABCE).",
+        rename_fixed_hint=True,
+        pareto_factors="ABCE",
     ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
@@ -153,6 +332,27 @@ STAGE_A_MODES = (
     "answer_boundary_combined_234",
 )
 
+PARETO_SCREEN_MODES = (
+    "fixed_role",
+    "pareto_p01_boundary",
+    "pareto_p02_calibration",
+    "pareto_p03_task_rule",
+    "pareto_p04_numeric_guard",
+    "pareto_p05_single_answer",
+    "pareto_p06_abc",
+    "pareto_p07_abd",
+    "pareto_p08_acde",
+    "pareto_p09_bce",
+    "pareto_p10_abcde",
+    "pareto_p11_abce",
+)
+
+FOLLOWUP_PROMPT_MODES = (
+    "expert_contract3_fixed_section",
+    "expert_contract3_interleaved",
+    "fixed_role_evidence_contract_revised",
+)
+
 
 def normalize_mode(mode: Optional[str]) -> str:
     return "base" if mode is None else mode
@@ -169,9 +369,26 @@ def get_condition(mode: Optional[str]) -> PromptCondition:
         ) from exc
 
 
-def mode_manifest() -> Dict[str, Dict[str, object]]:
-    """Return a JSON-serializable definition of every formal Stage-A mode."""
-    return {mode: asdict(MODE_SPECS[mode]) for mode in STAGE_A_MODES}
+def mode_manifest(
+    modes: Optional[Sequence[str]] = None,
+) -> Dict[str, Dict[str, object]]:
+    """Return JSON-serializable definitions for the requested formal modes."""
+    selected_modes = STAGE_A_MODES if modes is None else tuple(modes)
+    return {mode: asdict(get_condition(mode)) for mode in selected_modes}
+
+
+def build_aligned_rows(start: int, window_values: Iterable[float]) -> str:
+    """Serialize one scaled observation beside one local-hint placeholder."""
+    rows = []
+    for offset, value in enumerate(window_values):
+        # Preserve the released prompt's ``(x * 100):.0f`` rounding rule, then
+        # serialize the resulting integer with the approved signed width.
+        scaled_value = int(f"{float(value) * 100:.0f}")
+        rows.append(
+            f"Step {start + offset:04d} | value={scaled_value:+06d} | "
+            "context=<|local_hint|>"
+        )
+    return "\n".join(rows)
 
 
 def build_question_prompt(
@@ -184,6 +401,7 @@ def build_question_prompt(
     local_hint_tokens: str,
     fixed_hint_tokens: str,
     mode: Optional[str],
+    aligned_rows: Optional[str] = None,
 ) -> str:
     """Build the textual portion of a Stage-A prompt.
 
@@ -191,6 +409,10 @@ def build_question_prompt(
     including leading/trailing newlines and indentation.
     """
     condition = get_condition(mode)
+    if condition.interleave_time_series_evidence and aligned_rows is None:
+        raise ValueError(
+            f"Mode {normalize_mode(mode)!r} requires step-aligned evidence rows"
+        )
     if condition.add_output_protocol:
         if question_type not in OUTPUT_PROTOCOLS:
             raise ValueError(
@@ -205,10 +427,19 @@ def build_question_prompt(
     else:
         protocol_section = ""
 
-    if condition.add_evidence_contract:
+    if condition.use_revised_evidence_contract:
+        contract_text = EVIDENCE_CONTRACT_REVISED
+    elif condition.use_first_three_contract_items:
+        contract_text = EVIDENCE_CONTRACT_FIRST_THREE
+    elif condition.add_evidence_contract:
+        contract_text = EVIDENCE_CONTRACT
+    else:
+        contract_text = None
+
+    if contract_text is not None:
         contract_section = (
             "\n            "
-            + EVIDENCE_CONTRACT.format(
+            + contract_text.format(
                 start=start,
                 end=end,
                 end_minus_1=end - 1,
@@ -223,6 +454,105 @@ def build_question_prompt(
         if condition.rename_fixed_hint
         else "Overall Summary Hints"
     )
+
+    if condition.pareto_factors:
+        unknown = set(condition.pareto_factors) - set("ABCDE")
+        if unknown:
+            raise ValueError(
+                f"Unknown Pareto prompt factor(s): {sorted(unknown)}"
+            )
+        if "C" in condition.pareto_factors:
+            if question_type not in PARETO_TASK_RULES:
+                raise ValueError(
+                    f"Unsupported question_type {question_type!r} for Pareto "
+                    f"task rule; expected one of {sorted(PARETO_TASK_RULES)}"
+                )
+            task_rule_section = (
+                "\n            ### Task Rule\n"
+                f"            {PARETO_TASK_RULES[question_type]}\n"
+            )
+        else:
+            task_rule_section = ""
+
+        evidence_rules = []
+        if "A" in condition.pareto_factors:
+            evidence_rules.append(
+                PARETO_BOUNDARY_RULE.format(start=start, end=end)
+            )
+        if "B" in condition.pareto_factors:
+            evidence_rules.append(PARETO_CALIBRATION_RULE)
+        if "D" in condition.pareto_factors:
+            evidence_rules.append(PARETO_NUMERIC_RULE)
+        if evidence_rules:
+            evidence_use_section = (
+                "\n            ### Evidence Use\n"
+                + "\n".join(
+                    f"            - {rule}" for rule in evidence_rules
+                )
+                + "\n"
+            )
+        else:
+            evidence_use_section = ""
+
+        if "E" in condition.pareto_factors:
+            response_rule_section = (
+                "\n            ### Response Rule\n"
+                f"            {PARETO_SINGLE_ANSWER_RULE}\n"
+            )
+        else:
+            response_rule_section = ""
+
+        return f"""
+            You are an expert time series analyst. Analyze the provided data and answer the question.
+{evidence_use_section}
+            ### Time Series Data
+            - **Window:** Steps {start} to {end}
+            - **Values (scaled by 100):** {serialized_values}
+
+            ### Contextual Hints
+            - **Per-Step Analysis:** {local_hint_tokens}
+            - **{fixed_label}:** {fixed_hint_tokens}
+{task_rule_section}{response_rule_section}
+            ### Question
+            {question}
+            """
+    if condition.use_expert_anomaly_analyst_opening:
+        if not condition.standalone_fixed_hint:
+            raise ValueError(
+                "The approved expert-anomaly prompt requires a standalone "
+                "fixed-hint section"
+            )
+
+        if condition.interleave_time_series_evidence:
+            aligned_rows_indented = aligned_rows.replace(
+                "\n", "\n            "
+            )
+            evidence_section = f"""### Time-Series Evidence
+
+            Each row has the format:
+            step | observed value | aligned per-step latent evidence
+
+            {aligned_rows_indented}"""
+        else:
+            evidence_section = f"""### Time Series Data
+            - **Window:** Steps {start} to {end}
+            - **Values (scaled by 100):** {serialized_values}
+
+            ### Contextual Hints
+            - **Per-Step Analysis:** {local_hint_tokens}"""
+
+        return f"""
+            {EXPERT_ANOMALY_ANALYST_OPENING}
+{contract_section}
+            {evidence_section}
+
+            ### {fixed_label}
+
+            {fixed_hint_tokens}
+
+            ### Question
+            {question}
+            """
 
     return f"""
             You are an expert time series analyst. Analyze the provided data and answer the question.
