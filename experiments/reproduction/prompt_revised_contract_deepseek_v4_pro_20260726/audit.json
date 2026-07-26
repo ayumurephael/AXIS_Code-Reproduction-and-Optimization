@@ -1,0 +1,25 @@
+{
+  "prediction_rows": 140,
+  "records": 140,
+  "prediction_modes": {
+    "fixed_role_evidence_contract_revised": 140
+  },
+  "score_rows": 335,
+  "score_methods": {
+    "final_score_top_logprobs": 333,
+    "exact_sample_mean_20": 2
+  },
+  "score_models": {
+    "deepseek-v4-pro": 335
+  },
+  "score_providers": {
+    "deepseek": 335
+  },
+  "score_enable_thinking": {
+    "auto": 335
+  },
+  "logprobs_returned": 333,
+  "valid_prompt_hashes": 335,
+  "errors": [],
+  "ok": true
+}

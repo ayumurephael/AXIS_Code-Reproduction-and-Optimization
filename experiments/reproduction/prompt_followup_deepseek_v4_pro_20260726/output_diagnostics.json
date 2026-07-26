@@ -1,0 +1,157 @@
+{
+  "rows": 280,
+  "modes": {
+    "expert_contract3_fixed_section": {
+      "overall": {
+        "count": 140,
+        "response_chars_mean": 819.7928571428571,
+        "response_chars_median": 691.5,
+        "response_words_mean": 126.77857142857142,
+        "sentence_count_mean": 6.65,
+        "raw_answer_first_rate": 0.15714285714285714,
+        "strict_parse_rate": 0.12142857142857143,
+        "selected_option_text_exact_rate": 1.0,
+        "heuristic_correct_rate": 0.7529411764705882,
+        "response_at_least_3000_chars_rate": 0.0,
+        "unsupported_number_fraction_mean": 0.42443276961134113,
+        "think_states": {
+          "close_only": 15,
+          "none": 93,
+          "open_and_close": 2,
+          "open_only": 30
+        }
+      },
+      "by_question_type": {
+        "multiple_choice": {
+          "count": 43,
+          "response_chars_mean": 663.0232558139535,
+          "response_chars_median": 673,
+          "response_words_mean": 102.55813953488372,
+          "sentence_count_mean": 5.3023255813953485,
+          "raw_answer_first_rate": 0.046511627906976744,
+          "strict_parse_rate": 0.046511627906976744,
+          "selected_option_text_exact_rate": 1.0,
+          "heuristic_correct_rate": 0.8837209302325582,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.3162790697674418,
+          "think_states": {
+            "none": 43
+          }
+        },
+        "open_ended": {
+          "count": 55,
+          "response_chars_mean": 1066.3818181818183,
+          "response_chars_median": 885,
+          "response_words_mean": 164.1818181818182,
+          "sentence_count_mean": 7.963636363636364,
+          "raw_answer_first_rate": 0.34545454545454546,
+          "strict_parse_rate": 0.2545454545454545,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": null,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.546318378591106,
+          "think_states": {
+            "close_only": 14,
+            "none": 19,
+            "open_and_close": 2,
+            "open_only": 20
+          }
+        },
+        "true_false": {
+          "count": 42,
+          "response_chars_mean": 657.3809523809524,
+          "response_chars_median": 631.0,
+          "response_words_mean": 102.5952380952381,
+          "sentence_count_mean": 6.309523809523809,
+          "raw_answer_first_rate": 0.023809523809523808,
+          "strict_parse_rate": 0.023809523809523808,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": 0.6190476190476191,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.3755494505494505,
+          "think_states": {
+            "close_only": 1,
+            "none": 31,
+            "open_only": 10
+          }
+        }
+      }
+    },
+    "expert_contract3_interleaved": {
+      "overall": {
+        "count": 140,
+        "response_chars_mean": 837.1857142857143,
+        "response_chars_median": 683.5,
+        "response_words_mean": 128.25714285714287,
+        "sentence_count_mean": 6.821428571428571,
+        "raw_answer_first_rate": 0.22857142857142856,
+        "strict_parse_rate": 0.18571428571428572,
+        "selected_option_text_exact_rate": 1.0,
+        "heuristic_correct_rate": 0.7764705882352941,
+        "response_at_least_3000_chars_rate": 0.007142857142857143,
+        "unsupported_number_fraction_mean": 0.42889923976583627,
+        "think_states": {
+          "close_only": 24,
+          "none": 100,
+          "open_and_close": 4,
+          "open_only": 12
+        }
+      },
+      "by_question_type": {
+        "multiple_choice": {
+          "count": 43,
+          "response_chars_mean": 635.1860465116279,
+          "response_chars_median": 611,
+          "response_words_mean": 97.81395348837209,
+          "sentence_count_mean": 4.906976744186046,
+          "raw_answer_first_rate": 0.046511627906976744,
+          "strict_parse_rate": 0.046511627906976744,
+          "selected_option_text_exact_rate": 1.0,
+          "heuristic_correct_rate": 0.9534883720930233,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.20747508305647838,
+          "think_states": {
+            "none": 43
+          }
+        },
+        "open_ended": {
+          "count": 55,
+          "response_chars_mean": 1162.9272727272728,
+          "response_chars_median": 947,
+          "response_words_mean": 177.01818181818183,
+          "sentence_count_mean": 8.89090909090909,
+          "raw_answer_first_rate": 0.5272727272727272,
+          "strict_parse_rate": 0.41818181818181815,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": null,
+          "response_at_least_3000_chars_rate": 0.01818181818181818,
+          "unsupported_number_fraction_mean": 0.6961013837618116,
+          "think_states": {
+            "close_only": 19,
+            "none": 29,
+            "open_and_close": 4,
+            "open_only": 3
+          }
+        },
+        "true_false": {
+          "count": 42,
+          "response_chars_mean": 617.4285714285714,
+          "response_chars_median": 584.0,
+          "response_words_mean": 95.57142857142857,
+          "sentence_count_mean": 6.071428571428571,
+          "raw_answer_first_rate": 0.023809523809523808,
+          "strict_parse_rate": 0.023809523809523808,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": 0.5952380952380952,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.3056878306878307,
+          "think_states": {
+            "close_only": 5,
+            "none": 28,
+            "open_only": 9
+          }
+        }
+      }
+    }
+  }
+}

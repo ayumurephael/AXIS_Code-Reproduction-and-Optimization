@@ -1,0 +1,36 @@
+{
+  "audit_ok": true,
+  "audit_errors": [],
+  "score_rows": 335,
+  "method_counts": {
+    "final_score_top_logprobs": 333,
+    "exact_sample_mean_20": 2
+  },
+  "model_counts": {
+    "deepseek-v4-pro": 335
+  },
+  "provider_counts": {
+    "deepseek": 335
+  },
+  "endpoint_hosts": {
+    "api.deepseek.com": 335
+  },
+  "system_fingerprints": {
+    "fp_9954b31ca7_prod0820_fp8_kvcache_20260402": 335
+  },
+  "prompt_hash_count": 335,
+  "fatal_log_line_count": 0,
+  "token_usage": {
+    "prompt_tokens": 212078,
+    "completion_tokens": 505021,
+    "total_tokens": 717099,
+    "prompt_cache_hit_tokens": 92032,
+    "prompt_cache_miss_tokens": 120046
+  },
+  "hashes": {
+    "predictions.jsonl": "80e045229149d3101c9ee967604b6f9e7f1e0b0d67eddd6740b2c5eaeea3ba5b",
+    "scores.jsonl": "4650c46637a82394d182877d9a1297e1080c21bcf4318fbca83bd2c4977ac06b",
+    "audit.json": "5ce25f0df3b9c057f78a84af5358ab7e809e1e942bef7ca36897734cb892f94b",
+    "output_diagnostics.json": "3f2dd77f94423a2ce23078504c67bb2ce5687491c44ef50fabce272fc2228963"
+  }
+}

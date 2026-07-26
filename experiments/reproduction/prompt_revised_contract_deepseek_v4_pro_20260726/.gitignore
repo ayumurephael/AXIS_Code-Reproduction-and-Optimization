@@ -1,0 +1,17 @@
+# Large/raw runtime artifacts are retained locally but not committed.
+fallback_pending.jsonl
+inference.log
+judge.log
+output_diagnostics.jsonl
+predictions.jsonl
+scores.jsonl
+
+# These files contain machine-specific paths. Their audited, path-free fields
+# are recorded in experiment_manifest.json.
+environment_preflight.txt
+run_manifest.json
+
+# Temporary local diagnostics and prompt-appendix staging files.
+output_diagnostics_local.json
+output_diagnostics_local.jsonl
+prompt_appendix.tmp.md

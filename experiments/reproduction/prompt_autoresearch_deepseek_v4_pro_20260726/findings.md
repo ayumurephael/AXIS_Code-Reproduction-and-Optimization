@@ -170,3 +170,37 @@ Direction: **confirm**. Freeze R3-02 and R3-01 unchanged. Evaluate them once on
 the untouched internal holdout using fresh Baseline plus candidate MC
 components. Do not tune from holdout outcomes; lock the top confirming route
 for one final `paper140` run.
+
+## Holdout Confirmation
+
+The two frozen conservative routes were evaluated once on the untouched 48-QA /
+24-series holdout. The formal audit passed for 144 predictions, 179 new
+`deepseek-v4-pro` scores, and 333 assembled scores. Neither candidate
+confirmed.
+
+- R3-02: 7/10 nonnegative; MC Final/Correctness/Reasoning deltas
+  -0.042/-0.059/-0.004; one correct→wrong and one wrong→correct decision.
+- R3-01: 7/10 nonnegative; MC deltas -0.371/-0.353/-0.412; one
+  correct→wrong and zero wrong→correct decisions.
+- The seven OE/TF deltas are exactly zero by Baseline component reuse.
+- R3-02 corrected an anomalous oscillation where Baseline selected D and then
+  rejected all options, but it reinterpreted a normal alternating window as
+  isolated drops/recoveries and selected D instead of A.
+- R3-01 selected anomalous option C while its own rationale concluded that the
+  window was normal. Renaming the textual role of co-trained learned tokens is
+  not behaviorally neutral.
+
+## Outer-loop Cycle 6 Decision
+
+Direction: **conclude with negative confirmation**. The strict all-ten
+criterion was not met. Development gains were not distributionally robust:
+output-consistency text can freeze a wrong early interpretation, while header
+renames can perturb the decoding of learned latent tokens. The untouched
+holdout cannot be reused for prompt tuning. No prompt is locked and no
+candidate is run on `paper140`; the final set remains unexposed as required by
+the preregistered stopping rule.
+
+A future prompt-only study would require a newly reserved, series-disjoint
+selection resource. With the current data budget, the evidence supports the
+released Baseline prompt as the only configuration that preserves all task
+families under strict confirmation.

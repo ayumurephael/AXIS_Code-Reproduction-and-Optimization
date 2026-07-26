@@ -1,0 +1,30 @@
+{
+  "audit_ok": true,
+  "audit_errors": [],
+  "score_rows": 670,
+  "method_counts": {
+    "final_score_top_logprobs": 661,
+    "exact_sample_mean_20": 9
+  },
+  "model_counts": {
+    "deepseek-v4-pro": 670
+  },
+  "provider_counts": {
+    "deepseek": 670
+  },
+  "endpoint_hosts": {
+    "api.deepseek.com": 670
+  },
+  "system_fingerprints": {
+    "fp_9954b31ca7_prod0820_fp8_kvcache_20260402": 670
+  },
+  "prompt_hash_count": 670,
+  "fatal_log_line_count": 0,
+  "hashes": {
+    "predictions.jsonl": "6b06ae4acfb3c09186d3a6ca74ee3e3d1020795687f4c8cd1a51ab5a897bb449",
+    "scores.jsonl": "1e706c4c3b1f28c9b6cba1ef9a82da4b00c84a33592ccb3ff98844bd25e63bf4",
+    "audit.json": "0faa456c2be2f98ebbbdd6d557c7c6e37752d70561d447a0ff5931297519145b",
+    "table_followup.json": "c465dd0d77cd5871013656b1571fa857b6521491bdd73c09fbab894d1d060853",
+    "output_diagnostics.json": "8d359177d25f0621bfe0bda0dd5b7c9b9eb7249a672fb2c3e5c12fb3fce66529"
+  }
+}

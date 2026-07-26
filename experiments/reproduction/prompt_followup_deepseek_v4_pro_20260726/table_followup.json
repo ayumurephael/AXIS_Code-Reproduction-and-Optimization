@@ -1,0 +1,55 @@
+{
+  "models": {
+    "base": {
+      "true_false/final": 3.642142370108918,
+      "true_false/correctness": 3.641666401443943,
+      "true_false/justification_quality": 3.6428563231063786,
+      "multiple_choice/final": 4.255815217345678,
+      "multiple_choice/correctness": 4.32558409021178,
+      "multiple_choice/reasoning_quality": 4.093021180658102,
+      "open_ended/final": 3.085930669870713,
+      "open_ended/accuracy": 2.836508828155388,
+      "open_ended/completeness": 2.7700417591659106,
+      "open_ended/relevance": 3.7454598810275286,
+      "macro_final": 3.6612960857751027
+    },
+    "expert_contract3_fixed_section": {
+      "open_ended/final": 2.877224127157065,
+      "open_ended/accuracy": 2.594606058643784,
+      "open_ended/completeness": 2.727330188468427,
+      "open_ended/relevance": 3.381821468892643,
+      "multiple_choice/final": 4.034884473725089,
+      "multiple_choice/correctness": 4.069768740646049,
+      "multiple_choice/reasoning_quality": 3.953487850909515,
+      "true_false/final": 3.4619178611469485,
+      "true_false/correctness": 3.500076749914826,
+      "true_false/justification_quality": 3.404679527995136,
+      "macro_final": 3.4580088206763677
+    },
+    "expert_contract3_interleaved": {
+      "open_ended/final": 2.668520661828915,
+      "open_ended/accuracy": 2.1817822067015227,
+      "open_ended/completeness": 2.5963648600422826,
+      "open_ended/relevance": 3.3205639615619433,
+      "multiple_choice/final": 4.032672915576092,
+      "multiple_choice/correctness": 4.162788783452228,
+      "multiple_choice/reasoning_quality": 3.7290692238651086,
+      "true_false/final": 3.2862110586659763,
+      "true_false/correctness": 3.2548013859921276,
+      "true_false/justification_quality": 3.333325567676752,
+      "macro_final": 3.329134878690328
+    }
+  },
+  "paired_vs_axis": {
+    "expert_contract3_fixed_section": {
+      "mean": -0.20391650858098914,
+      "low": -0.37195599748687597,
+      "high": -0.036084808553575695
+    },
+    "expert_contract3_interleaved": {
+      "mean": -0.33929846070710373,
+      "low": -0.5042000161247818,
+      "high": -0.17073856256420783
+    }
+  }
+}

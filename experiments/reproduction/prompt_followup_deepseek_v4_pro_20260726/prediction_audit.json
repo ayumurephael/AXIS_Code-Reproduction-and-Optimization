@@ -1,0 +1,10 @@
+{
+  "prediction_rows": 280,
+  "records": 140,
+  "prediction_modes": {
+    "expert_contract3_fixed_section": 140,
+    "expert_contract3_interleaved": 140
+  },
+  "errors": [],
+  "ok": true
+}

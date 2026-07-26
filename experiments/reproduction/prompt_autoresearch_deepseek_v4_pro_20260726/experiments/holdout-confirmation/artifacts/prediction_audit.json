@@ -1,0 +1,11 @@
+{
+  "prediction_rows": 144,
+  "records": 48,
+  "prediction_modes": {
+    "base": 48,
+    "route_r3_01_mc_f0_safe": 48,
+    "route_r3_02_mc_f1_safe": 48
+  },
+  "errors": [],
+  "ok": true
+}

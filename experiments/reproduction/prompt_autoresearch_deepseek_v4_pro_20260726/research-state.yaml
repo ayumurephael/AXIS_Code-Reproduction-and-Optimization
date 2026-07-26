@@ -1,7 +1,7 @@
 project:
   title: "AXIS prompt Pareto-improvement search"
   question: "Which prompt design can improve MC, OE, and TF without sacrificing any task family on the released AXIS checkpoint?"
-  status: active
+  status: concluded_negative
   started: "2026-07-26"
   domain: "time-series QA prompt optimization and LLM evaluation"
 
@@ -23,23 +23,23 @@ evaluation:
 hypotheses:
   - id: H1
     statement: "The old full Evidence Contract improves OE by eliciting explicit evidence coverage, but hurts MC/TF through instruction competition and the false 'same row' alignment claim."
-    status: active
+    status: supported
     motivation: "OE rises in every dimension while MC/TF decline relative to fixed-role-only."
     priority: high
   - id: H2
     statement: "The revised scaling/alignment wording removes some MC/TF errors but over-activates numeric decoding and harms OE relevance/accuracy."
-    status: active
+    status: supported
     motivation: "Revised-vs-old restores MC/TF but loses all OE dimensions."
     priority: high
   - id: H3
     statement: "A single long common contract cannot Pareto-improve all task families; short shared evidence semantics plus task-conditioned response instructions can."
-    status: active
-    motivation: "Observed task-family trade-offs suggest different instruction bottlenecks."
+    status: mixed
+    motivation: "Routing prevents OE/TF collateral damage, but the MC intervention fails untouched-holdout confirmation."
     priority: high
   - id: H4
     statement: "Separating evidence interpretation from response format, and making numerical rescaling conditional only for numeric OE questions, will reduce cross-task interference."
-    status: pending
-    motivation: "The current contract mixes representation semantics, anomaly definition, and answer behavior."
+    status: unsupported
+    motivation: "Positive OE obligations and routed semantics did not improve content accuracy; no robust prompt-only numerical rule emerged."
     priority: medium
 
 experiments:
@@ -55,7 +55,14 @@ experiments:
     nonnegative_dimensions: 10
     worst_delta: 0.0
     mean_delta: 0.07504416589361132
-  total_runs: 33
+  confirmation_value:
+    split: holdout48
+    confirmed_mode: null
+    best_failing_mode: route_r3_02_mc_f1_safe
+    nonnegative_dimensions: 7
+    worst_delta: -0.05882270422744096
+    mean_delta: -0.010482221228891753
+  total_runs: 35
   trajectory:
     - round: screening_round_1
       modes: 13
@@ -104,11 +111,29 @@ experiments:
         - route_r3_02_mc_f1_safe
         - route_r3_01_mc_f0_safe
       holdout_touched: false
+    - round: holdout_confirmation
+      modes:
+        - route_r3_02_mc_f1_safe
+        - route_r3_01_mc_f0_safe
+      predictions: 144
+      selective_judge_scores: 179
+      assembled_scores: 333
+      audit_ok: true
+      gate_passed: false
+      best_mode: route_r3_02_mc_f1_safe
+      best_nonnegative_dimensions: 7
+      best_worst_delta: -0.05882270422744096
+      best_mean_delta: -0.010482221228891753
+      each_candidate_correct_to_wrong: 1
+      paper140_touched: false
 
 outer_loop:
-  cycle: 5
-  last_direction: confirm
-  last_reflection: "Four Round-3 routes reached 10/10 numerically. TF-P0 routes retained one unresolved Baseline-correct real-anomaly regression and failed the paired-decision guard. R3-02/R3-01 passed every guard with improved MC and exact Baseline OE/TF. New OE text consistently hurt content accuracy, so freeze the two conservative routes for one untouched-holdout confirmation without tuning."
+  cycle: 6
+  last_direction: conclude
+  last_reflection: "Neither frozen candidate generalized to the untouched holdout. R3-02 lost all three MC metrics and introduced one normal-window false positive despite correcting one contradictory anomaly case; R3-01 lost all three MC metrics and introduced a label-rationale contradiction. Both failed the all-ten and correct-to-wrong gates. Stop without holdout tuning or paper140 candidate evaluation."
+  stopping_criterion_met: true
+  stopping_reason: "No candidate confirmed on the untouched holdout; the preregistered protocol forbids choosing or tuning from failing holdout outcomes."
+  final_test_status: "not_run; paper140 preserved because no candidate was locked"
 
 workspace:
   findings: "findings.md"

@@ -1,0 +1,26 @@
+{
+  "prediction_rows": 280,
+  "records": 140,
+  "prediction_modes": {
+    "expert_contract3_fixed_section": 140,
+    "expert_contract3_interleaved": 140
+  },
+  "score_rows": 670,
+  "score_methods": {
+    "final_score_top_logprobs": 661,
+    "exact_sample_mean_20": 9
+  },
+  "score_models": {
+    "deepseek-v4-pro": 670
+  },
+  "score_providers": {
+    "deepseek": 670
+  },
+  "score_enable_thinking": {
+    "auto": 670
+  },
+  "logprobs_returned": 661,
+  "valid_prompt_hashes": 670,
+  "errors": [],
+  "ok": true
+}

@@ -1,0 +1,77 @@
+{
+  "checkpoint": "/home2/xuhaijie/axis_repro/full284_diag_969c618/axis_prompt_stage_a_bb1410f/experiments/checkpoints/released/model_optimizer.pth",
+  "checkpoint_sha256": "d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7",
+  "data": "/home2/xuhaijie/axis_repro/full284_diag_969c618/axis_prompt_stage_a_bb1410f/data/AXIS_qa_test",
+  "subset": "full",
+  "world_size": 3,
+  "modes": [
+    "base",
+    "route_r3_02_mc_f1_safe",
+    "route_r3_01_mc_f0_safe"
+  ],
+  "rows": 144,
+  "batching": "series",
+  "skip_loss": true,
+  "record_count": 48,
+  "series_count": 24,
+  "question_type_counts": {
+    "multiple_choice": 17,
+    "true_false": 16,
+    "open_ended": 15
+  },
+  "prompt_spec": "/home2/xuhaijie/axis_repro/full284_diag_969c618/axis_prompt_autoresearch_b48c5cd/src/models/AXIS/prompt_stage_a.py",
+  "prompt_spec_sha256": "1d0aebd9c4c93c5e653a21cbc93038d3071cf6be31517eca432a66e77aa011a9",
+  "mode_definitions": {
+    "base": {
+      "description": "Released AXIS prompt and generation boundary.",
+      "answer_boundary": false,
+      "remove_fixed_hint": false,
+      "add_output_protocol": false,
+      "rename_fixed_hint": false,
+      "add_evidence_contract": false,
+      "remove_local_hint": false,
+      "remove_window_values": false,
+      "use_expert_anomaly_analyst_opening": false,
+      "use_first_three_contract_items": false,
+      "use_revised_evidence_contract": false,
+      "standalone_fixed_hint": false,
+      "interleave_time_series_evidence": false,
+      "pareto_factors": "",
+      "routed_profile": ""
+    },
+    "route_r3_02_mc_f1_safe": {
+      "description": "Round 3: stable-selection MC with exact Baseline TF and OE.",
+      "answer_boundary": false,
+      "remove_fixed_hint": false,
+      "add_output_protocol": false,
+      "rename_fixed_hint": false,
+      "add_evidence_contract": false,
+      "remove_local_hint": false,
+      "remove_window_values": false,
+      "use_expert_anomaly_analyst_opening": false,
+      "use_first_three_contract_items": false,
+      "use_revised_evidence_contract": false,
+      "standalone_fixed_hint": false,
+      "interleave_time_series_evidence": false,
+      "pareto_factors": "",
+      "routed_profile": "r3_02_mc_f1_safe"
+    },
+    "route_r3_01_mc_f0_safe": {
+      "description": "Round 3: fixed-role MC with exact Baseline TF and OE.",
+      "answer_boundary": false,
+      "remove_fixed_hint": false,
+      "add_output_protocol": false,
+      "rename_fixed_hint": false,
+      "add_evidence_contract": false,
+      "remove_local_hint": false,
+      "remove_window_values": false,
+      "use_expert_anomaly_analyst_opening": false,
+      "use_first_three_contract_items": false,
+      "use_revised_evidence_contract": false,
+      "standalone_fixed_hint": false,
+      "interleave_time_series_evidence": false,
+      "pareto_factors": "",
+      "routed_profile": "r3_01_mc_f0_safe"
+    }
+  }
+}

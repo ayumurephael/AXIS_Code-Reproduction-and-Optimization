@@ -1,0 +1,27 @@
+{
+  "prediction_rows": 144,
+  "records": 48,
+  "prediction_modes": {
+    "base": 48,
+    "route_r3_02_mc_f1_safe": 48,
+    "route_r3_01_mc_f0_safe": 48
+  },
+  "score_rows": 333,
+  "score_methods": {
+    "final_score_top_logprobs": 330,
+    "exact_sample_mean_20": 3
+  },
+  "score_models": {
+    "deepseek-v4-pro": 333
+  },
+  "score_providers": {
+    "deepseek": 333
+  },
+  "score_enable_thinking": {
+    "auto": 333
+  },
+  "logprobs_returned": 330,
+  "valid_prompt_hashes": 333,
+  "errors": [],
+  "ok": true
+}

@@ -1,0 +1,22 @@
+{
+  "records": 48,
+  "candidate_modes": [
+    "route_r3_02_mc_f1_safe",
+    "route_r3_01_mc_f0_safe"
+  ],
+  "prediction_rows": 144,
+  "score_rows": 333,
+  "source_counts": {
+    "base": {
+      "base": 48
+    },
+    "route_r3_02_mc_f1_safe": {
+      "route_r3_02_mc_f1_safe": 17,
+      "base": 31
+    },
+    "route_r3_01_mc_f0_safe": {
+      "route_r3_01_mc_f0_safe": 17,
+      "base": 31
+    }
+  }
+}

@@ -1,0 +1,14 @@
+# Large/raw runtime artifacts are retained locally but not committed.
+fallback_pending.jsonl
+inference.log
+inference_offline.log
+judge.log
+output_diagnostics.jsonl
+predictions.jsonl
+scores.jsonl
+
+# These files contain machine-specific remote paths or an inherited remote
+# source marker. Their audited, path-free fields are in experiment_manifest.json.
+environment_preflight.txt
+inference__run_manifest.json
+remote_source_commit.txt
