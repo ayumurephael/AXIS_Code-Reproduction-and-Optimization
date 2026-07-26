@@ -55,7 +55,7 @@ experiments:
     nonnegative_dimensions: 9
     worst_delta: -0.28571198067779013
     mean_delta: 0.2526346384750413
-  total_runs: 19
+  total_runs: 25
   trajectory:
     - round: screening_round_1
       modes: 13
@@ -77,11 +77,22 @@ experiments:
       winner_worst_delta: -0.457
       winner_mean_delta: 0.128
       holdout_touched: false
+    - round: development_round_2
+      modes: 6
+      predictions: 576
+      judge_scores: 1326
+      audit_ok: true
+      gate_passed: false
+      winner: route_r2_04_oe_old_contract
+      winner_nonnegative_dimensions: 7
+      winner_worst_delta: -0.38103402416788823
+      winner_mean_delta: 0.20529373031711926
+      holdout_touched: false
 
 outer_loop:
-  cycle: 3
-  last_direction: pivot
-  last_reflection: "No validation candidate passed. P07 and fixed-role improve TF/MC but lose OE; P03/P06 create TF negation-label inversions and suppress real anomalies, while all validation OE questions require methodological evidence coverage rather than categorical diagnostic closure. Pivot to question-type-conditioned routing, treat screening+validation as an exposed 96-QA development pool, and preserve the untouched 48-QA holdout for confirmation."
+  cycle: 4
+  last_direction: deepen
+  last_reflection: "Round 2 validated task routing for MC and TF but isolated OE as the bottleneck. Negative OE constraints prime forbidden phrases, while long coverage rules change diagnoses and invite unsupported numeric or out-of-window claims. Round 3 preserves audited byte-identical components, adds two conservative Baseline-OE/TF controls, and tests short positive qualitative OE obligations; holdout remains untouched."
 
 workspace:
   findings: "findings.md"

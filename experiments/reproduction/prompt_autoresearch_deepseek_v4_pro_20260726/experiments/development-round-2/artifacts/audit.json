@@ -1,0 +1,30 @@
+{
+  "prediction_rows": 576,
+  "records": 96,
+  "prediction_modes": {
+    "route_r2_01_minimal": 96,
+    "route_r2_02_mc_stable": 96,
+    "route_r2_03_tf_boundary": 96,
+    "route_r2_04_oe_old_contract": 96,
+    "route_r2_05_oe_contract_coverage": 96,
+    "route_r2_06_full_routed": 96
+  },
+  "score_rows": 1326,
+  "score_methods": {
+    "final_score_top_logprobs": 1312,
+    "exact_sample_mean_20": 14
+  },
+  "score_models": {
+    "deepseek-v4-pro": 1326
+  },
+  "score_providers": {
+    "deepseek": 1326
+  },
+  "score_enable_thinking": {
+    "auto": 1326
+  },
+  "logprobs_returned": 1312,
+  "valid_prompt_hashes": 1326,
+  "errors": [],
+  "ok": true
+}

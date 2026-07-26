@@ -6,6 +6,7 @@ from src.models.AXIS.prompt_stage_a import (
     FOLLOWUP_PROMPT_MODES,
     PARETO_SCREEN_MODES,
     ROUTED_R2_MODES,
+    ROUTED_R3_MODES,
     STAGE_A_MODES,
     build_aligned_rows,
     build_question_prompt,
@@ -430,5 +431,70 @@ B) Spike
         with self.assertRaises(ValueError):
             _prompt("route_r2_01_minimal", "unknown")
 
+    def test_round3_routed_mode_matrix_is_locked(self):
+        self.assertEqual(
+            ROUTED_R3_MODES,
+            (
+                "route_r3_01_mc_f0_safe",
+                "route_r3_02_mc_f1_safe",
+                "route_r3_03_mc_f0_tf_p0",
+                "route_r3_04_mc_f1_tf_p0",
+                "route_r3_05_oe_q1",
+                "route_r3_06_oe_q2",
+                "route_r3_07_oe_q3",
+                "route_r3_08_historical",
+            ),
+        )
+        self.assertTrue(set(ROUTED_R3_MODES).issubset(MODE_SPECS))
+        for mode in ROUTED_R3_MODES:
+            for question_type in ("multiple_choice", "open_ended", "true_false"):
+                self.assertEqual(_prompt(mode, question_type).count("<|fixed_hint|>"), 30)
+
+    def test_round3_safe_components_are_byte_identical(self):
+        base_oe = _prompt("base", "open_ended")
+        base_tf = _prompt("base", "true_false")
+        for mode in ("route_r3_01_mc_f0_safe", "route_r3_02_mc_f1_safe"):
+            self.assertEqual(_prompt(mode, "open_ended"), base_oe)
+            self.assertEqual(_prompt(mode, "true_false"), base_tf)
+        self.assertEqual(
+            _prompt("route_r3_01_mc_f0_safe", "multiple_choice"),
+            _prompt("route_r2_01_minimal", "multiple_choice"),
+        )
+        self.assertEqual(
+            _prompt("route_r3_02_mc_f1_safe", "multiple_choice"),
+            _prompt("route_r2_02_mc_stable", "multiple_choice"),
+        )
+
+    def test_round3_new_oe_rules_keep_released_evidence_layout(self):
+        expected = {
+            "route_r3_05_oe_q1": "two or three observed qualitative features",
+            "route_r3_06_oe_q2": "event or pattern named in the question",
+            "route_r3_07_oe_q3": "First answer the assessment or analysis requested",
+        }
+        for mode, phrase in expected.items():
+            with self.subTest(mode=mode):
+                oe = _prompt(mode, "open_ended")
+                self.assertIn(phrase, oe)
+                self.assertIn("Overall Summary Hints", oe)
+                self.assertNotIn("Learned Task Guidance", oe)
+                self.assertNotIn("### Evidence Contract", oe)
+                self.assertIn("### Time Series Data", oe)
+                self.assertIn("### Contextual Hints", oe)
+                self.assertEqual(_prompt(mode, "multiple_choice"), _prompt("route_r2_01_minimal", "multiple_choice"))
+                self.assertEqual(_prompt(mode, "true_false"), _prompt("route_r2_01_minimal", "true_false"))
+
+    def test_round3_historical_components_are_byte_identical(self):
+        self.assertEqual(
+            _prompt("route_r3_08_historical", "multiple_choice"),
+            _prompt("route_r2_01_minimal", "multiple_choice"),
+        )
+        self.assertEqual(
+            _prompt("route_r3_08_historical", "true_false"),
+            _prompt("base", "true_false"),
+        )
+        self.assertEqual(
+            _prompt("route_r3_08_historical", "open_ended"),
+            _prompt("route_r2_04_oe_old_contract", "open_ended"),
+        )
 if __name__ == "__main__":
     unittest.main()

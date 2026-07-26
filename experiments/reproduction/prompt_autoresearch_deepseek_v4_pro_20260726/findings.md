@@ -114,3 +114,32 @@ TF receives direct proposition-polarity consistency; OE receives speech-act and
 evidence-coverage instructions that preserve uncertainty. Screening and
 validation are now exposed development data (96 QA / 48 series). The original
 48-QA / 24-series holdout remains untouched and confirmatory.
+## Development Round 2
+
+Six task-routed candidates were evaluated on the exposed 96-QA development
+pool. The formal audit passed for 576 predictions and 1,326 new
+`deepseek-v4-pro` scores. None passed the strict 10/10 gate.
+
+- R2-04 ranked first at 7/10, worst -0.381, mean +0.205.
+- Its MC deltas were +0.312/+0.294/+0.355 and its TF deltas were
+  +0.409/+0.298/+0.576.
+- Its OE deltas were Final -0.061, Accuracy -0.381, Completeness -0.060,
+  Relevance +0.311.
+- Fixed-role MC F0 and stable-selection MC F1 introduced no parsed
+  correct-to-wrong MC decisions.
+- TF P0 corrected fifteen Baseline errors but changed one real anomaly
+  (`series_000132:1`) from correct to incorrect.
+- OE-S0's negative “do not claim no further evidence is needed” language
+  primed that exact phrase in five responses; Contract+S0 increased it to
+  eight.
+- The largest OE losses were diagnostic reversal, unsupported/out-of-window
+  specifics, and incomplete treatment of boundary/evidence requests—not
+  insufficient response length.
+
+## Outer-loop Cycle 4 Decision
+
+Direction: **deepen**. Preserve the proven MC components; use exact Baseline
+routes as conservative OE/TF controls; and test short, positive OE obligations
+that require qualitative observed evidence without eliciting unsupported
+numeric decoding. Component-level artifact reuse is preregistered for prompts
+that are byte-identical to already audited GPU/Judge runs.

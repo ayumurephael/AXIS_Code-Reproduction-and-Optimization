@@ -1,0 +1,7 @@
+{
+  "audit_ok": true,
+  "audit_errors": [],
+  "fatal_log_line_count": 0,
+  "wrapper_substring_false_positive_count": 2,
+  "note": "The first wrapper scan matched progress counters processed=401 and processed=403; neither line was an HTTP or API error. A contextual scan found no authentication, traceback, or permanent-error line."
+}

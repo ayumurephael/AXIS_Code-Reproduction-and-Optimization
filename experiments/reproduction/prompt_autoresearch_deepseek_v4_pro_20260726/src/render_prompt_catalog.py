@@ -9,6 +9,7 @@ from pathlib import Path
 from src.models.AXIS.prompt_stage_a import (
     PARETO_SCREEN_MODES,
     ROUTED_R2_MODES,
+    ROUTED_R3_MODES,
     build_question_prompt,
 )
 
@@ -24,24 +25,30 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument(
         "--mode-set",
-        choices=("screening", "routed_r2"),
+        choices=("screening", "routed_r2", "routed_r3"),
         default="screening",
     )
     args = parser.parse_args()
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    modes = PARETO_SCREEN_MODES if args.mode_set == "screening" else ROUTED_R2_MODES
-    title = (
-        "Screening round 1 prompt catalog"
-        if args.mode_set == "screening"
-        else "Development round 2 routed prompt catalog"
-    )
+    if args.mode_set == "screening":
+        modes = PARETO_SCREEN_MODES
+    elif args.mode_set == "routed_r2":
+        modes = ROUTED_R2_MODES
+    else:
+        modes = ROUTED_R3_MODES
+    titles = {
+        "screening": "Screening round 1 prompt catalog",
+        "routed_r2": "Development round 2 routed prompt catalog",
+        "routed_r3": "Development round 3 routed prompt catalog",
+    }
+    title = titles[args.mode_set]
 
     rows = []
     markdown = [
         f"# {title}",
         "",
-        "Rendered before inference with a fixed illustrative window. Runtime ",
+        "Rendered before inference with a fixed illustrative window. Runtime",
         "values, steps, latent placeholders, and questions are substituted per sample.",
         "",
     ]
@@ -74,7 +81,7 @@ def main() -> None:
                     f"SHA-256: `{digest}`",
                     "",
                     "```text",
-                    prompt,
+                    prompt.rstrip(),
                     "```",
                     "",
                 ]

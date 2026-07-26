@@ -1,0 +1,39 @@
+{
+  "manifest": "experiments\\reproduction\\prompt_autoresearch_deepseek_v4_pro_20260726\\data\\manifests\\development96.json",
+  "manifest_sha256": "02af9611c54c9e29af15e86cee61f4b8eedfc60c367269e7fe042a85b71eb5d5",
+  "prediction_rows": 96,
+  "score_rows": 221,
+  "score_methods": {
+    "final_score_top_logprobs": 220,
+    "exact_sample_mean_20": 1
+  },
+  "score_models": {
+    "deepseek-v4-pro": 221
+  },
+  "sources": [
+    {
+      "name": "screening",
+      "predictions": "experiments\\reproduction\\prompt_autoresearch_deepseek_v4_pro_20260726\\experiments\\screening-round-1\\artifacts\\predictions.jsonl",
+      "predictions_sha256": "3f89790bc5d71fe32db7b3cab6b538b3bab3091312cd0fc9220beac26f11f303",
+      "scores": "experiments\\reproduction\\prompt_autoresearch_deepseek_v4_pro_20260726\\experiments\\screening-round-1\\artifacts\\scores.jsonl",
+      "scores_sha256": "1fbf1f73e6128fdd69be626ce0e70e6f1cae5e29a8489060abdb11ff9bb20e79",
+      "baseline_predictions": 24,
+      "baseline_scores": 55
+    },
+    {
+      "name": "validation",
+      "predictions": "experiments\\reproduction\\prompt_autoresearch_deepseek_v4_pro_20260726\\experiments\\validation\\artifacts\\predictions.jsonl",
+      "predictions_sha256": "3b7ab49d31989b0dd0f822c4122f8bb68e3d0c17a3262cbeb4313f0ae5628fff",
+      "scores": "experiments\\reproduction\\prompt_autoresearch_deepseek_v4_pro_20260726\\experiments\\validation\\artifacts\\scores.jsonl",
+      "scores_sha256": "2ee2935c43b995c56e7a26362175c61ff29110ea2448ae0ad45fbe1cc45674af",
+      "baseline_predictions": 72,
+      "baseline_scores": 166
+    }
+  ],
+  "output_hashes": {
+    "baseline_cached_predictions.jsonl": "674b7aa3a7a0647775ff8a45d98cc22fe675f3f2d15419b2cf5e943da33b47ce",
+    "baseline_cached_scores.jsonl": "b3dd3fd1012658d745713b1cac018382fd101ba8360975693d57aa0502a255f1"
+  },
+  "errors": [],
+  "ok": true
+}

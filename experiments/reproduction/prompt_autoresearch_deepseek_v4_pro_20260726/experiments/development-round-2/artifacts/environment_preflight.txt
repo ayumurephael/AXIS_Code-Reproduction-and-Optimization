@@ -1,0 +1,9 @@
+2026-07-26T14:31:29Z
+3400391c8c7de61862077d03eb114c15b9141e0f4efbd83025089c645b388f8d  src/models/AXIS/prompt_stage_a.py
+d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7  experiments/checkpoints/released/model_optimizer.pth
+02af9611c54c9e29af15e86cee61f4b8eedfc60c367269e7fe042a85b71eb5d5  /home2/xuhaijie/axis_repro/full284_diag_969c618/axis_prompt_autoresearch_4867767/experiments/reproduction/prompt_autoresearch_deepseek_v4_pro_20260726/data/manifests/development96.json
+0, NVIDIA A100-PCIE-40GB, 40960, 3, 0
+1, NVIDIA A100-PCIE-40GB, 40960, 3, 0
+2, NVIDIA A100-PCIE-40GB, 40960, 3, 0
+3, NVIDIA A100-PCIE-40GB, 40960, 37101, 0
+EXPECTED_PROMPT_SHA=3400391c8c7de61862077d03eb114c15b9141e0f4efbd83025089c645b388f8d

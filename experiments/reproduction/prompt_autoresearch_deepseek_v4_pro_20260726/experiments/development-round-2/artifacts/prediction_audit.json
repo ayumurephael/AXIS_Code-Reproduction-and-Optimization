@@ -1,0 +1,14 @@
+{
+  "prediction_rows": 576,
+  "records": 96,
+  "prediction_modes": {
+    "route_r2_01_minimal": 96,
+    "route_r2_02_mc_stable": 96,
+    "route_r2_03_tf_boundary": 96,
+    "route_r2_04_oe_old_contract": 96,
+    "route_r2_05_oe_contract_coverage": 96,
+    "route_r2_06_full_routed": 96
+  },
+  "errors": [],
+  "ok": true
+}

@@ -200,6 +200,33 @@ ROUTED_OE_SPEECH_ACT_RULE = (
     "claim."
 )
 
+ROUTED_OE_POSITIVE_EVIDENCE_RULE = (
+    "Answer the open-ended question in one coherent paragraph. Include: "
+    "(1) a direct assessment of this window; (2) two or three observed "
+    "qualitative features that support the assessment, including shape and "
+    "persistence or recovery; and (3) the boundary/context limitation or "
+    "additional evidence requested by the question. State location as "
+    "beginning, middle, or end and describe magnitude relatively unless an "
+    "exact value or step is unambiguous in the supplied input."
+)
+
+ROUTED_OE_NAMED_EVENT_RULE = (
+    "Treat the event or pattern named in the question as the behavior to "
+    "evaluate, not as a predetermined anomaly label. Compare its abruptness, "
+    "isolation, persistence or recovery, and boundary position with the rest "
+    "of the supplied window. Report the evidence supporting your conclusion "
+    "and the strongest evidence against it or remaining uncertainty."
+)
+
+ROUTED_OE_QUALITATIVE_SYNTHESIS_RULE = (
+    "First answer the assessment or analysis requested by the question. Then "
+    "apply it to this window using qualitative evidence: local contrast, "
+    "persistence or recovery, and boundary position. State what supports the "
+    "conclusion and what observation would refute it or require outside-window "
+    "context. Use beginning, middle, or end for location when exact step "
+    "alignment is not explicit."
+)
+
 ROUTED_R2_PROFILES = {
     "r2_01_minimal": {
         "multiple_choice": "mc_f0",
@@ -230,6 +257,33 @@ ROUTED_R2_PROFILES = {
         "multiple_choice": "mc_f1",
         "true_false": "tf_p1",
         "open_ended": "oe_c1",
+    },
+}
+
+ROUTED_R3_PROFILES = {
+    "r3_01_mc_f0_safe": {
+        "multiple_choice": "mc_f0", "true_false": "base", "open_ended": "base",
+    },
+    "r3_02_mc_f1_safe": {
+        "multiple_choice": "mc_f1", "true_false": "base", "open_ended": "base",
+    },
+    "r3_03_mc_f0_tf_p0": {
+        "multiple_choice": "mc_f0", "true_false": "tf_p0", "open_ended": "base",
+    },
+    "r3_04_mc_f1_tf_p0": {
+        "multiple_choice": "mc_f1", "true_false": "tf_p0", "open_ended": "base",
+    },
+    "r3_05_oe_q1": {
+        "multiple_choice": "mc_f0", "true_false": "tf_p0", "open_ended": "oe_q1",
+    },
+    "r3_06_oe_q2": {
+        "multiple_choice": "mc_f0", "true_false": "tf_p0", "open_ended": "oe_q2",
+    },
+    "r3_07_oe_q3": {
+        "multiple_choice": "mc_f0", "true_false": "tf_p0", "open_ended": "oe_q3",
+    },
+    "r3_08_historical": {
+        "multiple_choice": "mc_f0", "true_false": "base", "open_ended": "oe_c0",
     },
 }
 
@@ -403,7 +457,38 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         rename_fixed_hint=True,
         routed_profile="r2_06_full_routed",
     ),
-    # Released-code ablations remain available for compatibility.
+    "route_r3_01_mc_f0_safe": PromptCondition(
+        "Round 3: fixed-role MC with exact Baseline TF and OE.",
+        routed_profile="r3_01_mc_f0_safe",
+    ),
+    "route_r3_02_mc_f1_safe": PromptCondition(
+        "Round 3: stable-selection MC with exact Baseline TF and OE.",
+        routed_profile="r3_02_mc_f1_safe",
+    ),
+    "route_r3_03_mc_f0_tf_p0": PromptCondition(
+        "Round 3: fixed-role MC, direct-polarity TF, exact Baseline OE.",
+        routed_profile="r3_03_mc_f0_tf_p0",
+    ),
+    "route_r3_04_mc_f1_tf_p0": PromptCondition(
+        "Round 3: stable-selection MC, direct-polarity TF, exact Baseline OE.",
+        routed_profile="r3_04_mc_f1_tf_p0",
+    ),
+    "route_r3_05_oe_q1": PromptCondition(
+        "Round 3: positive OE evidence obligation.",
+        routed_profile="r3_05_oe_q1",
+    ),
+    "route_r3_06_oe_q2": PromptCondition(
+        "Round 3: named-event OE test.",
+        routed_profile="r3_06_oe_q2",
+    ),
+    "route_r3_07_oe_q3": PromptCondition(
+        "Round 3: compact qualitative OE synthesis.",
+        routed_profile="r3_07_oe_q3",
+    ),
+    "route_r3_08_historical": PromptCondition(
+        "Round 3: fixed-role MC, Baseline TF, historical OE Contract.",
+        routed_profile="r3_08_historical",
+    ),    # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
         remove_local_hint=True,
@@ -452,6 +537,17 @@ ROUTED_R2_MODES = (
     "route_r2_04_oe_old_contract",
     "route_r2_05_oe_contract_coverage",
     "route_r2_06_full_routed",
+)
+
+ROUTED_R3_MODES = (
+    "route_r3_01_mc_f0_safe",
+    "route_r3_02_mc_f1_safe",
+    "route_r3_03_mc_f0_tf_p0",
+    "route_r3_04_mc_f1_tf_p0",
+    "route_r3_05_oe_q1",
+    "route_r3_06_oe_q2",
+    "route_r3_07_oe_q3",
+    "route_r3_08_historical",
 )
 
 FOLLOWUP_PROMPT_MODES = (
@@ -563,8 +659,9 @@ def build_question_prompt(
     )
 
     if condition.routed_profile:
+        routed_profiles = {**ROUTED_R2_PROFILES, **ROUTED_R3_PROFILES}
         try:
-            routed_component = ROUTED_R2_PROFILES[condition.routed_profile][
+            routed_component = routed_profiles[condition.routed_profile][
                 question_type
             ]
         except KeyError as exc:
@@ -572,6 +669,26 @@ def build_question_prompt(
                 f"Unsupported routed profile/question type: "
                 f"{condition.routed_profile!r}/{question_type!r}"
             ) from exc
+
+        if routed_component == "base":
+            return build_question_prompt(
+                question=question,
+                question_type=question_type,
+                start=start,
+                end=end,
+                serialized_values=serialized_values,
+                local_hint_tokens=local_hint_tokens,
+                fixed_hint_tokens=fixed_hint_tokens,
+                mode="base",
+                aligned_rows=aligned_rows,
+            )
+
+        if routed_component in {"oe_q1", "oe_q2", "oe_q3"}:
+            routed_fixed_label = "Overall Summary Hints"
+        else:
+            routed_fixed_label = (
+                "Learned Task Guidance/Shared Task-Control Tokens"
+            )
 
         routed_contract_section = ""
         if routed_component in {"oe_c0", "oe_c1"}:
@@ -598,6 +715,12 @@ def build_question_prompt(
             )
         elif routed_component in {"oe_s0", "oe_c1"}:
             routed_task_rule = ROUTED_OE_SPEECH_ACT_RULE
+        elif routed_component == "oe_q1":
+            routed_task_rule = ROUTED_OE_POSITIVE_EVIDENCE_RULE
+        elif routed_component == "oe_q2":
+            routed_task_rule = ROUTED_OE_NAMED_EVENT_RULE
+        elif routed_component == "oe_q3":
+            routed_task_rule = ROUTED_OE_QUALITATIVE_SYNTHESIS_RULE
         else:
             raise ValueError(f"Unsupported routed component {routed_component!r}")
 
@@ -618,7 +741,7 @@ def build_question_prompt(
 
             ### Contextual Hints
             - **Per-Step Analysis:** {local_hint_tokens}
-            - **{fixed_label}:** {fixed_hint_tokens}
+            - **{routed_fixed_label}:** {fixed_hint_tokens}
 {routed_task_section}
             ### Question
             {question}

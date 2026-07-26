@@ -1,0 +1,378 @@
+{
+  "prediction_rows": 672,
+  "equivalent_route_replicates": {
+    "mc_f0": {
+      "question_type": "multiple_choice",
+      "modes": [
+        "route_r2_01_minimal",
+        "route_r2_03_tf_boundary",
+        "route_r2_04_oe_old_contract",
+        "route_r2_05_oe_contract_coverage"
+      ],
+      "records": 34,
+      "identical_responses": 29,
+      "identical_decisions": 34
+    },
+    "mc_f1": {
+      "question_type": "multiple_choice",
+      "modes": [
+        "route_r2_02_mc_stable",
+        "route_r2_06_full_routed"
+      ],
+      "records": 34,
+      "identical_responses": 30,
+      "identical_decisions": 34
+    },
+    "tf_p0": {
+      "question_type": "true_false",
+      "modes": [
+        "route_r2_01_minimal",
+        "route_r2_02_mc_stable",
+        "route_r2_04_oe_old_contract",
+        "route_r2_05_oe_contract_coverage"
+      ],
+      "records": 33,
+      "identical_responses": 25,
+      "identical_decisions": 33
+    },
+    "tf_p1": {
+      "question_type": "true_false",
+      "modes": [
+        "route_r2_03_tf_boundary",
+        "route_r2_06_full_routed"
+      ],
+      "records": 33,
+      "identical_responses": 29,
+      "identical_decisions": 33
+    },
+    "oe_s0": {
+      "question_type": "open_ended",
+      "modes": [
+        "route_r2_01_minimal",
+        "route_r2_02_mc_stable",
+        "route_r2_03_tf_boundary"
+      ],
+      "records": 29,
+      "identical_responses": 28,
+      "identical_decisions": null
+    },
+    "oe_c1": {
+      "question_type": "open_ended",
+      "modes": [
+        "route_r2_05_oe_contract_coverage",
+        "route_r2_06_full_routed"
+      ],
+      "records": 29,
+      "identical_responses": 29,
+      "identical_decisions": null
+    }
+  },
+  "closed_decision_errors": {
+    "route_r2_01_minimal": [
+      {
+        "record_id": "series_000015:0",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The window from step 466 to 490 contains evidence of a sudden, localized increase in values that could indicate an anomaly near the center of the window."
+      },
+      {
+        "record_id": "series_000019:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The time series window from step 604 to 627 contains an anomaly characterized by a sudden local increase forming a pronounced convex shape that stands out from the surrounding data."
+      },
+      {
+        "record_id": "series_000035:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The presence of four consecutive downward spikes within the window from step 513 to 542 suggests an anomalous pattern that deviates from the expected normal behavior of the time series."
+      },
+      {
+        "record_id": "series_000057:1",
+        "question_type": "multiple_choice",
+        "gold": "C",
+        "predicted": "A",
+        "has_anomaly": false,
+        "question": "Which of the following best describes the pattern observed in the time series window from step 308 to 345 with respect to anomaly detection?\n\nA) The window shows a sudden spike followed by a prolonged plateau, suggesting a significant deviation from normal behavior.\n\nB) There is evidence of repeated oscillations with increasing amplitude, indicating possible periodic anomalies.\n\nC) The window exhibits consistent values and smooth transitions, consistent with normal behavior and no apparent anomalies.\n\nD) Multiple abrupt drops in sequence signal the presence of consecutive anomalies affecting the overall trend."
+      },
+      {
+        "record_id": "series_000059:0",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: A sudden sharp increase in the time series within window steps 3 to 30, followed by a partial decrease, is indicative of a local spike anomaly rather than a transition to a new stable level."
+      },
+      {
+        "record_id": "series_000088:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The presence of a sharp downward spike near the lower boundary of the time window from step 200 to 217 could indicate an anomalous event that may not align with typical signal patterns."
+      },
+      {
+        "record_id": "series_000091:1",
+        "question_type": "multiple_choice",
+        "gold": "C",
+        "predicted": "B",
+        "has_anomaly": true,
+        "question": "Which of the following best characterizes the anomaly detected in the time series window from step 143 to 171, considering its pattern and location within the window?\n\nA) The time series exhibits a steady upward trend near the center of the window, indicative of normal seasonal variation  \nB) There is an abrupt and isolated upward peak followed immediately by a quick return to the baseline, suggesting a brief outlier event  \nC) The data displays a prolonged and pronounced downward deviation, forming a broad dip compared to surrounding values, indicating an anomalous local spike  \nD) The window demonstrates regular oscillations with consistent amplitude and frequency, typical of normal periodic behavior"
+      },
+      {
+        "record_id": "series_000116:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The presence of several consecutive downward spikes within the window from step 51 to 73 strongly suggests an anomalous event rather than normal fluctuation."
+      },
+      {
+        "record_id": "series_000132:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: In a time series window spanning steps 13 to 49, the presence of a local upward spike immediately followed by a sustained increase in values is indicative of an anomalous pattern."
+      },
+      {
+        "record_id": "series_000137:1",
+        "question_type": "multiple_choice",
+        "gold": "C",
+        "predicted": "A",
+        "has_anomaly": true,
+        "question": "Which of the following best describes the most likely anomaly pattern detected within the time series window from step 653 to 683, considering its position and progression?\n\nA) An isolated upward spike near the window's center that quickly returns to the baseline, indicating a momentary fluctuation before stability resumes.\n\nB) A gradual increase in values throughout the window, suggesting a long-term trend rather than a localized anomaly.\n\nC) A sudden sharp drop in values near the beginning of the window, immediately followed by a further sustained decrease, indicating an abrupt downward spike with a continued decline.\n\nD) Consistently stable values across the entire window, reflecting typical behavior with no notable deviations."
+      }
+    ],
+    "route_r2_02_mc_stable": [
+      {
+        "record_id": "series_000015:0",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The window from step 466 to 490 contains evidence of a sudden, localized increase in values that could indicate an anomaly near the center of the window."
+      },
+      {
+        "record_id": "series_000019:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The time series window from step 604 to 627 contains an anomaly characterized by a sudden local increase forming a pronounced convex shape that stands out from the surrounding data."
+      },
+      {
+        "record_id": "series_000024:0",
+        "question_type": "multiple_choice",
+        "gold": "C",
+        "predicted": "D",
+        "has_anomaly": false,
+        "question": "In the time series window from step 233 to 253, which observation best describes the likelihood of an anomaly occurring within this segment?\n\nA) The window displays sharp and isolated deviations inconsistent with previous data, indicating a probable anomaly.\n\nB) The window contains subtle shifts in trend that disrupt the established pattern, suggesting anomalous activity.\n\nC) The window maintains stable trends and consistent fluctuations, implying normal behavior without evidence of anomalies.\n\nD) The window shows erratic oscillations and irregular spikes, pointing toward the presence of significant anomalies."
+      },
+      {
+        "record_id": "series_000035:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The presence of four consecutive downward spikes within the window from step 513 to 542 suggests an anomalous pattern that deviates from the expected normal behavior of the time series."
+      },
+      {
+        "record_id": "series_000059:0",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: A sudden sharp increase in the time series within window steps 3 to 30, followed by a partial decrease, is indicative of a local spike anomaly rather than a transition to a new stable level."
+      },
+      {
+        "record_id": "series_000088:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The presence of a sharp downward spike near the lower boundary of the time window from step 200 to 217 could indicate an anomalous event that may not align with typical signal patterns."
+      },
+      {
+        "record_id": "series_000089:0",
+        "question_type": "multiple_choice",
+        "gold": "A",
+        "predicted": "D",
+        "has_anomaly": false,
+        "question": "Which of the following best describes the behavior observed in the time series window from step 625 to 650 with respect to anomaly detection?\n\nA) The window shows consistent patterns and stable values, suggesting normal behavior without evidence of anomalies.  \nB) The window reveals abrupt spikes followed immediately by returns to baseline, indicating isolated anomalous events.  \nC) The window is characterized by persistent upward trends that deviate from historical patterns, pointing to a possible anomaly.  \nD) The window contains fluctuating values with increasing volatility, implying the onset of anomalous behavior."
+      },
+      {
+        "record_id": "series_000116:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The presence of several consecutive downward spikes within the window from step 51 to 73 strongly suggests an anomalous event rather than normal fluctuation."
+      },
+      {
+        "record_id": "series_000132:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: In a time series window spanning steps 13 to 49, the presence of a local upward spike immediately followed by a sustained increase in values is indicative of an anomalous pattern."
+      }
+    ],
+    "route_r2_03_tf_boundary": [
+      {
+        "record_id": "series_000015:0",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The window from step 466 to 490 contains evidence of a sudden, localized increase in values that could indicate an anomaly near the center of the window."
+      },
+      {
+        "record_id": "series_000019:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The time series window from step 604 to 627 contains an anomaly characterized by a sudden local increase forming a pronounced convex shape that stands out from the surrounding data."
+      },
+      {
+        "record_id": "series_000025:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: A pronounced decrease in the time series values within the window from step 167 to 200 could indicate the presence of an extended local anomaly near the boundary of the window."
+      },
+      {
+        "record_id": "series_000035:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The presence of four consecutive downward spikes within the window from step 513 to 542 suggests an anomalous pattern that deviates from the expected normal behavior of the time series."
+      },
+      {
+        "record_id": "series_000057:1",
+        "question_type": "multiple_choice",
+        "gold": "C",
+        "predicted": "A",
+        "has_anomaly": false,
+        "question": "Which of the following best describes the pattern observed in the time series window from step 308 to 345 with respect to anomaly detection?\n\nA) The window shows a sudden spike followed by a prolonged plateau, suggesting a significant deviation from normal behavior.\n\nB) There is evidence of repeated oscillations with increasing amplitude, indicating possible periodic anomalies.\n\nC) The window exhibits consistent values and smooth transitions, consistent with normal behavior and no apparent anomalies.\n\nD) Multiple abrupt drops in sequence signal the presence of consecutive anomalies affecting the overall trend."
+      },
+      {
+        "record_id": "series_000059:0",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: A sudden sharp increase in the time series within window steps 3 to 30, followed by a partial decrease, is indicative of a local spike anomaly rather than a transition to a new stable level."
+      },
+      {
+        "record_id": "series_000088:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The presence of a sharp downward spike near the lower boundary of the time window from step 200 to 217 could indicate an anomalous event that may not align with typical signal patterns."
+      },
+      {
+        "record_id": "series_000091:1",
+        "question_type": "multiple_choice",
+        "gold": "C",
+        "predicted": "B",
+        "has_anomaly": true,
+        "question": "Which of the following best characterizes the anomaly detected in the time series window from step 143 to 171, considering its pattern and location within the window?\n\nA) The time series exhibits a steady upward trend near the center of the window, indicative of normal seasonal variation  \nB) There is an abrupt and isolated upward peak followed immediately by a quick return to the baseline, suggesting a brief outlier event  \nC) The data displays a prolonged and pronounced downward deviation, forming a broad dip compared to surrounding values, indicating an anomalous local spike  \nD) The window demonstrates regular oscillations with consistent amplitude and frequency, typical of normal periodic behavior"
+      },
+      {
+        "record_id": "series_000106:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: A sudden and pronounced drop in amplitude observed near the center of the window suggests the presence of a local anomaly rather than typical time series fluctuations."
+      },
+      {
+        "record_id": "series_000107:0",
+        "question_type": "true_false",
+        "gold": false,
+        "predicted": true,
+        "has_anomaly": false,
+        "question": "True or False: There is evidence of abnormal or unexpected patterns within the time series data between steps 293 and 312."
+      },
+      {
+        "record_id": "series_000116:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: The presence of several consecutive downward spikes within the window from step 51 to 73 strongly suggests an anomalous event rather than normal fluctuation."
+      },
+      {
+        "record_id": "series_000132:1",
+        "question_type": "true_false",
+        "gold": true,
+        "predicted": false,
+        "has_anomaly": true,
+        "question": "True or False: In a time series window spanning steps 13 to 49, the presence of a local upward spike immediately followed by a sustained increase in values is indicative of an anomalous pattern."
+      },
+      {
+        "record_id": "series_000137:1",
+        "question_type": "multiple_choice",
+        "gold": "C",
+        "predicted": "A",
+        "has_anomaly": true,
+        "question": "Which of the following best describes the most likely anomaly pattern detected within the time series window from step 653 to 683, considering its position and progression?\n\nA) An isolated upward spike near the window's center that quickly returns to the baseline, indicating a momentary fluctuation before stability resumes.\n\nB) A gradual increase in values throughout the window, suggesting a long-term trend rather than a localized anomaly.\n\nC) A sudden sharp drop in values near the beginning of the window, immediately followed by a further sustained decrease, indicating an abrupt downward spike with a continued decline.\n\nD) Consistently stable values across the entire window, reflecting typical behavior with no notable deviations."
+      }
+    ]
+  },
+  "open_ended_phrase_behavior": {
+    "base": {
+      "records": 29,
+      "no_further_needed": 0,
+      "categorical_no_anomaly": 10,
+      "mentions_support_and_challenge": 0
+    },
+    "route_r2_01_minimal": {
+      "records": 29,
+      "no_further_needed": 5,
+      "categorical_no_anomaly": 7,
+      "mentions_support_and_challenge": 5
+    },
+    "route_r2_02_mc_stable": {
+      "records": 29,
+      "no_further_needed": 5,
+      "categorical_no_anomaly": 7,
+      "mentions_support_and_challenge": 5
+    },
+    "route_r2_03_tf_boundary": {
+      "records": 29,
+      "no_further_needed": 5,
+      "categorical_no_anomaly": 7,
+      "mentions_support_and_challenge": 5
+    },
+    "route_r2_04_oe_old_contract": {
+      "records": 29,
+      "no_further_needed": 0,
+      "categorical_no_anomaly": 10,
+      "mentions_support_and_challenge": 1
+    },
+    "route_r2_05_oe_contract_coverage": {
+      "records": 29,
+      "no_further_needed": 8,
+      "categorical_no_anomaly": 6,
+      "mentions_support_and_challenge": 11
+    },
+    "route_r2_06_full_routed": {
+      "records": 29,
+      "no_further_needed": 8,
+      "categorical_no_anomaly": 6,
+      "mentions_support_and_challenge": 11
+    }
+  }
+}
