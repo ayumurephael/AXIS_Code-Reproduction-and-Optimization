@@ -1,0 +1,7 @@
+# Raw joined responses and Judge explanations are retained locally.
+experiments/failure-case-audit/failure_case_details.jsonl
+experiments/failure-case-audit/case_dossiers.json
+
+# Python cache files are not research artifacts.
+**/__pycache__/
+*.pyc

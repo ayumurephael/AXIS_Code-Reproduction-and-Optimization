@@ -1,0 +1,66 @@
+project:
+  title: "AXIS prompt Pareto-improvement search"
+  question: "Which prompt design can improve MC, OE, and TF without sacrificing any task family on the released AXIS checkpoint?"
+  status: active
+  started: "2026-07-26"
+  domain: "time-series QA prompt optimization and LLM evaluation"
+
+evaluation:
+  released_checkpoint_only: true
+  formal_judge: "deepseek-v4-pro"
+  locked_reference_set: "paper140"
+  locked_reference_counts:
+    multiple_choice: 43
+    open_ended: 55
+    true_false: 42
+  success_criterion: "On paper140, all ten Table-I metrics must be no lower than the locked Baseline under deepseek-v4-pro; prefer candidates that improve all ten."
+  prompt_search_space: "All prompt-only changes are allowed, including question-type-conditioned rules."
+  selection_set: "24 QA / 12 series from the 144 non-paper140 QA, series-disjoint from validation and holdout"
+  validation_set: "72 QA / 36 series from the 144 non-paper140 QA"
+  confirmatory_set: "48 QA / 24 series from the 144 non-paper140 QA; touched only after validation selection"
+  final_test_policy: "paper140 is touched once after a single prompt is locked from the internal holdout"
+
+hypotheses:
+  - id: H1
+    statement: "The old full Evidence Contract improves OE by eliciting explicit evidence coverage, but hurts MC/TF through instruction competition and the false 'same row' alignment claim."
+    status: active
+    motivation: "OE rises in every dimension while MC/TF decline relative to fixed-role-only."
+    priority: high
+  - id: H2
+    statement: "The revised scaling/alignment wording removes some MC/TF errors but over-activates numeric decoding and harms OE relevance/accuracy."
+    status: active
+    motivation: "Revised-vs-old restores MC/TF but loses all OE dimensions."
+    priority: high
+  - id: H3
+    statement: "A single long common contract cannot Pareto-improve all task families; short shared evidence semantics plus task-conditioned response instructions can."
+    status: active
+    motivation: "Observed task-family trade-offs suggest different instruction bottlenecks."
+    priority: high
+  - id: H4
+    statement: "Separating evidence interpretation from response format, and making numerical rescaling conditional only for numeric OE questions, will reduce cross-task interference."
+    status: pending
+    motivation: "The current contract mixes representation semantics, anomaly definition, and answer behavior."
+    priority: medium
+
+experiments:
+  proxy_metric: "Lexicographic: number of nonnegative Table-I dimensions, minimum dimension delta, then mean of the ten deltas versus Baseline"
+  baseline_value:
+    mc_final: 4.255815217345678
+    oe_final: 3.085930669870713
+    tf_final: 3.642142370108918
+    macro_final: 3.661296085775103
+  best_value: null
+  total_runs: 0
+  trajectory: []
+
+outer_loop:
+  cycle: 1
+  last_direction: deepen
+  last_reflection: "The user locked the all-10-metrics Pareto criterion, allowed all prompt-only changes including task conditioning, and approved the 12->4->2->1 search funnel. Begin screening on a disjoint non-paper140 split."
+
+workspace:
+  findings: "findings.md"
+  log: "research-log.md"
+  experiments_dir: "experiments/"
+  failure_case_protocol: "experiments/failure-case-audit/protocol.md"
+  parent_report: "../prompt_stage_a_deepseek_v4_pro_20260725/Prompt_Stage_A_消融实验结果分析.md"

@@ -1,0 +1,413 @@
+{
+  "old_contract_minus_fixed_role": {
+    "open_ended": {
+      "count": 55,
+      "control_mode": "fixed_role",
+      "treatment_mode": "fixed_role_evidence_contract",
+      "response_length_delta_mean": 161.52727272727273,
+      "response_length_delta_vs_final_delta_pearson": -0.13223102981682344,
+      "features": {
+        "shorter_than_200": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "outside_step_reference": {
+          "control_rate": 0.03636363636363636,
+          "treatment_rate": 0.09090909090909091,
+          "delta": 0.05454545454545455
+        },
+        "multiple_answer_markers": {
+          "control_rate": 0.07272727272727272,
+          "treatment_rate": 0.05454545454545454,
+          "delta": -0.01818181818181818
+        },
+        "tf_self_contradiction": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "mentions_scaling_operation": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.01818181818181818,
+          "delta": 0.01818181818181818
+        },
+        "injects_new_mc_format": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.01818181818181818,
+          "delta": 0.01818181818181818
+        }
+      },
+      "unsupported_number_fraction": {
+        "paired_count": 55,
+        "control_mean": 0.4594805194805195,
+        "treatment_mean": 0.45051948051948054,
+        "mean_delta": -0.00896103896103896
+      }
+    },
+    "multiple_choice": {
+      "count": 43,
+      "control_mode": "fixed_role",
+      "treatment_mode": "fixed_role_evidence_contract",
+      "response_length_delta_mean": 28.302325581395348,
+      "response_length_delta_vs_final_delta_pearson": -0.16104029401789052,
+      "features": {
+        "shorter_than_200": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "outside_step_reference": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.046511627906976744,
+          "delta": 0.046511627906976744
+        },
+        "multiple_answer_markers": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.023255813953488372,
+          "delta": 0.023255813953488372
+        },
+        "tf_self_contradiction": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "mentions_scaling_operation": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "injects_new_mc_format": {
+          "control_rate": 0.046511627906976744,
+          "treatment_rate": 0.06976744186046512,
+          "delta": 0.023255813953488372
+        }
+      },
+      "unsupported_number_fraction": {
+        "paired_count": 41,
+        "control_mean": 0.409349593495935,
+        "treatment_mean": 0.3188443670150987,
+        "mean_delta": -0.09050522648083624
+      }
+    },
+    "true_false": {
+      "count": 42,
+      "control_mode": "fixed_role",
+      "treatment_mode": "fixed_role_evidence_contract",
+      "response_length_delta_mean": 100.71428571428571,
+      "response_length_delta_vs_final_delta_pearson": -0.2886781984623963,
+      "features": {
+        "shorter_than_200": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "outside_step_reference": {
+          "control_rate": 0.023809523809523808,
+          "treatment_rate": 0.047619047619047616,
+          "delta": 0.023809523809523808
+        },
+        "multiple_answer_markers": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.047619047619047616,
+          "delta": 0.047619047619047616
+        },
+        "tf_self_contradiction": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.023809523809523808,
+          "delta": 0.023809523809523808
+        },
+        "mentions_scaling_operation": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "injects_new_mc_format": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.023809523809523808,
+          "delta": 0.023809523809523808
+        }
+      },
+      "unsupported_number_fraction": {
+        "paired_count": 42,
+        "control_mean": 0.39399092970521543,
+        "treatment_mean": 0.41010959939531366,
+        "mean_delta": 0.016118669690098262
+      }
+    }
+  },
+  "revised_contract_minus_fixed_role": {
+    "open_ended": {
+      "count": 55,
+      "control_mode": "fixed_role",
+      "treatment_mode": "fixed_role_evidence_contract_revised",
+      "response_length_delta_mean": 168.0909090909091,
+      "response_length_delta_vs_final_delta_pearson": 0.14321160994062102,
+      "features": {
+        "shorter_than_200": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.01818181818181818,
+          "delta": 0.01818181818181818
+        },
+        "outside_step_reference": {
+          "control_rate": 0.03636363636363636,
+          "treatment_rate": 0.18181818181818182,
+          "delta": 0.14545454545454545
+        },
+        "multiple_answer_markers": {
+          "control_rate": 0.07272727272727272,
+          "treatment_rate": 0.07272727272727272,
+          "delta": 0.0
+        },
+        "tf_self_contradiction": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "mentions_scaling_operation": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.03636363636363636,
+          "delta": 0.03636363636363636
+        },
+        "injects_new_mc_format": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.01818181818181818,
+          "delta": 0.01818181818181818
+        }
+      },
+      "unsupported_number_fraction": {
+        "paired_count": 55,
+        "control_mean": 0.4594805194805195,
+        "treatment_mean": 0.5100715632055345,
+        "mean_delta": 0.050591043725015016
+      }
+    },
+    "multiple_choice": {
+      "count": 43,
+      "control_mode": "fixed_role",
+      "treatment_mode": "fixed_role_evidence_contract_revised",
+      "response_length_delta_mean": 10.953488372093023,
+      "response_length_delta_vs_final_delta_pearson": -0.07224839349461934,
+      "features": {
+        "shorter_than_200": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "outside_step_reference": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "multiple_answer_markers": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "tf_self_contradiction": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "mentions_scaling_operation": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "injects_new_mc_format": {
+          "control_rate": 0.046511627906976744,
+          "treatment_rate": 0.06976744186046512,
+          "delta": 0.023255813953488372
+        }
+      },
+      "unsupported_number_fraction": {
+        "paired_count": 41,
+        "control_mean": 0.409349593495935,
+        "treatment_mean": 0.416144018583043,
+        "mean_delta": 0.00679442508710801
+      }
+    },
+    "true_false": {
+      "count": 42,
+      "control_mode": "fixed_role",
+      "treatment_mode": "fixed_role_evidence_contract_revised",
+      "response_length_delta_mean": 39.45238095238095,
+      "response_length_delta_vs_final_delta_pearson": -0.44314903464167044,
+      "features": {
+        "shorter_than_200": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "outside_step_reference": {
+          "control_rate": 0.023809523809523808,
+          "treatment_rate": 0.09523809523809523,
+          "delta": 0.07142857142857142
+        },
+        "multiple_answer_markers": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.023809523809523808,
+          "delta": 0.023809523809523808
+        },
+        "tf_self_contradiction": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "mentions_scaling_operation": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "injects_new_mc_format": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        }
+      },
+      "unsupported_number_fraction": {
+        "paired_count": 42,
+        "control_mean": 0.39399092970521543,
+        "treatment_mean": 0.38015873015873014,
+        "mean_delta": -0.01383219954648526
+      }
+    }
+  },
+  "revised_contract_minus_old_contract": {
+    "open_ended": {
+      "count": 55,
+      "control_mode": "fixed_role_evidence_contract",
+      "treatment_mode": "fixed_role_evidence_contract_revised",
+      "response_length_delta_mean": 6.5636363636363635,
+      "response_length_delta_vs_final_delta_pearson": 0.11805230216294889,
+      "features": {
+        "shorter_than_200": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.01818181818181818,
+          "delta": 0.01818181818181818
+        },
+        "outside_step_reference": {
+          "control_rate": 0.09090909090909091,
+          "treatment_rate": 0.18181818181818182,
+          "delta": 0.09090909090909091
+        },
+        "multiple_answer_markers": {
+          "control_rate": 0.05454545454545454,
+          "treatment_rate": 0.07272727272727272,
+          "delta": 0.01818181818181818
+        },
+        "tf_self_contradiction": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "mentions_scaling_operation": {
+          "control_rate": 0.01818181818181818,
+          "treatment_rate": 0.03636363636363636,
+          "delta": 0.01818181818181818
+        },
+        "injects_new_mc_format": {
+          "control_rate": 0.01818181818181818,
+          "treatment_rate": 0.01818181818181818,
+          "delta": 0.0
+        }
+      },
+      "unsupported_number_fraction": {
+        "paired_count": 55,
+        "control_mean": 0.45051948051948054,
+        "treatment_mean": 0.5100715632055345,
+        "mean_delta": 0.059552082686053984
+      }
+    },
+    "multiple_choice": {
+      "count": 43,
+      "control_mode": "fixed_role_evidence_contract",
+      "treatment_mode": "fixed_role_evidence_contract_revised",
+      "response_length_delta_mean": -17.348837209302324,
+      "response_length_delta_vs_final_delta_pearson": 0.03985013828208875,
+      "features": {
+        "shorter_than_200": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "outside_step_reference": {
+          "control_rate": 0.046511627906976744,
+          "treatment_rate": 0.0,
+          "delta": -0.046511627906976744
+        },
+        "multiple_answer_markers": {
+          "control_rate": 0.023255813953488372,
+          "treatment_rate": 0.0,
+          "delta": -0.023255813953488372
+        },
+        "tf_self_contradiction": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "mentions_scaling_operation": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "injects_new_mc_format": {
+          "control_rate": 0.06976744186046512,
+          "treatment_rate": 0.06976744186046512,
+          "delta": 0.0
+        }
+      },
+      "unsupported_number_fraction": {
+        "paired_count": 42,
+        "control_mean": 0.32315759637188207,
+        "treatment_mean": 0.41814058956916106,
+        "mean_delta": 0.09498299319727892
+      }
+    },
+    "true_false": {
+      "count": 42,
+      "control_mode": "fixed_role_evidence_contract",
+      "treatment_mode": "fixed_role_evidence_contract_revised",
+      "response_length_delta_mean": -61.26190476190476,
+      "response_length_delta_vs_final_delta_pearson": -0.28418128033790285,
+      "features": {
+        "shorter_than_200": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "outside_step_reference": {
+          "control_rate": 0.047619047619047616,
+          "treatment_rate": 0.09523809523809523,
+          "delta": 0.047619047619047616
+        },
+        "multiple_answer_markers": {
+          "control_rate": 0.047619047619047616,
+          "treatment_rate": 0.023809523809523808,
+          "delta": -0.023809523809523808
+        },
+        "tf_self_contradiction": {
+          "control_rate": 0.023809523809523808,
+          "treatment_rate": 0.0,
+          "delta": -0.023809523809523808
+        },
+        "mentions_scaling_operation": {
+          "control_rate": 0.0,
+          "treatment_rate": 0.0,
+          "delta": 0.0
+        },
+        "injects_new_mc_format": {
+          "control_rate": 0.023809523809523808,
+          "treatment_rate": 0.0,
+          "delta": -0.023809523809523808
+        }
+      },
+      "unsupported_number_fraction": {
+        "paired_count": 42,
+        "control_mean": 0.41010959939531366,
+        "treatment_mean": 0.38015873015873014,
+        "mean_delta": -0.02995086923658352
+      }
+    }
+  }
+}
