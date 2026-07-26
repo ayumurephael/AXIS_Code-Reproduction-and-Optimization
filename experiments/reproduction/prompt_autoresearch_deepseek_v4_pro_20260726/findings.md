@@ -87,3 +87,30 @@ The internal holdout and `paper140` remain untouched.
   harmful to OE. Any future brevity rule should be closed-task-only.
 - Fewer unsupported numbers do not guarantee higher G-Eval scores: P09 has the
   lowest OE unsupported-number fraction but loses every OE record.
+## Validation Round 1
+
+The four advanced candidates and the fixed-role control were formally scored
+on the series-disjoint 72-QA validation split. No candidate met the locked gate,
+so the internal holdout remains untouched.
+
+- P07 (A+B+D) ranked first: 7/10 nonnegative dimensions, worst delta -0.457,
+  mean delta +0.128. It improved TF Final by +0.662 but reduced OE Final by
+  -0.271.
+- Fixed role improved MC Final by +0.232 and TF Final by +0.604, but reduced OE
+  Final by -0.191.
+- P01 was the safest common rule but achieved only 5/10 nonnegative dimensions.
+- P03 and P06 produced explicit TF polarity contradictions: they answered
+  `False` while explaining that a negated no-anomaly proposition was true.
+- P03/P06 also changed correct MC anomaly decisions to non-anomalous options.
+- All 22 validation OE questions are methodological/evidence-seeking. Forcing a
+  diagnostic conclusion caused large Accuracy and Completeness losses.
+
+## Outer-loop Cycle 3 Decision
+
+Direction: **pivot** from global factor combinations to question-type routing.
+The released Values/Local layout, all 30 Fixed tokens, and released generation
+boundary remain fixed. MC receives only closed-option comparison discipline;
+TF receives direct proposition-polarity consistency; OE receives speech-act and
+evidence-coverage instructions that preserve uncertainty. Screening and
+validation are now exposed development data (96 QA / 48 series). The original
+48-QA / 24-series holdout remains untouched and confirmatory.

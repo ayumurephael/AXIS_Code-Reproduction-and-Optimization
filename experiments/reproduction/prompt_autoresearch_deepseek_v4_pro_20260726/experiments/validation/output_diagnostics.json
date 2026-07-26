@@ -1,0 +1,433 @@
+{
+  "rows": 432,
+  "modes": {
+    "base": {
+      "overall": {
+        "count": 72,
+        "response_chars_mean": 686.2777777777778,
+        "response_chars_median": 665.0,
+        "response_words_mean": 105.84722222222223,
+        "sentence_count_mean": 5.569444444444445,
+        "raw_answer_first_rate": 0.4166666666666667,
+        "strict_parse_rate": 0.2361111111111111,
+        "selected_option_text_exact_rate": 1.0,
+        "heuristic_correct_rate": 0.64,
+        "response_at_least_3000_chars_rate": 0.0,
+        "unsupported_number_fraction_mean": 0.3864748677248677,
+        "think_states": {
+          "none": 54,
+          "open_only": 18
+        }
+      },
+      "by_question_type": {
+        "multiple_choice": {
+          "count": 26,
+          "response_chars_mean": 668.0,
+          "response_chars_median": 681.0,
+          "response_words_mean": 101.88461538461539,
+          "sentence_count_mean": 4.730769230769231,
+          "raw_answer_first_rate": 0.2692307692307692,
+          "strict_parse_rate": 0.2692307692307692,
+          "selected_option_text_exact_rate": 1.0,
+          "heuristic_correct_rate": 0.8846153846153846,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.30097680097680096,
+          "think_states": {
+            "none": 26
+          }
+        },
+        "open_ended": {
+          "count": 22,
+          "response_chars_mean": 793.5909090909091,
+          "response_chars_median": 740.5,
+          "response_words_mean": 123.45454545454545,
+          "sentence_count_mean": 6.090909090909091,
+          "raw_answer_first_rate": 0.6818181818181818,
+          "strict_parse_rate": 0.09090909090909091,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": null,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.4972582972582973,
+          "think_states": {
+            "none": 15,
+            "open_only": 7
+          }
+        },
+        "true_false": {
+          "count": 24,
+          "response_chars_mean": 607.7083333333334,
+          "response_chars_median": 607.5,
+          "response_words_mean": 94.0,
+          "sentence_count_mean": 6.0,
+          "raw_answer_first_rate": 0.3333333333333333,
+          "strict_parse_rate": 0.3333333333333333,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": 0.375,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.3775462962962963,
+          "think_states": {
+            "none": 13,
+            "open_only": 11
+          }
+        }
+      }
+    },
+    "fixed_role": {
+      "overall": {
+        "count": 72,
+        "response_chars_mean": 668.2916666666666,
+        "response_chars_median": 640.5,
+        "response_words_mean": 103.73611111111111,
+        "sentence_count_mean": 5.472222222222222,
+        "raw_answer_first_rate": 0.3194444444444444,
+        "strict_parse_rate": 0.125,
+        "selected_option_text_exact_rate": 1.0,
+        "heuristic_correct_rate": 0.74,
+        "response_at_least_3000_chars_rate": 0.0,
+        "unsupported_number_fraction_mean": 0.38528439153439153,
+        "think_states": {
+          "close_only": 1,
+          "none": 51,
+          "open_only": 20
+        }
+      },
+      "by_question_type": {
+        "multiple_choice": {
+          "count": 26,
+          "response_chars_mean": 644.1923076923077,
+          "response_chars_median": 640.0,
+          "response_words_mean": 98.15384615384616,
+          "sentence_count_mean": 4.6923076923076925,
+          "raw_answer_first_rate": 0.19230769230769232,
+          "strict_parse_rate": 0.19230769230769232,
+          "selected_option_text_exact_rate": 1.0,
+          "heuristic_correct_rate": 0.9230769230769231,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.34798534798534797,
+          "think_states": {
+            "none": 26
+          }
+        },
+        "open_ended": {
+          "count": 22,
+          "response_chars_mean": 744.6818181818181,
+          "response_chars_median": 691.5,
+          "response_words_mean": 116.0909090909091,
+          "sentence_count_mean": 6.0,
+          "raw_answer_first_rate": 0.6818181818181818,
+          "strict_parse_rate": 0.045454545454545456,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": null,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.4680735930735931,
+          "think_states": {
+            "none": 15,
+            "open_only": 7
+          }
+        },
+        "true_false": {
+          "count": 24,
+          "response_chars_mean": 624.375,
+          "response_chars_median": 611.0,
+          "response_words_mean": 98.45833333333333,
+          "sentence_count_mean": 5.833333333333333,
+          "raw_answer_first_rate": 0.125,
+          "strict_parse_rate": 0.125,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": 0.5416666666666666,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.34980158730158734,
+          "think_states": {
+            "close_only": 1,
+            "none": 10,
+            "open_only": 13
+          }
+        }
+      }
+    },
+    "pareto_p01_boundary": {
+      "overall": {
+        "count": 72,
+        "response_chars_mean": 669.2916666666666,
+        "response_chars_median": 631.5,
+        "response_words_mean": 103.625,
+        "sentence_count_mean": 5.513888888888889,
+        "raw_answer_first_rate": 0.3888888888888889,
+        "strict_parse_rate": 0.19444444444444445,
+        "selected_option_text_exact_rate": 1.0,
+        "heuristic_correct_rate": 0.7,
+        "response_at_least_3000_chars_rate": 0.0,
+        "unsupported_number_fraction_mean": 0.33774651274651274,
+        "think_states": {
+          "none": 54,
+          "open_only": 18
+        }
+      },
+      "by_question_type": {
+        "multiple_choice": {
+          "count": 26,
+          "response_chars_mean": 657.5769230769231,
+          "response_chars_median": 647.5,
+          "response_words_mean": 100.92307692307692,
+          "sentence_count_mean": 4.6923076923076925,
+          "raw_answer_first_rate": 0.23076923076923078,
+          "strict_parse_rate": 0.23076923076923078,
+          "selected_option_text_exact_rate": 1.0,
+          "heuristic_correct_rate": 0.9230769230769231,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.26185481185481185,
+          "think_states": {
+            "none": 26
+          }
+        },
+        "open_ended": {
+          "count": 22,
+          "response_chars_mean": 757.7272727272727,
+          "response_chars_median": 713.0,
+          "response_words_mean": 117.5,
+          "sentence_count_mean": 6.0,
+          "raw_answer_first_rate": 0.7272727272727273,
+          "strict_parse_rate": 0.09090909090909091,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": null,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.4497835497835498,
+          "think_states": {
+            "none": 16,
+            "open_only": 6
+          }
+        },
+        "true_false": {
+          "count": 24,
+          "response_chars_mean": 600.9166666666666,
+          "response_chars_median": 600.0,
+          "response_words_mean": 93.83333333333333,
+          "sentence_count_mean": 5.958333333333333,
+          "raw_answer_first_rate": 0.25,
+          "strict_parse_rate": 0.25,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": 0.4583333333333333,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.31726190476190474,
+          "think_states": {
+            "none": 12,
+            "open_only": 12
+          }
+        }
+      }
+    },
+    "pareto_p03_task_rule": {
+      "overall": {
+        "count": 72,
+        "response_chars_mean": 655.4861111111111,
+        "response_chars_median": 639.5,
+        "response_words_mean": 100.79166666666667,
+        "sentence_count_mean": 5.638888888888889,
+        "raw_answer_first_rate": 0.3611111111111111,
+        "strict_parse_rate": 0.1111111111111111,
+        "selected_option_text_exact_rate": 1.0,
+        "heuristic_correct_rate": 0.74,
+        "response_at_least_3000_chars_rate": 0.0,
+        "unsupported_number_fraction_mean": 0.286317907444668,
+        "think_states": {
+          "none": 70,
+          "open_only": 2
+        }
+      },
+      "by_question_type": {
+        "multiple_choice": {
+          "count": 26,
+          "response_chars_mean": 643.8846153846154,
+          "response_chars_median": 640.5,
+          "response_words_mean": 97.53846153846153,
+          "sentence_count_mean": 4.6923076923076925,
+          "raw_answer_first_rate": 0.038461538461538464,
+          "strict_parse_rate": 0.038461538461538464,
+          "selected_option_text_exact_rate": 1.0,
+          "heuristic_correct_rate": 0.8846153846153846,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.25257142857142856,
+          "think_states": {
+            "none": 26
+          }
+        },
+        "open_ended": {
+          "count": 22,
+          "response_chars_mean": 755.1818181818181,
+          "response_chars_median": 726.0,
+          "response_words_mean": 115.81818181818181,
+          "sentence_count_mean": 6.181818181818182,
+          "raw_answer_first_rate": 0.9090909090909091,
+          "strict_parse_rate": 0.09090909090909091,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": null,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.3703463203463203,
+          "think_states": {
+            "none": 20,
+            "open_only": 2
+          }
+        },
+        "true_false": {
+          "count": 24,
+          "response_chars_mean": 576.6666666666666,
+          "response_chars_median": 567.0,
+          "response_words_mean": 90.54166666666667,
+          "sentence_count_mean": 6.166666666666667,
+          "raw_answer_first_rate": 0.20833333333333334,
+          "strict_parse_rate": 0.20833333333333334,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": 0.5833333333333334,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.24444444444444444,
+          "think_states": {
+            "none": 24
+          }
+        }
+      }
+    },
+    "pareto_p06_abc": {
+      "overall": {
+        "count": 72,
+        "response_chars_mean": 649.8055555555555,
+        "response_chars_median": 633.0,
+        "response_words_mean": 99.43055555555556,
+        "sentence_count_mean": 5.583333333333333,
+        "raw_answer_first_rate": 0.4027777777777778,
+        "strict_parse_rate": 0.125,
+        "selected_option_text_exact_rate": 1.0,
+        "heuristic_correct_rate": 0.74,
+        "response_at_least_3000_chars_rate": 0.0,
+        "unsupported_number_fraction_mean": 0.26967592592592593,
+        "think_states": {
+          "none": 71,
+          "open_only": 1
+        }
+      },
+      "by_question_type": {
+        "multiple_choice": {
+          "count": 26,
+          "response_chars_mean": 646.2692307692307,
+          "response_chars_median": 628.0,
+          "response_words_mean": 98.0,
+          "sentence_count_mean": 4.6923076923076925,
+          "raw_answer_first_rate": 0.11538461538461539,
+          "strict_parse_rate": 0.11538461538461539,
+          "selected_option_text_exact_rate": 1.0,
+          "heuristic_correct_rate": 0.8461538461538461,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.2512820512820513,
+          "think_states": {
+            "none": 26
+          }
+        },
+        "open_ended": {
+          "count": 22,
+          "response_chars_mean": 722.6818181818181,
+          "response_chars_median": 703.0,
+          "response_words_mean": 109.77272727272727,
+          "sentence_count_mean": 6.0,
+          "raw_answer_first_rate": 0.9545454545454546,
+          "strict_parse_rate": 0.045454545454545456,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": null,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.34545454545454546,
+          "think_states": {
+            "none": 21,
+            "open_only": 1
+          }
+        },
+        "true_false": {
+          "count": 24,
+          "response_chars_mean": 586.8333333333334,
+          "response_chars_median": 576.0,
+          "response_words_mean": 91.5,
+          "sentence_count_mean": 6.166666666666667,
+          "raw_answer_first_rate": 0.20833333333333334,
+          "strict_parse_rate": 0.20833333333333334,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": 0.625,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.22013888888888888,
+          "think_states": {
+            "none": 24
+          }
+        }
+      }
+    },
+    "pareto_p07_abd": {
+      "overall": {
+        "count": 72,
+        "response_chars_mean": 690.4305555555555,
+        "response_chars_median": 659.0,
+        "response_words_mean": 106.41666666666667,
+        "sentence_count_mean": 5.638888888888889,
+        "raw_answer_first_rate": 0.3333333333333333,
+        "strict_parse_rate": 0.1527777777777778,
+        "selected_option_text_exact_rate": 1.0,
+        "heuristic_correct_rate": 0.72,
+        "response_at_least_3000_chars_rate": 0.0,
+        "unsupported_number_fraction_mean": 0.3667989417989418,
+        "think_states": {
+          "close_only": 1,
+          "none": 54,
+          "open_only": 17
+        }
+      },
+      "by_question_type": {
+        "multiple_choice": {
+          "count": 26,
+          "response_chars_mean": 670.2307692307693,
+          "response_chars_median": 655.5,
+          "response_words_mean": 101.6923076923077,
+          "sentence_count_mean": 4.846153846153846,
+          "raw_answer_first_rate": 0.2692307692307692,
+          "strict_parse_rate": 0.2692307692307692,
+          "selected_option_text_exact_rate": 1.0,
+          "heuristic_correct_rate": 0.8846153846153846,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.3557692307692308,
+          "think_states": {
+            "none": 26
+          }
+        },
+        "open_ended": {
+          "count": 22,
+          "response_chars_mean": 772.2727272727273,
+          "response_chars_median": 749.0,
+          "response_words_mean": 119.18181818181819,
+          "sentence_count_mean": 6.090909090909091,
+          "raw_answer_first_rate": 0.6363636363636364,
+          "strict_parse_rate": 0.045454545454545456,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": null,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.4216450216450216,
+          "think_states": {
+            "none": 14,
+            "open_only": 8
+          }
+        },
+        "true_false": {
+          "count": 24,
+          "response_chars_mean": 637.2916666666666,
+          "response_chars_median": 625.0,
+          "response_words_mean": 99.83333333333333,
+          "sentence_count_mean": 6.083333333333333,
+          "raw_answer_first_rate": 0.125,
+          "strict_parse_rate": 0.125,
+          "selected_option_text_exact_rate": null,
+          "heuristic_correct_rate": 0.5416666666666666,
+          "response_at_least_3000_chars_rate": 0.0,
+          "unsupported_number_fraction_mean": 0.3284722222222222,
+          "think_states": {
+            "close_only": 1,
+            "none": 14,
+            "open_only": 9
+          }
+        }
+      }
+    }
+  }
+}

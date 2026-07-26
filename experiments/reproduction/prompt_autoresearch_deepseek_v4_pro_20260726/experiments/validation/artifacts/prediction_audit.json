@@ -1,0 +1,14 @@
+{
+  "prediction_rows": 432,
+  "records": 72,
+  "prediction_modes": {
+    "base": 72,
+    "fixed_role": 72,
+    "pareto_p01_boundary": 72,
+    "pareto_p03_task_rule": 72,
+    "pareto_p06_abc": 72,
+    "pareto_p07_abd": 72
+  },
+  "errors": [],
+  "ok": true
+}

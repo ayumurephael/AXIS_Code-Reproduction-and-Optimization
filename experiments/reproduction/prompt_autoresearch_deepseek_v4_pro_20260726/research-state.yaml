@@ -55,7 +55,7 @@ experiments:
     nonnegative_dimensions: 9
     worst_delta: -0.28571198067779013
     mean_delta: 0.2526346384750413
-  total_runs: 13
+  total_runs: 19
   trajectory:
     - round: screening_round_1
       modes: 13
@@ -66,11 +66,22 @@ experiments:
       winner_nonnegative_dimensions: 9
       winner_worst_delta: -0.28571198067779013
       winner_mean_delta: 0.2526346384750413
+    - round: validation_round_1
+      modes: 6
+      predictions: 432
+      judge_scores: 996
+      audit_ok: true
+      gate_passed: false
+      winner: pareto_p07_abd
+      winner_nonnegative_dimensions: 7
+      winner_worst_delta: -0.457
+      winner_mean_delta: 0.128
+      holdout_touched: false
 
 outer_loop:
-  cycle: 2
-  last_direction: deepen
-  last_reflection: "Screening supports short low-semantic-load rules: the boundary-only P01 leads with 9/10 nonnegative dimensions. Global calibration and brevity rules create MC/TF under-detection and categorical OE closure. Advance P01, P03, P06, and P07 unchanged to validation; if the validation gate fails, design speech-act-aware OE and closed-task-only rules."
+  cycle: 3
+  last_direction: pivot
+  last_reflection: "No validation candidate passed. P07 and fixed-role improve TF/MC but lose OE; P03/P06 create TF negation-label inversions and suppress real anomalies, while all validation OE questions require methodological evidence coverage rather than categorical diagnostic closure. Pivot to question-type-conditioned routing, treat screening+validation as an exposed 96-QA development pool, and preserve the untouched 48-QA holdout for confirmation."
 
 workspace:
   findings: "findings.md"

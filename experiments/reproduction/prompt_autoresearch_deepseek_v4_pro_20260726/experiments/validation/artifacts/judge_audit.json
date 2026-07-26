@@ -1,0 +1,30 @@
+{
+  "prediction_rows": 432,
+  "records": 72,
+  "prediction_modes": {
+    "base": 72,
+    "fixed_role": 72,
+    "pareto_p01_boundary": 72,
+    "pareto_p03_task_rule": 72,
+    "pareto_p06_abc": 72,
+    "pareto_p07_abd": 72
+  },
+  "score_rows": 996,
+  "score_methods": {
+    "final_score_top_logprobs": 988,
+    "exact_sample_mean_20": 8
+  },
+  "score_models": {
+    "deepseek-v4-pro": 996
+  },
+  "score_providers": {
+    "deepseek": 996
+  },
+  "score_enable_thinking": {
+    "auto": 996
+  },
+  "logprobs_returned": 988,
+  "valid_prompt_hashes": 996,
+  "errors": [],
+  "ok": true
+}
