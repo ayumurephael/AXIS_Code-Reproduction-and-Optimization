@@ -166,6 +166,73 @@ PARETO_SINGLE_ANSWER_RULE = (
     "after the shortest explanation that fully supports the answer."
 )
 
+ROUTED_MC_STABLE_RULE = (
+    "Compare the complete meaning of every option with the supplied evidence. "
+    "Select exactly one best-supported option, state that option once, and keep "
+    "the explanation consistent with it. Do not revise the selected option or "
+    "introduce a second answer."
+)
+
+ROUTED_TF_POLARITY_RULE = (
+    'Judge the truth of the complete proposition exactly as written, preserving '
+    'every negation such as "no evidence" and "does not". Answer True when the '
+    "evidence supports the proposition as written; answer False when any "
+    "essential clause is contradicted. Before finishing, verify that the label "
+    "and the first explanatory sentence express the same truth value."
+)
+
+ROUTED_TF_BOUNDARY_POLARITY_RULE = (
+    "Use only evidence inside the half-open window [{start}, {end}); do not "
+    "invent or cite a step outside it. "
+    + ROUTED_TF_POLARITY_RULE
+)
+
+ROUTED_OE_SPEECH_ACT_RULE = (
+    "First determine whether the question asks for a diagnosis, an assessment "
+    "method, or evidence that would support or challenge an assessment. Address "
+    "the supplied window before general methods. Cover every requested part: "
+    "the observed shape and location; what it currently supports or challenges "
+    "relative to ordinary variation; relevant boundary, persistence, or recovery "
+    "uncertainty; and only the requested additional evidence or indicators. For "
+    "a methodological or evidence-seeking question, do not deny its premise "
+    "merely to force a normal/anomalous verdict, and do not claim that no further "
+    "evidence is needed unless the question and supplied evidence justify that "
+    "claim."
+)
+
+ROUTED_R2_PROFILES = {
+    "r2_01_minimal": {
+        "multiple_choice": "mc_f0",
+        "true_false": "tf_p0",
+        "open_ended": "oe_s0",
+    },
+    "r2_02_mc_stable": {
+        "multiple_choice": "mc_f1",
+        "true_false": "tf_p0",
+        "open_ended": "oe_s0",
+    },
+    "r2_03_tf_boundary": {
+        "multiple_choice": "mc_f0",
+        "true_false": "tf_p1",
+        "open_ended": "oe_s0",
+    },
+    "r2_04_oe_old_contract": {
+        "multiple_choice": "mc_f0",
+        "true_false": "tf_p0",
+        "open_ended": "oe_c0",
+    },
+    "r2_05_oe_contract_coverage": {
+        "multiple_choice": "mc_f0",
+        "true_false": "tf_p0",
+        "open_ended": "oe_c1",
+    },
+    "r2_06_full_routed": {
+        "multiple_choice": "mc_f1",
+        "true_false": "tf_p1",
+        "open_ended": "oe_c1",
+    },
+}
+
 EXPERT_ANOMALY_ANALYST_OPENING = (
     "You are an expert time-series anomaly analyst. Produce one precise, "
     "evidence-grounded answer to the question."
@@ -188,6 +255,7 @@ class PromptCondition:
     standalone_fixed_hint: bool = False
     interleave_time_series_evidence: bool = False
     pareto_factors: str = ""
+    routed_profile: str = ""
 
 
 MODE_SPECS: Dict[str, PromptCondition] = {
@@ -305,6 +373,36 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         rename_fixed_hint=True,
         pareto_factors="ABCE",
     ),
+    "route_r2_01_minimal": PromptCondition(
+        "Round 2: MC fixed-only, TF direct polarity, OE speech-act coverage.",
+        rename_fixed_hint=True,
+        routed_profile="r2_01_minimal",
+    ),
+    "route_r2_02_mc_stable": PromptCondition(
+        "Round 2: add stable MC selection to the minimal routed profile.",
+        rename_fixed_hint=True,
+        routed_profile="r2_02_mc_stable",
+    ),
+    "route_r2_03_tf_boundary": PromptCondition(
+        "Round 2: add boundary discipline to the TF routed profile.",
+        rename_fixed_hint=True,
+        routed_profile="r2_03_tf_boundary",
+    ),
+    "route_r2_04_oe_old_contract": PromptCondition(
+        "Round 2: route the historical five-item Contract to OE only.",
+        rename_fixed_hint=True,
+        routed_profile="r2_04_oe_old_contract",
+    ),
+    "route_r2_05_oe_contract_coverage": PromptCondition(
+        "Round 2: OE-only historical Contract plus speech-act coverage.",
+        rename_fixed_hint=True,
+        routed_profile="r2_05_oe_contract_coverage",
+    ),
+    "route_r2_06_full_routed": PromptCondition(
+        "Round 2: stable MC, boundary/polarity TF, Contract/coverage OE.",
+        rename_fixed_hint=True,
+        routed_profile="r2_06_full_routed",
+    ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
@@ -345,6 +443,15 @@ PARETO_SCREEN_MODES = (
     "pareto_p09_bce",
     "pareto_p10_abcde",
     "pareto_p11_abce",
+)
+
+ROUTED_R2_MODES = (
+    "route_r2_01_minimal",
+    "route_r2_02_mc_stable",
+    "route_r2_03_tf_boundary",
+    "route_r2_04_oe_old_contract",
+    "route_r2_05_oe_contract_coverage",
+    "route_r2_06_full_routed",
 )
 
 FOLLOWUP_PROMPT_MODES = (
@@ -454,6 +561,68 @@ def build_question_prompt(
         if condition.rename_fixed_hint
         else "Overall Summary Hints"
     )
+
+    if condition.routed_profile:
+        try:
+            routed_component = ROUTED_R2_PROFILES[condition.routed_profile][
+                question_type
+            ]
+        except KeyError as exc:
+            raise ValueError(
+                f"Unsupported routed profile/question type: "
+                f"{condition.routed_profile!r}/{question_type!r}"
+            ) from exc
+
+        routed_contract_section = ""
+        if routed_component in {"oe_c0", "oe_c1"}:
+            routed_contract_section = (
+                "\n            "
+                + EVIDENCE_CONTRACT.format(
+                    start=start,
+                    end=end,
+                    end_minus_1=end - 1,
+                )
+                + "\n"
+            )
+
+        if routed_component == "mc_f0" or routed_component == "oe_c0":
+            routed_task_rule = None
+        elif routed_component == "mc_f1":
+            routed_task_rule = ROUTED_MC_STABLE_RULE
+        elif routed_component == "tf_p0":
+            routed_task_rule = ROUTED_TF_POLARITY_RULE
+        elif routed_component == "tf_p1":
+            routed_task_rule = ROUTED_TF_BOUNDARY_POLARITY_RULE.format(
+                start=start,
+                end=end,
+            )
+        elif routed_component in {"oe_s0", "oe_c1"}:
+            routed_task_rule = ROUTED_OE_SPEECH_ACT_RULE
+        else:
+            raise ValueError(f"Unsupported routed component {routed_component!r}")
+
+        if routed_task_rule is None:
+            routed_task_section = ""
+        else:
+            routed_task_section = (
+                "\n            ### Task Rule\n"
+                f"            {routed_task_rule}\n"
+            )
+
+        return f"""
+            You are an expert time series analyst. Analyze the provided data and answer the question.
+{routed_contract_section}
+            ### Time Series Data
+            - **Window:** Steps {start} to {end}
+            - **Values (scaled by 100):** {serialized_values}
+
+            ### Contextual Hints
+            - **Per-Step Analysis:** {local_hint_tokens}
+            - **{fixed_label}:** {fixed_hint_tokens}
+{routed_task_section}
+            ### Question
+            {question}
+            """
 
     if condition.pareto_factors:
         unknown = set(condition.pareto_factors) - set("ABCDE")

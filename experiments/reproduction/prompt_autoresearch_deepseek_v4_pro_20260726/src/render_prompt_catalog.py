@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.models.AXIS.prompt_stage_a import (
     PARETO_SCREEN_MODES,
+    ROUTED_R2_MODES,
     build_question_prompt,
 )
 
@@ -21,19 +22,30 @@ QUESTIONS = {
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--mode-set",
+        choices=("screening", "routed_r2"),
+        default="screening",
+    )
     args = parser.parse_args()
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
+    modes = PARETO_SCREEN_MODES if args.mode_set == "screening" else ROUTED_R2_MODES
+    title = (
+        "Screening round 1 prompt catalog"
+        if args.mode_set == "screening"
+        else "Development round 2 routed prompt catalog"
+    )
 
     rows = []
     markdown = [
-        "# Screening round 1 prompt catalog",
+        f"# {title}",
         "",
         "Rendered before inference with a fixed illustrative window. Runtime ",
         "values, steps, latent placeholders, and questions are substituted per sample.",
         "",
     ]
-    for mode in PARETO_SCREEN_MODES:
+    for mode in modes:
         for question_type, question in QUESTIONS.items():
             prompt = build_question_prompt(
                 question=question,
@@ -74,7 +86,7 @@ def main() -> None:
     output.with_suffix(".md").write_text(
         "\n".join(markdown), encoding="utf-8"
     )
-    print(json.dumps({"rows": len(rows), "modes": len(PARETO_SCREEN_MODES)}))
+    print(json.dumps({"rows": len(rows), "modes": len(modes), "mode_set": args.mode_set}))
 
 
 if __name__ == "__main__":

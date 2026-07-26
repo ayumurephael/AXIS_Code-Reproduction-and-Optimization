@@ -5,6 +5,7 @@ from src.models.AXIS.prompt_stage_a import (
     OUTPUT_PROTOCOLS,
     FOLLOWUP_PROMPT_MODES,
     PARETO_SCREEN_MODES,
+    ROUTED_R2_MODES,
     STAGE_A_MODES,
     build_aligned_rows,
     build_question_prompt,
@@ -349,6 +350,85 @@ B) Spike
     def test_pareto_task_rule_rejects_unknown_question_type(self):
         with self.assertRaises(ValueError):
             _prompt("pareto_p03_task_rule", "unknown")
+
+    def test_round2_routed_mode_matrix_is_locked(self):
+        self.assertEqual(
+            ROUTED_R2_MODES,
+            (
+                "route_r2_01_minimal",
+                "route_r2_02_mc_stable",
+                "route_r2_03_tf_boundary",
+                "route_r2_04_oe_old_contract",
+                "route_r2_05_oe_contract_coverage",
+                "route_r2_06_full_routed",
+            ),
+        )
+        self.assertTrue(set(ROUTED_R2_MODES).issubset(MODE_SPECS))
+        for mode in ROUTED_R2_MODES:
+            self.assertEqual(_prompt(mode).count("<|fixed_hint|>"), 30)
+            self.assertIn(
+                "Learned Task Guidance/Shared Task-Control Tokens",
+                _prompt(mode),
+            )
+
+    def test_round2_minimal_routes_by_question_type(self):
+        mc = _prompt("route_r2_01_minimal", "multiple_choice")
+        tf = _prompt("route_r2_01_minimal", "true_false")
+        oe = _prompt("route_r2_01_minimal", "open_ended")
+        self.assertNotIn("### Task Rule", mc)
+        self.assertIn("complete proposition exactly as written", tf)
+        self.assertIn("label and the first explanatory sentence", tf)
+        self.assertIn("diagnosis, an assessment method", oe)
+        self.assertIn("Cover every requested part", oe)
+        self.assertNotIn("### Evidence Contract", mc)
+        self.assertNotIn("### Evidence Contract", tf)
+        self.assertNotIn("### Evidence Contract", oe)
+
+    def test_round2_mc_stable_is_mc_only(self):
+        mc = _prompt("route_r2_02_mc_stable", "multiple_choice")
+        tf = _prompt("route_r2_02_mc_stable", "true_false")
+        oe = _prompt("route_r2_02_mc_stable", "open_ended")
+        self.assertIn("Select exactly one best-supported option", mc)
+        self.assertNotIn("Select exactly one best-supported option", tf)
+        self.assertNotIn("Select exactly one best-supported option", oe)
+        self.assertIn("complete proposition exactly as written", tf)
+        self.assertIn("Cover every requested part", oe)
+
+    def test_round2_tf_boundary_is_tf_only_and_half_open(self):
+        tf = _prompt("route_r2_03_tf_boundary", "true_false")
+        mc = _prompt("route_r2_03_tf_boundary", "multiple_choice")
+        oe = _prompt("route_r2_03_tf_boundary", "open_ended")
+        self.assertIn("half-open window [7, 10)", tf)
+        self.assertNotIn("half-open window [7, 10)", mc)
+        self.assertNotIn("half-open window [7, 10)", oe)
+        self.assertIn("complete proposition exactly as written", tf)
+
+    def test_round2_old_contract_is_oe_only(self):
+        for mode in (
+            "route_r2_04_oe_old_contract",
+            "route_r2_05_oe_contract_coverage",
+            "route_r2_06_full_routed",
+        ):
+            with self.subTest(mode=mode):
+                mc = _prompt(mode, "multiple_choice")
+                tf = _prompt(mode, "true_false")
+                oe = _prompt(mode, "open_ended")
+                self.assertNotIn("### Evidence Contract", mc)
+                self.assertNotIn("### Evidence Contract", tf)
+                self.assertIn("### Evidence Contract", oe)
+                self.assertIn("value on the same row", oe)
+        self.assertNotIn(
+            "Cover every requested part",
+            _prompt("route_r2_04_oe_old_contract", "open_ended"),
+        )
+        self.assertIn(
+            "Cover every requested part",
+            _prompt("route_r2_05_oe_contract_coverage", "open_ended"),
+        )
+
+    def test_round2_rejects_unknown_question_type(self):
+        with self.assertRaises(ValueError):
+            _prompt("route_r2_01_minimal", "unknown")
 
 if __name__ == "__main__":
     unittest.main()
