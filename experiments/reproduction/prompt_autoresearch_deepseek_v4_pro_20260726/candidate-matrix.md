@@ -49,3 +49,20 @@ All candidates retain the author's two-block Values/Local layout and the Fixed-r
 ## Two-sentence research pitch
 
 AXIS prompt modifications currently trade OE evidence coverage against MC/TF decision reliability because one long shared Contract entangles representation, anomaly semantics, and answer behavior. We decompose those functions into short orthogonal guards and task-conditioned decision rules, then optimize the worst task-Final delta so a candidate cannot win by sacrificing another task family.
+## Development round 2: routed candidates
+
+Validation rejected all common-factor candidates. Round 2 therefore routes a
+small rule by question type while freezing the released evidence layout and
+30 Fixed tokens.
+
+| Mode | MC | TF | OE |
+|---|---|---|---|
+| R2-01 | fixed-role only | direct proposition polarity | speech-act coverage |
+| R2-02 | stable one-option rule | direct proposition polarity | speech-act coverage |
+| R2-03 | fixed-role only | boundary + direct polarity | speech-act coverage |
+| R2-04 | fixed-role only | direct proposition polarity | old five-item Contract only |
+| R2-05 | fixed-role only | direct proposition polarity | old Contract + speech-act coverage |
+| R2-06 | stable one-option rule | boundary + direct polarity | old Contract + speech-act coverage |
+
+The exact text, frozen data hashes, pre-data predictions, and strict 10/10
+development gate are in `experiments/development-round-2/protocol.md`.
