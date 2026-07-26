@@ -1,0 +1,21 @@
+{
+  "prediction_rows": 312,
+  "records": 24,
+  "prediction_modes": {
+    "base": 24,
+    "fixed_role": 24,
+    "pareto_p01_boundary": 24,
+    "pareto_p02_calibration": 24,
+    "pareto_p03_task_rule": 24,
+    "pareto_p04_numeric_guard": 24,
+    "pareto_p05_single_answer": 24,
+    "pareto_p06_abc": 24,
+    "pareto_p07_abd": 24,
+    "pareto_p08_acde": 24,
+    "pareto_p09_bce": 24,
+    "pareto_p10_abcde": 24,
+    "pareto_p11_abce": 24
+  },
+  "errors": [],
+  "ok": true
+}

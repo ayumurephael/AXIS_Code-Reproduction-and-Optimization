@@ -1,0 +1,235 @@
+{
+  "models": {
+    "fixed_role": {
+      "open_ended/final": 2.52851596983945,
+      "open_ended/accuracy": 2.1428209728611765,
+      "open_ended/completeness": 2.1426343715496126,
+      "open_ended/relevance": 3.4286886643189143,
+      "true_false/final": 3.066675355769644,
+      "true_false/correctness": 3.111111710859794,
+      "true_false/justification_quality": 3.00002082313442,
+      "multiple_choice/final": 4.262499642526375,
+      "multiple_choice/correctness": 4.37499977870304,
+      "multiple_choice/reasoning_quality": 3.999999324780825,
+      "macro_final": 3.2858969893784895
+    },
+    "pareto_p01_boundary": {
+      "open_ended/final": 2.6642890765349536,
+      "open_ended/accuracy": 2.285717075102444,
+      "open_ended/completeness": 2.1428631640121525,
+      "open_ended/relevance": 3.7142866428161514,
+      "true_false/final": 3.6222223894693193,
+      "true_false/correctness": 3.666666560307734,
+      "true_false/justification_quality": 3.555556133211696,
+      "multiple_choice/final": 4.07500518923259,
+      "multiple_choice/correctness": 4.000010525852087,
+      "multiple_choice/reasoning_quality": 4.249992737120431,
+      "macro_final": 3.453838885078954
+    },
+    "base": {
+      "open_ended/final": 2.5357820884900417,
+      "open_ended/accuracy": 2.5714290557802335,
+      "open_ended/completeness": 1.8573341326605204,
+      "open_ended/relevance": 3.285716575119259,
+      "true_false/final": 3.3333336646524563,
+      "true_false/correctness": 3.3333332659042916,
+      "true_false/justification_quality": 3.3333342627747022,
+      "multiple_choice/final": 3.700000087497516,
+      "multiple_choice/correctness": 3.6250002367211978,
+      "multiple_choice/reasoning_quality": 3.8749997393089255,
+      "macro_final": 3.1897052802133374
+    },
+    "pareto_p02_calibration": {
+      "open_ended/final": 2.5928561997319894,
+      "open_ended/accuracy": 2.571429030012493,
+      "open_ended/completeness": 2.142857620513739,
+      "open_ended/relevance": 3.1428529068260267,
+      "true_false/final": 3.766666053980581,
+      "true_false/correctness": 3.833332882452663,
+      "true_false/justification_quality": 3.666665811272461,
+      "multiple_choice/final": 3.449999953527625,
+      "multiple_choice/correctness": 3.375000179231668,
+      "multiple_choice/reasoning_quality": 3.6249994268848584,
+      "macro_final": 3.269840735746732
+    },
+    "pareto_p03_task_rule": {
+      "open_ended/final": 2.591694413092454,
+      "open_ended/accuracy": 2.571427899162018,
+      "open_ended/completeness": 2.1394756137626265,
+      "open_ended/relevance": 3.1429272785627616,
+      "true_false/final": 3.6222155843944344,
+      "true_false/correctness": 3.6666665053070435,
+      "true_false/justification_quality": 3.5555392030255217,
+      "multiple_choice/final": 4.087499837119838,
+      "multiple_choice/correctness": 4.12499994026536,
+      "multiple_choice/reasoning_quality": 3.9999995964469557,
+      "macro_final": 3.4338032782022423
+    },
+    "pareto_p04_numeric_guard": {
+      "open_ended/final": 2.5428629351932996,
+      "open_ended/accuracy": 2.142862944266452,
+      "open_ended/completeness": 2.4285696167413797,
+      "open_ended/relevance": 3.1428717961351964,
+      "true_false/final": 3.4222221127181363,
+      "true_false/correctness": 3.3333335797636123,
+      "true_false/justification_quality": 3.5555549121499244,
+      "multiple_choice/final": 3.7625039573532812,
+      "multiple_choice/correctness": 3.8749999373135156,
+      "multiple_choice/reasoning_quality": 3.500013337446067,
+      "macro_final": 3.242529668421572
+    },
+    "pareto_p05_single_answer": {
+      "open_ended/final": 2.3914351604864637,
+      "open_ended/accuracy": 2.342857589041278,
+      "open_ended/completeness": 2.2857133843790427,
+      "open_ended/relevance": 2.5714510659645056,
+      "true_false/final": 3.333334196537315,
+      "true_false/correctness": 3.3333352676298635,
+      "true_false/justification_quality": 3.3333325898984927,
+      "multiple_choice/final": 4.474999791420946,
+      "multiple_choice/correctness": 4.624999863469142,
+      "multiple_choice/reasoning_quality": 4.124999623308493,
+      "macro_final": 3.399923049481575
+    },
+    "pareto_p06_abc": {
+      "open_ended/final": 2.564459074008122,
+      "open_ended/accuracy": 2.2857162604809385,
+      "open_ended/completeness": 1.857146177097651,
+      "open_ended/relevance": 3.714857402852053,
+      "true_false/final": 3.7777776347681913,
+      "true_false/correctness": 3.777777749367951,
+      "true_false/justification_quality": 3.7777774628685523,
+      "multiple_choice/final": 4.231886266068292,
+      "multiple_choice/correctness": 4.331266242087905,
+      "multiple_choice/reasoning_quality": 3.9999996553558654,
+      "macro_final": 3.5247076582815353
+    },
+    "pareto_p07_abd": {
+      "open_ended/final": 2.5785406796094206,
+      "open_ended/accuracy": 2.428467892671576,
+      "open_ended/completeness": 2.0000139390018123,
+      "open_ended/relevance": 3.4285734617457817,
+      "true_false/final": 3.266668961550158,
+      "true_false/correctness": 3.2222226878760316,
+      "true_false/justification_quality": 3.333338372061348,
+      "multiple_choice/final": 3.8250022100985657,
+      "multiple_choice/correctness": 3.7500036839832527,
+      "multiple_choice/reasoning_quality": 3.999998771034295,
+      "macro_final": 3.2234039504193817
+    },
+    "pareto_p08_acde": {
+      "open_ended/final": 2.3071419856077244,
+      "open_ended/accuracy": 2.000000966795779,
+      "open_ended/completeness": 2.142848327831056,
+      "open_ended/relevance": 2.857149108294442,
+      "true_false/final": 3.5333332676524987,
+      "true_false/correctness": 3.44444444881496,
+      "true_false/justification_quality": 3.666666495908806,
+      "multiple_choice/final": 4.212500999633011,
+      "multiple_choice/correctness": 4.2500018052410855,
+      "multiple_choice/reasoning_quality": 4.124999119880842,
+      "macro_final": 3.350992084297745
+    },
+    "pareto_p09_bce": {
+      "open_ended/final": 2.121437125684158,
+      "open_ended/accuracy": 2.142858453740137,
+      "open_ended/completeness": 1.714308303200099,
+      "open_ended/relevance": 2.571429202516918,
+      "true_false/final": 3.5777781138109046,
+      "true_false/correctness": 3.666666640987098,
+      "true_false/justification_quality": 3.4444453230466143,
+      "multiple_choice/final": 4.087500559437846,
+      "multiple_choice/correctness": 4.1250012278644315,
+      "multiple_choice/reasoning_quality": 3.9999989997758125,
+      "macro_final": 3.2622385996443026
+    },
+    "pareto_p10_abcde": {
+      "open_ended/final": 2.349975460500196,
+      "open_ended/accuracy": 2.2858048594406424,
+      "open_ended/completeness": 1.857168885594598,
+      "open_ended/relevance": 2.999782165792871,
+      "true_false/final": 3.644444765121864,
+      "true_false/correctness": 3.7777778474756016,
+      "true_false/justification_quality": 3.444445141591257,
+      "multiple_choice/final": 4.049999863728837,
+      "multiple_choice/correctness": 4.124999888895508,
+      "multiple_choice/reasoning_quality": 3.8749998050066035,
+      "macro_final": 3.3481400297836323
+    },
+    "pareto_p11_abce": {
+      "open_ended/final": 2.335746238800612,
+      "open_ended/accuracy": 2.0000821035106666,
+      "open_ended/completeness": 1.8571496601028878,
+      "open_ended/relevance": 3.2857170717862263,
+      "true_false/final": 3.4000019464963835,
+      "true_false/correctness": 3.4444465538490365,
+      "true_false/justification_quality": 3.3333350354674054,
+      "multiple_choice/final": 4.062500055005839,
+      "multiple_choice/correctness": 4.249999886810143,
+      "multiple_choice/reasoning_quality": 3.62500044746246,
+      "macro_final": 3.2660827467676117
+    }
+  },
+  "paired_vs_axis": {
+    "fixed_role": {
+      "mean": 0.08538370123880945,
+      "low": -0.2499909008059279,
+      "high": 0.48123146667745936
+    },
+    "pareto_p01_boundary": {
+      "mean": 0.2708161772311142,
+      "low": -0.027128724484348683,
+      "high": 0.6645448819730206
+    },
+    "pareto_p02_calibration": {
+      "mean": 0.09581288378698483,
+      "low": -0.28541575475714304,
+      "high": 0.42289866606627474
+    },
+    "pareto_p03_task_rule": {
+      "mean": 0.253805064453053,
+      "low": -0.22327963655572614,
+      "high": 0.7749703268728431
+    },
+    "pareto_p04_numeric_guard": {
+      "mean": 0.05623303826500223,
+      "low": -0.11665895834107987,
+      "high": 0.22914958789147089
+    },
+    "pareto_p05_single_answer": {
+      "mean": 0.21623224676358874,
+      "low": -0.2333665851692791,
+      "high": 0.7403842347502989
+    },
+    "pareto_p06_abc": {
+      "mean": 0.35232600242643297,
+      "low": -0.11443558826375692,
+      "high": 0.8295680262351784
+    },
+    "pareto_p07_abd": {
+      "mean": 0.029139366280140227,
+      "low": -0.20006178587316223,
+      "high": 0.28956936801746685
+    },
+    "pareto_p08_acde": {
+      "mean": 0.1791467918295054,
+      "low": -0.2333369176091976,
+      "high": 0.652044910044449
+    },
+    "pareto_p09_bce": {
+      "mean": 0.09998287826281187,
+      "low": -0.3437671749800691,
+      "high": 0.5874979911148385
+    },
+    "pareto_p10_abcde": {
+      "mean": 0.17913965492276315,
+      "low": -0.26254498409935595,
+      "high": 0.6728738018794783
+    },
+    "pareto_p11_abce": {
+      "mean": 0.0874901387014968,
+      "low": -0.35626717333187785,
+      "high": 0.5687478291925394
+    }
+  }
+}

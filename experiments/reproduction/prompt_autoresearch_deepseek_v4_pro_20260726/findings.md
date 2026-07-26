@@ -57,4 +57,33 @@ winner.
 
 ## Optimization Trajectory
 
-No new search experiments have been run. The diagnostic bootstrap is complete and proposes Pareto-v1 plus an orthogonal, series-level search on the 144 non-paper140 QA.
+Screening round 1 completed 13 inference conditions and 715 formal Judge
+dimension scores on the frozen 24-QA development split. No candidate is yet a
+strict Pareto success.
+
+- P01 boundary guard: 9/10 nonnegative dimensions, worst -0.286, mean +0.253.
+- P03 task rule: 8/10, worst -0.143, mean +0.205.
+- P06 A+B+C: 8/10, worst -0.286, mean +0.287.
+- P07 A+B+D: 7/10, worst -0.143, mean +0.038.
+
+The four candidates advance unchanged to the frozen 72-QA validation split.
+The internal holdout and `paper140` remain untouched.
+
+## Screening Round 1 Mechanistic Findings
+
+- A single boundary guard is the most robust common intervention and causes no
+  correct-to-wrong parsed decision flips in screening.
+- The current TF task rule fixes negation cases but can suppress a real spike
+  or convex anomaly by forcing unnecessary re-diagnosis.
+- The anomaly-calibration list is not behaviorally neutral: mentioning peaks,
+  trends, extrema, and variability can make those features more salient and
+  either create MC false positives or TF false negatives.
+- OE questions have different speech acts. A diagnostic question may support
+  a conclusion; a methodological “how would you evaluate / what evidence
+  would you seek” question requires conditional evidence and methods. Forcing
+  every OE answer to start with a diagnostic conclusion loses relevance and
+  completeness.
+- Shared “shortest explanation” wording improves MC output control but is
+  harmful to OE. Any future brevity rule should be closed-task-only.
+- Fewer unsupported numbers do not guarantee higher G-Eval scores: P09 has the
+  lowest OE unsupported-number fraction but loses every OE record.

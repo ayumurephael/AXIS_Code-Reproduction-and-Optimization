@@ -49,14 +49,28 @@ experiments:
     oe_final: 3.085930669870713
     tf_final: 3.642142370108918
     macro_final: 3.661296085775103
-  best_value: null
-  total_runs: 0
-  trajectory: []
+  best_value:
+    split: screening
+    mode: pareto_p01_boundary
+    nonnegative_dimensions: 9
+    worst_delta: -0.28571198067779013
+    mean_delta: 0.2526346384750413
+  total_runs: 13
+  trajectory:
+    - round: screening_round_1
+      modes: 13
+      predictions: 312
+      judge_scores: 715
+      audit_ok: true
+      winner: pareto_p01_boundary
+      winner_nonnegative_dimensions: 9
+      winner_worst_delta: -0.28571198067779013
+      winner_mean_delta: 0.2526346384750413
 
 outer_loop:
-  cycle: 1
+  cycle: 2
   last_direction: deepen
-  last_reflection: "The user locked the all-10-metrics Pareto criterion, allowed all prompt-only changes including task conditioning, and approved the 12->4->2->1 search funnel. Begin screening on a disjoint non-paper140 split."
+  last_reflection: "Screening supports short low-semantic-load rules: the boundary-only P01 leads with 9/10 nonnegative dimensions. Global calibration and brevity rules create MC/TF under-detection and categorical OE closure. Advance P01, P03, P06, and P07 unchanged to validation; if the validation gate fails, design speech-act-aware OE and closed-task-only rules."
 
 workspace:
   findings: "findings.md"
