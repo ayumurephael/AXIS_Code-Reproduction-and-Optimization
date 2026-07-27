@@ -10,6 +10,7 @@ from pathlib import Path
 
 from src.models.AXIS.prompt_stage_a import (
     LITERATURE_R1_PROFILES,
+    LITERATURE_R2_PROFILES,
     build_question_prompt,
 )
 from tools.axis_repro.build_tables import DIMS
@@ -66,6 +67,11 @@ COMPONENT_SOURCES = {
     },
 }
 
+ALL_LITERATURE_PROFILES = {
+    **LITERATURE_R1_PROFILES,
+    **LITERATURE_R2_PROFILES,
+}
+
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,9 +110,9 @@ def source_mode(component: str, question_type: str) -> str:
         ) from exc
 
 
-def required_source_pairs() -> set[tuple[str, str]]:
+def required_source_pairs(profiles: dict) -> set[tuple[str, str]]:
     pairs = set()
-    for profile in LITERATURE_R1_PROFILES.values():
+    for profile in profiles.values():
         for question_type, component in profile.items():
             source = source_mode(component, question_type)
             if source != "base":
@@ -125,14 +131,22 @@ def prepare(args: argparse.Namespace) -> None:
         (row["record_id"], row["mode"]): row for row in candidate_rows
     }
     record_ids = sorted(baseline)
-    if len(record_ids) != 24:
-        raise RuntimeError(f"Expected 24 Baseline records, found {len(record_ids)}")
-    if len(candidate) != 24 * len(LITERATURE_R1_PROFILES):
-        raise RuntimeError("Candidate prediction matrix is incomplete")
+    if len(record_ids) != args.expected_records:
+        raise RuntimeError(
+            f"Expected {args.expected_records} Baseline records, "
+            f"found {len(record_ids)}"
+        )
+    if len(candidate) != len(candidate_rows):
+        raise RuntimeError("Candidate prediction keys are not unique")
+    routes = args.routes or list(LITERATURE_R1_PROFILES)
+    try:
+        profiles = {route: ALL_LITERATURE_PROFILES[route] for route in routes}
+    except KeyError as exc:
+        raise RuntimeError(f"Unknown route {exc.args[0]!r}") from exc
 
     component_rows = []
     component_provenance = {}
-    for source, question_type in sorted(required_source_pairs()):
+    for source, question_type in sorted(required_source_pairs(profiles)):
         selected = [
             row for row in candidate_rows
             if row["mode"] == source and row["question_type"] == question_type
@@ -153,7 +167,7 @@ def prepare(args: argparse.Namespace) -> None:
 
     assembled = []
     route_provenance = {}
-    for route, profile in LITERATURE_R1_PROFILES.items():
+    for route, profile in profiles.items():
         route_provenance[route] = {}
         for record_id in record_ids:
             question_type = baseline[record_id]["question_type"]
@@ -187,11 +201,22 @@ def prepare(args: argparse.Namespace) -> None:
 
     component_rows.sort(key=lambda row: (row["record_id"], row["mode"]))
     assembled.sort(key=lambda row: (row["record_id"], row["mode"]))
-    if len(component_rows) != 97:
-        raise RuntimeError(f"Expected 97 unique component rows, found {len(component_rows)}")
-    if len(assembled) != 288:
-        raise RuntimeError(f"Expected 288 assembled rows, found {len(assembled)}")
-    if len({(row["record_id"], row["mode"]) for row in assembled}) != 288:
+    expected_component_rows = sum(
+        sum(row["question_type"] == question_type for row in baseline_rows)
+        for _, question_type in required_source_pairs(profiles)
+    )
+    expected_assembled_rows = len(record_ids) * len(profiles)
+    if len(component_rows) != expected_component_rows:
+        raise RuntimeError(
+            f"Expected {expected_component_rows} unique component rows, "
+            f"found {len(component_rows)}"
+        )
+    if len(assembled) != expected_assembled_rows:
+        raise RuntimeError(
+            f"Expected {expected_assembled_rows} assembled rows, "
+            f"found {len(assembled)}"
+        )
+    if len({(row["record_id"], row["mode"]) for row in assembled}) != len(assembled):
         raise RuntimeError("Duplicate assembled prediction key")
 
     write_jsonl(Path(args.component_output), component_rows)
@@ -268,11 +293,12 @@ def assemble_scores(args: argparse.Namespace) -> None:
             row["component_source_mode"] = source
             rows.append(row)
     rows.sort(key=lambda row: (row["record_id"], row["mode"], row["dimension"]))
-    if len(rows) != 660:
-        raise RuntimeError(f"Expected 660 assembled scores, found {len(rows)}")
+    expected_rows = sum(len(DIMS[row["question_type"]]) for row in predictions)
+    if len(rows) != expected_rows:
+        raise RuntimeError(f"Expected {expected_rows} assembled scores, found {len(rows)}")
     if len({
         (row["record_id"], row["mode"], row["dimension"]) for row in rows
-    }) != 660:
+    }) != len(rows):
         raise RuntimeError("Duplicate assembled score key")
     write_jsonl(Path(args.output), rows)
     print(json.dumps({"assembled_scores": len(rows)}))
@@ -288,6 +314,8 @@ def main() -> None:
     prepare_parser.add_argument("--component-output", required=True)
     prepare_parser.add_argument("--assembled-output", required=True)
     prepare_parser.add_argument("--provenance", required=True)
+    prepare_parser.add_argument("--routes", nargs="+")
+    prepare_parser.add_argument("--expected-records", type=int, default=24)
     prepare_parser.set_defaults(function=prepare)
 
     filter_parser = subparsers.add_parser("filter-scores")

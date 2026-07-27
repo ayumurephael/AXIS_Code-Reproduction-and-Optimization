@@ -334,6 +334,14 @@ LITERATURE_R1_PROFILES = {
     },
 }
 
+LITERATURE_R2_PROFILES = {
+    "lit_r2_01_mc_tf_re2_safe": {
+        "multiple_choice": "re2",
+        "true_false": "re2",
+        "open_ended": "base",
+    },
+}
+
 ROUTED_R2_PROFILES = {
     "r2_01_minimal": {
         "multiple_choice": "mc_f0",
@@ -645,6 +653,10 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         "Literature Round 1: MC semantic binding plus question re-reading.",
         literature_profile="lit_r1_12_mc_bind_re2",
     ),
+    "lit_r2_01_mc_tf_re2_safe": PromptCondition(
+        "Literature Round 2: MC and TF re-reading with exact Baseline OE.",
+        literature_profile="lit_r2_01_mc_tf_re2_safe",
+    ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
@@ -720,6 +732,10 @@ LITERATURE_R1_MODES = (
     "lit_r1_10_triplet_re2",
     "lit_r1_11_decoupled",
     "lit_r1_12_mc_bind_re2",
+)
+
+LITERATURE_R2_MODES = (
+    "lit_r2_01_mc_tf_re2_safe",
 )
 
 FOLLOWUP_PROMPT_MODES = (
@@ -832,9 +848,12 @@ def build_question_prompt(
 
     if condition.literature_profile:
         try:
-            literature_component = LITERATURE_R1_PROFILES[
-                condition.literature_profile
-            ][question_type]
+            literature_profiles = {
+                **LITERATURE_R1_PROFILES,
+                **LITERATURE_R2_PROFILES,
+            }
+            literature_component = literature_profiles[
+                condition.literature_profile][question_type]
         except KeyError as exc:
             raise ValueError(
                 f"Unsupported literature profile/question type: "

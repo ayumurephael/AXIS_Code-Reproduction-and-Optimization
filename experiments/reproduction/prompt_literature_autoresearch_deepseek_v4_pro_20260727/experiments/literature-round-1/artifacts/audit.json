@@ -1,0 +1,36 @@
+{
+  "prediction_rows": 312,
+  "records": 24,
+  "prediction_modes": {
+    "base": 24,
+    "lit_r1_01_mc_semantic_bind": 24,
+    "lit_r1_02_mc_pointwise": 24,
+    "lit_r1_03_mc_re2": 24,
+    "lit_r1_04_tf_minimal": 24,
+    "lit_r1_05_tf_clause": 24,
+    "lit_r1_06_tf_re2": 24,
+    "lit_r1_07_oe_direct": 24,
+    "lit_r1_08_oe_re2": 24,
+    "lit_r1_09_triplet_minimal": 24,
+    "lit_r1_10_triplet_re2": 24,
+    "lit_r1_11_decoupled": 24,
+    "lit_r1_12_mc_bind_re2": 24
+  },
+  "score_rows": 715,
+  "score_methods": {
+    "final_score_top_logprobs": 715
+  },
+  "score_models": {
+    "deepseek-v4-pro": 715
+  },
+  "score_providers": {
+    "deepseek": 715
+  },
+  "score_enable_thinking": {
+    "auto": 715
+  },
+  "logprobs_returned": 715,
+  "valid_prompt_hashes": 715,
+  "errors": [],
+  "ok": true
+}

@@ -21,13 +21,24 @@
 - Analyze paired correct→wrong and wrong→correct cases, not only aggregate Judge means.
 - Reject candidates with hidden family-level regressions even when their ten-metric mean rises.
 
-## Pending questions
+## Round 1 findings
 
-- Does semantic binding help MC when the original Fixed-token header is preserved?
-- Does exact question re-reading help any task type on this checkpoint, or merely add distribution shift?
-- Can a very short TF rule fix contradictions without changing otherwise correct decisions?
-- Does a direct OE rule improve relevance/accuracy rather than just verbosity/completeness?
+1. Preserving the old Fixed-token header matters. Four scaffold-preserving MC interventions passed all ten screening dimensions because unchanged OE/TF components were exactly Baseline.
+2. MC question re-reading is the strongest new factor: it fixed both tested Baseline MC errors and raised all three MC metrics.
+3. Adding semantic binding to RE2 did not improve decisions over RE2 alone and reduced MC Reasoning by 0.250 relative to RE2; one response also invented `-6.40`.
+4. Pointwise and semantic-selection rules are weaker than RE2 but remained decision-safe on screening.
+5. TF RE2 has a real accuracy/robustness trade-off: four wrong→correct versus one correct→wrong, with the failure caused by reconstructing a nonexistent stable numeric range.
+6. Static TF rules over-focus on textual clause verification and can suppress evidence encoded in the learned tokens.
+7. OE directness is not diagnostic correctness. Shorter answers with fewer unsupported numbers still denied real boundary anomalies and lost Judge Accuracy/Relevance.
+8. OE RE2 raises coverage but repeats question framing, lengthens outputs, and increases scaled-number interpretation errors; the result is higher Completeness but lower Relevance.
+9. Decision/report decoupling is too broad for this checkpoint: it changed all task families and lost six dimensions.
+
+## Current questions
+
+- Do MC RE2, pointwise checking, and semantic binding generalize to the exposed 72-QA validation pool without correct→wrong transitions?
+- Does the TF RE2 net gain replicate, and can it satisfy a strict zero-regression gate?
+- If MC-only routes remain robust, can they pass the exposed 48-QA robustness check that defeated the prior header-renamed routes?
 
 ## Result status
 
-Round 1 is preregistered but not yet executed. No improvement claim is made.
+Round 1 is complete and audited. Results are exploratory because the split was exposed. No paper140 candidate output has been generated.

@@ -1,0 +1,20 @@
+[
+  {
+    "mode": "lit_r2_01_mc_tf_re2_safe",
+    "question_type": "multiple_choice",
+    "prompt_sha256": "274997d12d8950b8f3d3c28b2d1f3ce71035dbb865a912fc6b2adf5e4da1c17c",
+    "prompt": "\n            You are an expert time series analyst. Analyze the provided data and answer the question.\n\n            ### Time Series Data\n            - **Window:** Steps 7 to 10\n            - **Values (scaled by 100):** 10, 11, 42\n\n            ### Contextual Hints\n            - **Per-Step Analysis:** <|local_hint|><|local_hint|><|local_hint|>\n            - **Overall Summary Hints:** <|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|>\n\n            ### Question\n            Which description best matches the window?\nA) Stable\nB) Spike\nC) Trend\nD) Cyclic\n\n            Read the question again:\n            Which description best matches the window?\nA) Stable\nB) Spike\nC) Trend\nD) Cyclic\n            "
+  },
+  {
+    "mode": "lit_r2_01_mc_tf_re2_safe",
+    "question_type": "open_ended",
+    "prompt_sha256": "2839337c01b253c2b75f5e0d48b885f9470ba9b7794c7b4e62e669165cc7436c",
+    "prompt": "\n            You are an expert time series analyst. Analyze the provided data and answer the question.\n\n            ### Time Series Data\n            - **Window:** Steps 7 to 10\n            - **Values (scaled by 100):** 10, 11, 42\n\n            ### Contextual Hints\n            - **Per-Step Analysis:** <|local_hint|><|local_hint|><|local_hint|>\n            - **Overall Summary Hints:** <|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|>\n\n            ### Question\n            What evidence supports or refutes an anomaly in this window?\n            "
+  },
+  {
+    "mode": "lit_r2_01_mc_tf_re2_safe",
+    "question_type": "true_false",
+    "prompt_sha256": "e50bfa34b2bcc26387738fd2a19b7923caddefb09db9eaf4c284762a3f4e266f",
+    "prompt": "\n            You are an expert time series analyst. Analyze the provided data and answer the question.\n\n            ### Time Series Data\n            - **Window:** Steps 7 to 10\n            - **Values (scaled by 100):** 10, 11, 42\n\n            ### Contextual Hints\n            - **Per-Step Analysis:** <|local_hint|><|local_hint|><|local_hint|>\n            - **Overall Summary Hints:** <|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|><|fixed_hint|>\n\n            ### Question\n            True or False: The window contains an anomalous deviation.\n\n            Read the question again:\n            True or False: The window contains an anomalous deviation.\n            "
+  }
+]

@@ -5,6 +5,7 @@ from src.models.AXIS.prompt_stage_a import (
     OUTPUT_PROTOCOLS,
     FOLLOWUP_PROMPT_MODES,
     LITERATURE_R1_MODES,
+    LITERATURE_R2_MODES,
     PARETO_SCREEN_MODES,
     ROUTED_R2_MODES,
     ROUTED_R3_MODES,
@@ -584,6 +585,33 @@ B) Spike
     def test_literature_round1_rejects_unknown_question_type(self):
         with self.assertRaises(ValueError):
             _prompt("lit_r1_09_triplet_minimal", "unknown")
+
+    def test_literature_round2_matrix_is_locked(self):
+        self.assertEqual(
+            LITERATURE_R2_MODES,
+            ("lit_r2_01_mc_tf_re2_safe",),
+        )
+        self.assertTrue(set(LITERATURE_R2_MODES).issubset(MODE_SPECS))
+
+    def test_literature_round2_route_reuses_registered_components(self):
+        route = "lit_r2_01_mc_tf_re2_safe"
+        self.assertEqual(
+            _prompt(route, "multiple_choice"),
+            _prompt("lit_r1_03_mc_re2", "multiple_choice"),
+        )
+        self.assertEqual(
+            _prompt(route, "true_false"),
+            _prompt("lit_r1_06_tf_re2", "true_false"),
+        )
+        self.assertEqual(
+            _prompt(route, "open_ended"),
+            _prompt("base", "open_ended"),
+        )
+        for question_type in ("multiple_choice", "open_ended", "true_false"):
+            prompt = _prompt(route, question_type)
+            self.assertIn("Overall Summary Hints", prompt)
+            self.assertNotIn("Learned Task Guidance", prompt)
+            self.assertEqual(prompt.count("<|fixed_hint|>"), 30)
 
 if __name__ == "__main__":
     unittest.main()
