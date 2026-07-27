@@ -3,8 +3,8 @@ import unittest
 from experiments.reproduction.prompt_final_full284_deepseek_v4_pro_20260727.src.extract_final_round9_cases import (
     select_best_cases,
 )
-from experiments.reproduction.prompt_final_full284_deepseek_v4_pro_20260727.src.final_round8_pipeline import (
-    FINAL_MODE,
+from experiments.reproduction.prompt_final_full284_deepseek_v4_pro_20260727.src.final_round9_variants import (
+    JOINT_MODE as FINAL_MODE,
 )
 from tools.axis_repro.build_tables import DIMS
 
