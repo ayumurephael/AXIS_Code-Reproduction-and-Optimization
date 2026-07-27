@@ -120,3 +120,63 @@ covered every requested part; the extra rule introduced an open `<think>`
 prefix, dropped boundary-specific conclusions, or added speculative trends.
 The next OE round will target answer coverage and relevance without imposing
 an anomaly-status prior or claiming that text decodes learned Local vectors.
+
+## 2026-07-27 — Rounds 4–6 outer loop
+
+Round 4 tested five OE coverage-only prompts and found no validation survivor.
+Round 5 moved to a frozen-Baseline two-pass design; `verbatim_or_add` was the
+closest mode but lost Completeness/Relevance on holdout48. Round 6 tested
+three A/B selectors, but the released checkpoint frequently ignored the
+selection meta-task. These results ruled out universal coverage reminders,
+unconditional second-pass rewriting, and checkpoint self-selection.
+
+## 2026-07-27 — Rounds 7–9 deterministic repair loop
+
+Round 7 routed only malformed OE responses with an unclosed `<think>` and no
+Answer boundary. It fixed `series_000111:0` but harmed `series_000141:0`.
+Round 8 added explicit no-anomaly verdict preservation; it passed the exposed
+views but selected four full284 repairs, three of which deleted requested
+content and lowered Completeness/Relevance.
+
+Round 9 added a 60% word-retention guard. It was designed after inspecting the
+Round-8 full284 failures and is therefore labeled post-hoc. On full284 it
+selects only `series_000111:0`.
+
+## 2026-07-27 — Locked full284 formal result
+
+The final component union uses:
+
+- MC: `lit_r5_02_mc_status_then_shape`;
+- TF: `lit_r4_01_tf_neg_re2`, activated only by explicit negative cues;
+- OE: `v2_r5_02_oe_verbatim_or_add`, accepted only by the Round-9
+  deterministic gate.
+
+Authorized Port-2225 GPUs generated all new responses. Formal
+`deepseek-v4-pro` scoring completed for the 277 unique changed dimensions;
+unchanged answers reused the canonical Baseline score exactly. Three routes
+pass the user's final criterion:
+
+- `prompt_final_round9_mc_oe`: 10/10 non-lower, six strict gains;
+- `prompt_final_round9_tf_oe`: 10/10 non-lower, six strict gains;
+- `prompt_final_round9_joint`: 10/10 non-lower, nine strict gains.
+
+The joint route changes 94 MC, 43 TF, and one OE response. A secondary paired
+Judge repeat was launched for all 138 changed records (276 predictions,
+554 dimensions) to quantify Judge variance without replacing the locked
+primary result.
+
+## 2026-07-28 — Paired Judge-repeat audit complete
+
+The paired repeat completed 554 dimensions for 276 Baseline/candidate
+predictions: 552 top-logprob expectations and two exact-20 fallbacks. All
+rows used `deepseek-v4-pro`, provider `deepseek`, with nonempty prompt hashes.
+
+MC and TF deltas remained positive. The only OE repair had OE Final `+0.0010`,
+Accuracy `+0.0202`, Completeness tied at four decimals, and Relevance
+`-0.0202`. Thus the MC+OE and TF+OE routes each had five strict gains and the
+joint route had eight, but every route was 9/10 rather than 10/10 in this
+secondary repeat.
+
+The locked primary formal result remains the declared Table-I result. The
+claim is narrowed to locked-primary engineering PASS; repeat-robust full
+non-degradation is not established.

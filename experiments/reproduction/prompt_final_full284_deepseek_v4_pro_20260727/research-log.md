@@ -49,3 +49,38 @@ Neither candidate passed the frozen final criterion:
 The triplet RE2 prompt improves all three TF metrics but reduces MC Final,
 MC Reasoning, OE Final, OE Accuracy, and OE Completeness. No winner is locked,
 and no three-family success examples are claimed.
+
+## 2026-07-27 — Failure-driven continuation and Round-9 winner
+
+The initial full284 RE2 candidates remained valid negative results; they were
+not rerun. Subsequent failure-driven rounds tested OE coverage, two-pass
+refinement, checkpoint self-selection, and increasingly conservative
+deterministic repair gates. Round 8 exposed a deletion failure on full284.
+Round 9 added a post-hoc 60% word-retention guard and retained only the single
+OE repair that improved both Accuracy and Completeness.
+
+The formal component union combines status-first MC, negative-cue qualitative
+TF RE2, and the Round-9 OE repair. Three final routes pass the user-confirmed
+criterion. The joint route has 10/10 non-lower metrics and nine strict gains.
+All new inference ran on the authorized Port-2225 GPU server and all semantic
+scoring used `deepseek-v4-pro`.
+
+A paired repeat Judge audit was started for the 138 changed responses to
+measure scoring variance. This repeat is secondary; it does not replace the
+locked primary formal result.
+
+## 2026-07-28 — Paired Judge-repeat audit complete
+
+The paired repeat completed 554 dimensions for 276 Baseline/candidate
+predictions: 552 top-logprob expectations and two exact-20 fallbacks. All
+rows used `deepseek-v4-pro`, provider `deepseek`, with nonempty prompt hashes.
+
+MC and TF deltas remained positive. The only OE repair had OE Final `+0.0010`,
+Accuracy `+0.0202`, Completeness tied at four decimals, and Relevance
+`-0.0202`. Thus the MC+OE and TF+OE routes each had five strict gains and the
+joint route had eight, but every route was 9/10 rather than 10/10 in this
+secondary repeat.
+
+The locked primary formal result remains the declared Table-I result. The
+claim is narrowed to locked-primary engineering PASS; repeat-robust full
+non-degradation is not established.

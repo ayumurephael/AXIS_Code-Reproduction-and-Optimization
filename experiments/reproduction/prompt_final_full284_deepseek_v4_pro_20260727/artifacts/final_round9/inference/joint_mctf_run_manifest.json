@@ -1,0 +1,44 @@
+{
+  "checkpoint": "/home2/xuhaijie/axis_repro/full284_diag_969c618/axis_prompt_stage_a_bb1410f/experiments/checkpoints/released/model_optimizer.pth",
+  "checkpoint_sha256": "d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7",
+  "data": "/home2/xuhaijie/axis_repro/full284_diag_969c618/axis_prompt_stage_a_bb1410f/data/AXIS_qa_test",
+  "subset": "full",
+  "world_size": 1,
+  "modes": [
+    "lit_r5_04_joint_status_tf_neg_re2"
+  ],
+  "rows": 284,
+  "batching": "series",
+  "skip_loss": true,
+  "record_count": 284,
+  "series_count": 142,
+  "question_type_counts": {
+    "open_ended": 99,
+    "multiple_choice": 94,
+    "true_false": 91
+  },
+  "prompt_spec": "/home2/xuhaijie/axis_repro/axis_prompt_v2_63e627b_bundle_node2/src/models/AXIS/prompt_stage_a.py",
+  "prompt_spec_sha256": "c82aaf0d4deb177656c6166fed90f0308a0c815f627284d5bf8c85891f067dc9",
+  "mode_definitions": {
+    "lit_r5_04_joint_status_tf_neg_re2": {
+      "description": "Literature Round 5: status-first MC plus negative-cue TF RE2.",
+      "answer_boundary": false,
+      "inline_answer_boundary": false,
+      "remove_fixed_hint": false,
+      "add_output_protocol": false,
+      "rename_fixed_hint": false,
+      "add_evidence_contract": false,
+      "remove_local_hint": false,
+      "remove_window_values": false,
+      "use_expert_anomaly_analyst_opening": false,
+      "use_first_three_contract_items": false,
+      "use_revised_evidence_contract": false,
+      "standalone_fixed_hint": false,
+      "interleave_time_series_evidence": false,
+      "pareto_factors": "",
+      "routed_profile": "",
+      "literature_profile": "lit_r5_04_joint_status_tf_neg_re2",
+      "new_md_profile": ""
+    }
+  }
+}

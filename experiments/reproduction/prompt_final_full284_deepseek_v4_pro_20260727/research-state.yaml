@@ -1,36 +1,50 @@
 project:
   title: "AXIS final full-284 prompt evaluation"
-  status: completed_no_winner
+  status: "completed_locked_primary_winners_paired_repeat_not_robust"
   started: "2026-07-27"
 
 scope:
-  registered_modes: 69
-  baseline_mode: base
-  prompt_candidates: 65
-  ablation_controls: 3
+  initial_registered_modes: 69
+  later_failure_driven_rounds: "v2 rounds 1-9, including new.md compatibility"
+  baseline_mode: "base"
   rerun_known_failures: false
 
 evaluation:
-  dataset: full284
+  dataset: "full284"
   record_count: 284
-  formal_judge: deepseek-v4-pro
-  released_checkpoint_sha256: d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7
-  baseline_full284_status: completed
-  zero_correct_to_wrong_gate: removed
-  final_success: "all 10 >= Baseline; at least 3 > Baseline; OE branch changed; at least 1 OE metric > Baseline"
+  series_count: 142
+  formal_judge: "deepseek-v4-pro"
+  released_checkpoint_sha256: "d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7"
+  baseline_full284_status: "completed"
+  zero_correct_to_wrong_gate: "removed; diagnostic only"
+  final_success: "all 10 >= Baseline at 4dp; at least 3 > Baseline; OE changed; at least 1 OE metric > Baseline"
 
-screen:
-  policy: "9/10 on an audited aggregate, worst >= -0.15, positive mean, OE changed and improved, with no later broader contradiction"
-  frozen_candidates:
-    - lit_r1_08_oe_re2
-    - lit_r1_10_triplet_re2
+formal_primary:
+  status: "completed"
+  winners:
+    - "prompt_final_round9_mc_oe"
+    - "prompt_final_round9_tf_oe"
+    - "prompt_final_round9_joint"
+  best: "prompt_final_round9_joint"
+  best_nonlower_metrics: "10/10"
+  best_strict_improvements: 9
+  changed_responses: 138
+  predictions: 1136
+  scores: 2668
+  post_hoc_oe_guard: true
+
+paired_repeat:
+  status: "completed"
+  prediction_rows: 276
+  expected_score_dimensions: 554
+  role: "secondary Judge-variance audit"
+  all_routes_ten_nonlower: false
+  common_failure: "OE Relevance -0.0202"
 
 execution:
-  gpu_inference: completed
-  judge: completed
-  audit: completed
-  prompt_final_md: completed
-  commit: completed
-  push: completed
-  remote_secret_cleanup: completed
-
+  gpu_inference: "completed on authorized Port 2225 GPU server"
+  judge: "locked primary and paired repeat completed"
+  audit: "primary integrity audit passed"
+  prompt_final_md: "complete with primary and paired-repeat limitation"
+  push: "pending final paired audit"
+  credentials_exposed: false

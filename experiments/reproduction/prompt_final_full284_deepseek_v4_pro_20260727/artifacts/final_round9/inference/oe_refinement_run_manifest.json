@@ -1,0 +1,24 @@
+{
+  "checkpoint": "/home2/xuhaijie/axis_repro/full284_diag_969c618/axis_prompt_stage_a_bb1410f/experiments/checkpoints/released/model_optimizer.pth",
+  "checkpoint_sha256": "d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7",
+  "data": "/home2/xuhaijie/axis_repro/full284_diag_969c618/axis_prompt_stage_a_bb1410f/data/AXIS_qa_test",
+  "series_manifest": "/home2/xuhaijie/axis_repro/axis_prompt_v2_63e627b_bundle_node2/experiments/reproduction/prompt_final_full284_deepseek_v4_pro_20260727/round8_joint_candidate/full_series_manifest.json",
+  "series_key": "all_series",
+  "baseline_predictions": "/home2/xuhaijie/axis_repro/axis_prompt_v2_63e627b_bundle_node2/experiments/reproduction/prompt_final_full284_deepseek_v4_pro_20260727/artifacts/assembled/predictions.jsonl",
+  "baseline_predictions_sha256": "9b97fd2a86f70015b9677c1d09d91ad45d99a90b3477e7cd23b5a4626f7f6c6f",
+  "world_size": 1,
+  "modes": [
+    "v2_r5_02_oe_verbatim_or_add"
+  ],
+  "rows": 160,
+  "selected_component_rows": 99,
+  "support_series_batch_rows": 61,
+  "series_count": 80,
+  "batching": "full series",
+  "passes": 2,
+  "first_pass": "frozen canonical Baseline response",
+  "second_pass_prompt_rules": {
+    "v2_r5_02_oe_verbatim_or_add": "If the draft already directly answers every requested part, return it unchanged. Otherwise add only the missing requested information. Preserve its anomaly/normal verdict and existing evidence claims; do not add speculation or prompt commentary."
+  },
+  "runner_sha256": "97438a9d3341918a105629ac6ae01bc4f592f67fd470a02d958dcae01f752231"
+}

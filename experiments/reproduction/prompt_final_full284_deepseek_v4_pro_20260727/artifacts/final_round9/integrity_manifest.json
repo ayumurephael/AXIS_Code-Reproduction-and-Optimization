@@ -1,0 +1,42 @@
+{
+    "dataset":  "AXIS_qa_test full284",
+    "records":  284,
+    "series":  142,
+    "checkpoint_sha256":  "d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7",
+    "formal_judge":  "deepseek-v4-pro",
+    "primary":  {
+                    "prediction_rows":  1136,
+                    "prediction_sha256":  "eb7dd5a9806902acb76fa1bd820f2a528539a55eb0778fd8dd7ac004afdf5be5",
+                    "score_rows":  2668,
+                    "score_sha256":  "c9007d8d424cfad83cd0e8f82f688d4d3ba8526b9afc73e472f614149866b62d",
+                    "aligned_new_score_rows":  277,
+                    "aligned_new_scores_sha256":  "da1b0d0124c1609e0dacd6d67b29868a6a7cdb6788ebf2b2be5ee8677fd661ba",
+                    "methods":  {
+                                    "final_score_top_logprobs":  2646,
+                                    "exact_sample_mean_20":  22
+                                },
+                    "modes":  {
+                                  "base":  284,
+                                  "prompt_final_round9_mc_oe":  284,
+                                  "prompt_final_round9_tf_oe":  284,
+                                  "prompt_final_round9_joint":  284
+                              },
+                    "audit_ok":  true
+                },
+    "paired_repeat":  {
+                          "prediction_rows":  276,
+                          "prediction_sha256":  "185486535f96bd6477afe99388871221bcd1502f23bded0358ea46eaeb93f42e",
+                          "score_rows":  554,
+                          "score_sha256":  "eb95082ffff49ebdf760871cebd0fc0982d06dafe660906eadd15d7d218dc8b7",
+                          "methods":  {
+                                          "final_score_top_logprobs":  552,
+                                          "exact_sample_mean_20":  2
+                                      },
+                          "model_rows":  554,
+                          "provider_rows":  554,
+                          "missing_prompt_hash":  0,
+                          "audit_ok":  true,
+                          "all_routes_ten_nonlower":  false,
+                          "common_failure":  "OE Relevance -0.0202"
+                      }
+}

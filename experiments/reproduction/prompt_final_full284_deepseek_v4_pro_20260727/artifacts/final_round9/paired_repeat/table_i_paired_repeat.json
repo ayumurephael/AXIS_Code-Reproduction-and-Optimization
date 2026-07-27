@@ -1,0 +1,280 @@
+{
+  "role": "secondary paired Judge-variance audit",
+  "formal_result_source": "locked primary full284 run",
+  "table_i_display_precision": 4,
+  "routes": {
+    "prompt_final_round9_mc_oe": {
+      "changed_records": 95,
+      "paired_repeat_dimensions": 191,
+      "canonical_reuse_dimensions": 476,
+      "baseline_mode": "prompt_final_round9_mc_oe__paired_baseline",
+      "candidate_mode": "prompt_final_round9_mc_oe__paired_candidate",
+      "all_ten_nonlower": false,
+      "strict_improvements": 5,
+      "metrics": {
+        "MC Final": {
+          "baseline": 3.995873553058668,
+          "candidate": 4.082907206262073,
+          "absolute_delta": 0.08703365320340462,
+          "relative_percent": 2.1780882715065926,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "MC Corr.": {
+          "baseline": 4.029446532430291,
+          "candidate": 4.127667519174436,
+          "absolute_delta": 0.09822098674414459,
+          "relative_percent": 2.437580098249977,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "MC Rsn.": {
+          "baseline": 3.917536601191551,
+          "candidate": 3.978466476133224,
+          "absolute_delta": 0.06092987494167312,
+          "relative_percent": 1.5553109299129664,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "OE Final": {
+          "baseline": 3.148609136158708,
+          "candidate": 3.1496188643410212,
+          "absolute_delta": 0.0010097281823133741,
+          "relative_percent": 0.03206902281765081,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "OE Acc.": {
+          "baseline": 3.022731403339815,
+          "candidate": 3.0429322495843487,
+          "absolute_delta": 0.020200846244533555,
+          "relative_percent": 0.6682977595102775,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "OE Comp.": {
+          "baseline": 2.7919079345373405,
+          "candidate": 2.7919080125507914,
+          "absolute_delta": 7.801345081048794e-08,
+          "relative_percent": 2.794270177946104e-06,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": false
+        },
+        "OE Rel.": {
+          "baseline": 3.7116178930056773,
+          "candidate": 3.69141590864574,
+          "absolute_delta": -0.020201984359937253,
+          "relative_percent": -0.5442905207997485,
+          "nonlower_4dp": false,
+          "strict_improvement_4dp": false
+        },
+        "TF Final": {
+          "baseline": 3.3624168072342813,
+          "candidate": 3.3624168072342813,
+          "absolute_delta": 0.0,
+          "relative_percent": 0.0,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": false
+        },
+        "TF Corr.": {
+          "baseline": 3.3769245809602597,
+          "candidate": 3.3769245809602597,
+          "absolute_delta": 0.0,
+          "relative_percent": 0.0,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": false
+        },
+        "TF Justif.": {
+          "baseline": 3.3406551466453127,
+          "candidate": 3.3406551466453127,
+          "absolute_delta": 0.0,
+          "relative_percent": 0.0,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": false
+        }
+      }
+    },
+    "prompt_final_round9_tf_oe": {
+      "changed_records": 44,
+      "paired_repeat_dimensions": 89,
+      "canonical_reuse_dimensions": 578,
+      "baseline_mode": "prompt_final_round9_tf_oe__paired_baseline",
+      "candidate_mode": "prompt_final_round9_tf_oe__paired_candidate",
+      "all_ten_nonlower": false,
+      "strict_improvements": 5,
+      "metrics": {
+        "MC Final": {
+          "baseline": 4.040003148588662,
+          "candidate": 4.040003148588662,
+          "absolute_delta": 0.0,
+          "relative_percent": 0.0,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": false
+        },
+        "MC Corr.": {
+          "baseline": 4.070826981112093,
+          "candidate": 4.070826981112093,
+          "absolute_delta": 0.0,
+          "relative_percent": 0.0,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": false
+        },
+        "MC Rsn.": {
+          "baseline": 3.9680808727006536,
+          "candidate": 3.9680808727006536,
+          "absolute_delta": 0.0,
+          "relative_percent": 0.0,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": false
+        },
+        "OE Final": {
+          "baseline": 3.148609136158708,
+          "candidate": 3.1496188643410212,
+          "absolute_delta": 0.0010097281823133741,
+          "relative_percent": 0.03206902281765081,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "OE Acc.": {
+          "baseline": 3.022731403339815,
+          "candidate": 3.0429322495843487,
+          "absolute_delta": 0.020200846244533555,
+          "relative_percent": 0.6682977595102775,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "OE Comp.": {
+          "baseline": 2.7919079345373405,
+          "candidate": 2.7919080125507914,
+          "absolute_delta": 7.801345081048794e-08,
+          "relative_percent": 2.794270177946104e-06,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": false
+        },
+        "OE Rel.": {
+          "baseline": 3.7116178930056773,
+          "candidate": 3.69141590864574,
+          "absolute_delta": -0.020201984359937253,
+          "relative_percent": -0.5442905207997485,
+          "nonlower_4dp": false,
+          "strict_improvement_4dp": false
+        },
+        "TF Final": {
+          "baseline": 3.3911919473777004,
+          "candidate": 3.484945537998783,
+          "absolute_delta": 0.09375359062108268,
+          "relative_percent": 2.7646205840273748,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "TF Corr.": {
+          "baseline": 3.3956032705874213,
+          "candidate": 3.5225277290038304,
+          "absolute_delta": 0.1269244584164091,
+          "relative_percent": 3.7379060008518556,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "TF Justif.": {
+          "baseline": 3.3845749625631187,
+          "candidate": 3.4285722514912136,
+          "absolute_delta": 0.043997288928094846,
+          "relative_percent": 1.299935425119849,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        }
+      }
+    },
+    "prompt_final_round9_joint": {
+      "changed_records": 138,
+      "paired_repeat_dimensions": 277,
+      "canonical_reuse_dimensions": 390,
+      "baseline_mode": "prompt_final_round9_joint__paired_baseline",
+      "candidate_mode": "prompt_final_round9_joint__paired_candidate",
+      "all_ten_nonlower": false,
+      "strict_improvements": 8,
+      "metrics": {
+        "MC Final": {
+          "baseline": 3.995873553058668,
+          "candidate": 4.082907206262073,
+          "absolute_delta": 0.08703365320340462,
+          "relative_percent": 2.1780882715065926,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "MC Corr.": {
+          "baseline": 4.029446532430291,
+          "candidate": 4.127667519174436,
+          "absolute_delta": 0.09822098674414459,
+          "relative_percent": 2.437580098249977,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "MC Rsn.": {
+          "baseline": 3.917536601191551,
+          "candidate": 3.978466476133224,
+          "absolute_delta": 0.06092987494167312,
+          "relative_percent": 1.5553109299129664,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "OE Final": {
+          "baseline": 3.148609136158708,
+          "candidate": 3.1496188643410212,
+          "absolute_delta": 0.0010097281823133741,
+          "relative_percent": 0.03206902281765081,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "OE Acc.": {
+          "baseline": 3.022731403339815,
+          "candidate": 3.0429322495843487,
+          "absolute_delta": 0.020200846244533555,
+          "relative_percent": 0.6682977595102775,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "OE Comp.": {
+          "baseline": 2.7919079345373405,
+          "candidate": 2.7919080125507914,
+          "absolute_delta": 7.801345081048794e-08,
+          "relative_percent": 2.794270177946104e-06,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": false
+        },
+        "OE Rel.": {
+          "baseline": 3.7116178930056773,
+          "candidate": 3.69141590864574,
+          "absolute_delta": -0.020201984359937253,
+          "relative_percent": -0.5442905207997485,
+          "nonlower_4dp": false,
+          "strict_improvement_4dp": false
+        },
+        "TF Final": {
+          "baseline": 3.3911919473777004,
+          "candidate": 3.484945537998783,
+          "absolute_delta": 0.09375359062108268,
+          "relative_percent": 2.7646205840273748,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "TF Corr.": {
+          "baseline": 3.3956032705874213,
+          "candidate": 3.5225277290038304,
+          "absolute_delta": 0.1269244584164091,
+          "relative_percent": 3.7379060008518556,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        },
+        "TF Justif.": {
+          "baseline": 3.3845749625631187,
+          "candidate": 3.4285722514912136,
+          "absolute_delta": 0.043997288928094846,
+          "relative_percent": 1.299935425119849,
+          "nonlower_4dp": true,
+          "strict_improvement_4dp": true
+        }
+      }
+    }
+  }
+}

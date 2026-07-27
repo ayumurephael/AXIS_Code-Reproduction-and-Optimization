@@ -1,8 +1,8 @@
 project:
   title: "AXIS prompt research v2: evidence-use and task-family protocols"
-  status: active
+  status: "complete_locked_primary_winners_paired_repeat_not_robust"
   started: "2026-07-27"
-  continuation_of: "../prompt_literature_autoresearch_deepseek_v4_pro_20260727"
+  conclusion: "Three Round-9 routes pass the locked full284 Table-I criterion; the joint route improves 9/10 displayed metrics."
 
 constraints:
   released_checkpoint_only: true
@@ -15,52 +15,74 @@ constraints:
 evaluation:
   paper_table_i_reference: "paper140"
   broad_generalization_view: "full284"
-  development_pool: "the 144 non-paper140 QA, already exposed and used only for falsification"
+  development_pool: "the 144 non-paper140 QA, exposed and used only for falsification"
   success_criterion: "All ten Table-I metrics are no lower than the same-run Baseline; at least three are strictly higher; the OE prompt changes and at least one OE metric is strictly higher."
-  judge_variance_policy: "Use a locked primary run, then repeat paired Baseline/candidate judging for finalists because identical deepseek-v4-pro score prompts were empirically non-deterministic."
+  zero_correct_to_wrong_gate: "removed by user; diagnostic only"
+  judge_variance_policy: "Locked primary result plus paired Baseline/candidate repeat for finalists."
 
 baseline_audit:
-  old_paper140_scores: "../prompt_stage_a_deepseek_v4_pro_20260725/baseline_table.json"
-  current_full284_scores: "../prompt_final_full284_deepseek_v4_pro_20260727/final_results.json"
+  old_paper140_table_i: [4.2558, 4.3256, 4.0930, 3.0859, 2.8365, 2.7700, 3.7455, 3.6421, 3.6417, 3.6429]
+  current_full284_table_i: [4.0400, 4.0708, 3.9681, 3.1486, 3.0328, 2.7818, 3.7116, 3.3624, 3.3769, 3.3407]
   same_paper140_model_responses: "140/140"
   same_paper140_prompt_texts: "140/140"
-  main_difference: "The former table uses 140 QA / 70 series; the later table uses all 284 QA / 142 series."
-  secondary_difference: "Repeated deepseek-v4-pro judging changed raw integer ratings despite identical score-prompt hashes."
+  main_difference: "The former table uses 140 QA / 70 series; the latter uses all 284 QA / 142 series."
+  secondary_difference: "Repeated deepseek-v4-pro judging is not exactly deterministic."
 
 search:
-  current_round: round_4_oe_coverage_design
-  round_1_new_modes: 9
-  round_1_gpu_outputs: "684 full-series batch rows / 409 changed components"
-  screening_judge_dimensions: 164
-  screening_survivors: 7
-  screening_rejected: ["v2_r1_05_oe_fixed_postnote", "v2_r1_09_tf_prefix_context"]
-  validation_judge_dimensions: 398
-  validation_survivors:
-    - "v2_r1_06_mc_context_balanced"
-    - "v2_r1_07_mc_content_output"
-  validation_rejected_oe_tf: 5
-  round_2_new_md_modes: 5
-  round_2_status: "complete; all five released-checkpoint compatibility modes failed screening24"
-  round_2_survivors: []
-  round_3_main_modes: 5
-  round_3_holdout_judge_dimensions: 74
-  round_3_status: "complete; both MC components and all three OE lexical routers failed holdout48"
-  round_3_survivors: []
+  current_round: "round_9_formal_complete"
   outer_loop_interval: "5-10 experiments"
-  paper140_candidate_runs: 0
-  full284_candidate_runs: 0
+  known_failed_prompts_rerun: false
+  round_1: "Two MC rules survived development; OE/TF rules failed one or more dimensions."
+  round_2_new_md: "All five released-checkpoint compatibility modes failed screening24."
+  round_3: "MC and lexical OE routers failed exposed holdout48."
+  round_4: "Five OE coverage prompts failed validation72."
+  round_5: "Two-pass verbatim_or_add was closest, but failed holdout OE Completeness/Relevance."
+  round_6: "Three checkpoint A/B selectors were unreliable."
+  round_7: "Broad malformed-answer repair fixed one case and harmed one case."
+  round_8: "No-anomaly gate passed holdout but failed full284 because three repairs deleted content."
+  round_9: "Added a post-hoc 60% word-retention guard; selected one OE repair on full284."
+
+formal_primary:
+  dataset: "full284"
+  records: 284
+  series: 142
+  question_type_counts:
+    multiple_choice: 94
+    open_ended: 99
+    true_false: 91
+  candidates:
+    prompt_final_round9_mc_oe:
+      all_ten_nonlower: true
+      strict_improvements: 6
+    prompt_final_round9_tf_oe:
+      all_ten_nonlower: true
+      strict_improvements: 6
+    prompt_final_round9_joint:
+      all_ten_nonlower: true
+      strict_improvements: 9
+  joint_absolute_deltas: [0.0929756592, 0.1100250494, 0.0531937486, 0.0070706110, 0.0101007286, 0.0101010074, 0.0000000114, 0.1364829061, 0.1615374419, 0.0989011024]
+  changed_responses:
+    multiple_choice: 94
+    open_ended: 1
+    true_false: 43
+  post_hoc_limit: "Round-9 word-retention threshold was designed after inspecting Round-8 full284 failures; no untouched-test claim."
+  prediction_sha256: "eb7dd5a9806902acb76fa1bd820f2a528539a55eb0778fd8dd7ac004afdf5be5"
+  score_sha256: "c9007d8d424cfad83cd0e8f82f688d4d3ba8526b9afc73e472f614149866b62d"
+
+paired_repeat:
+  status: "completed"
+  changed_records: 138
+  prediction_rows: 276
+  expected_score_dimensions: 554
+  role: "secondary Judge-variance audit; does not replace locked primary"
+  all_routes_ten_nonlower: false
+  joint_strict_improvements: 8
+  common_failure: "OE Relevance -0.0202; all routes 9/10"
 
 workspace:
   baseline_audit: "baseline-audit.md"
   literature: "literature/survey.md"
   log: "research-log.md"
   findings: "findings.md"
-  round_1_protocol: "experiments/round-1/protocol.md"
-  round_1_screening_analysis: "experiments/round-1/screening-analysis.md"
-  round_1_validation_protocol: "experiments/round-1/validation-protocol.md"
-  round_1_validation_analysis: "experiments/round-1/validation-analysis.md"
-  round_2_protocol: "experiments/round-2-new-md/protocol.md"
-  round_2_analysis: "experiments/round-2-new-md/analysis.md"
-  round_2_source: "../../../architecture_redesign_fixedhint_frozen/改进系列说明/prompt 改进/new.md"
-  round_3_protocol: "experiments/round-3-main/protocol.md"
-  round_3_holdout_analysis: "experiments/round-3-main/holdout-analysis.md"
+  final_report: "../prompt_final_full284_deepseek_v4_pro_20260727/prompt_final.md"
+  final_primary_artifacts: "../prompt_final_full284_deepseek_v4_pro_20260727/artifacts/final_round9"
