@@ -92,7 +92,14 @@ def main() -> None:
     manifest = json.loads(
         Path(args.series_manifest).read_text(encoding="utf-8")
     )
-    allowed = set(manifest[args.series_key])
+    if args.series_key == "search_pool_series":
+        allowed = set(
+            manifest["screening_series"]
+            + manifest["validation_series"]
+            + manifest["holdout_series"]
+        )
+    else:
+        allowed = set(manifest[args.series_key])
     records = [row for row in records if row.series_file in allowed]
 
     grouped = collections.OrderedDict()
