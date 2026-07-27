@@ -75,3 +75,18 @@ Round 1 is complete and audited. Results are exploratory because the split was e
 - Does the semantic qualitative MC route survive the exposed holdout48 that defeated earlier header-renamed/stability MC prompts?
 - Can a question-only TF router retain negation-case gains with zero positive-anomaly regressions?
 - Is a no-reread `Answer:` prefix more compatible with the checkpoint than requiring an exact sentence at the end?
+
+## Round 4 findings
+
+1. Question-surface routing works only when its lexical boundary is narrow. Explicit grammatical negation passes every pooled and constituent guard; broad normality vocabulary fails screening TF Justification.
+2. `normal`, `stable`, `consistent`, and similar tokens are semantic content, not reliable markers of logical polarity. Routing on them transforms questions that do not need polarity repair.
+3. Protecting positive anomaly propositions by exact Baseline reuse eliminates the known `series_000132:1` regression.
+4. A natural answer-first TF prefix is fully compatible on the routed sample: 15/15 responses start with an unambiguous `Answer: True/False.`.
+5. No-reread prefixing retains TF gains without the attention cost of repeating the entire question.
+6. The strongest safe joint route improves six changed MC/TF dimensions and leaves all four OE dimensions exactly Baseline on pooled development96, with zero correct→wrong transitions.
+
+## Current questions after Round 4
+
+- Does semantic qualitative MC remain non-regressive on the exposed holdout48?
+- Does the narrow TF prefix add robust holdout value beyond the MC-only route?
+- If a unique route passes the frozen holdout gate, does it retain all ten formal paper140 metrics?

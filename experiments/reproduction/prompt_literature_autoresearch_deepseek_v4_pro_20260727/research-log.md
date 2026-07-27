@@ -71,3 +71,15 @@ Universal qualitative TF RE2 improves pooled TF by +0.361/+0.379/+0.333 and fixe
 ## 2026-07-27 — Cycle 4 preregistration
 
 Frozen six routes. Four reuse existing components to test explicit-negation and broader non-anomaly routers with qualitative TF RE2, alone and with the successful semantic MC component. Two routes test an explicit-negation-only, no-reread TF prefix, alone and in the same joint candidate. Positive anomaly propositions and all OE records retain the exact Baseline prompt.
+
+## 2026-07-27 — Outer loop 4
+
+Round 4 added 96/96 GPU predictions for the no-reread prefix and 30/30 new `deepseek-v4-pro` dimensions; four other routes reused audited Round-3 components. The final audit passed for 672 predictions and 1,547 scores.
+
+The broad non-anomaly router is rejected despite the highest pooled mean. It reduces screening TF Justification by 0.111 because ordinary words such as `normal` and `stable` over-route questions and compress multi-phase evidence. The explicit-negative router passes pooled and both constituent gates with zero closed-task correct→wrong transitions.
+
+`lit_r4_06_joint_semantic_tf_neg_prefix` improves pooled MC by +0.256/+0.324/+0.097 and TF by +0.255/+0.242/+0.273, while retaining exact Baseline OE. All 15 routed TF responses have the requested unambiguous first-answer prefix. It advances with the MC-only `lit_r3_02_mc_semantic_qual` to the preregistered exposed holdout48 check.
+
+## 2026-07-27 — Exposed holdout preregistration
+
+Frozen exactly two candidates and the exact-component assembly rule before new holdout inference. Both share the semantic qualitative MC component. The joint candidate adds the narrow, no-reread TF prefix only when an explicit grammatical negation is present; all other TF and all OE records reuse exact Baseline. A candidate must retain all ten holdout metrics, have zero closed-task correct→wrong transitions, satisfy prefix compliance, and pass the provenance/Judge audit before it can be locked for the one permitted paper140 run.

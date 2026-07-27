@@ -80,17 +80,32 @@ def main() -> None:
     parser.add_argument("--output-predictions", required=True)
     parser.add_argument("--output-scores", required=True)
     parser.add_argument("--provenance", required=True)
+    parser.add_argument("--routes", nargs="+")
     args = parser.parse_args()
 
     predictions = read_jsonl(args.r3_predictions)
     scores = read_jsonl(args.r3_scores)
-    routes = list(REUSE_ROUTES)
+    requested_routes = args.routes
+    known_routes = set(REUSE_ROUTES) | set(PREFIX_ROUTES)
+    if requested_routes:
+        unknown_routes = set(requested_routes) - known_routes
+        if unknown_routes:
+            raise ValueError(f"Unknown routes: {sorted(unknown_routes)}")
+    routes = [
+        route for route in REUSE_ROUTES
+        if requested_routes is None or route in requested_routes
+    ]
     if bool(args.prefix_predictions) != bool(args.prefix_scores):
         raise ValueError("Prefix predictions and scores must be supplied together")
     if args.prefix_predictions:
         predictions.extend(read_jsonl(args.prefix_predictions))
         scores.extend(read_jsonl(args.prefix_scores))
-        routes.extend(PREFIX_ROUTES)
+        routes.extend(
+            route for route in PREFIX_ROUTES
+            if requested_routes is None or route in requested_routes
+        )
+    elif requested_routes and set(requested_routes) & set(PREFIX_ROUTES):
+        raise ValueError("Requested prefix routes require prefix inputs")
 
     pred_index = index_unique(predictions)
     score_index = index_unique(scores, dimensions=True)
