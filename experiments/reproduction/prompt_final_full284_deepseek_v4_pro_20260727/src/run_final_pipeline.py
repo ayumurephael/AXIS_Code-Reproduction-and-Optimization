@@ -134,17 +134,6 @@ def main() -> None:
         ("base", "lit_r1_08_oe_re2", "lit_r1_10_triplet_re2"),
         ASSEMBLED_AUDIT,
     )
-    run(
-        [
-            sys.executable,
-            "-m",
-            "tools.axis_repro.table_runner",
-            "--scores",
-            str(assembled_scores),
-            "--output-prefix",
-            str(PROJECT / "tables/full284"),
-        ]
-    )
     run([sys.executable, str(RENDERER)])
 
 

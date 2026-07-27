@@ -1,0 +1,118 @@
+{
+  "models": {
+    "base": {
+      "open_ended/final": 3.148608874155466,
+      "open_ended/accuracy": 3.0328315515948017,
+      "open_ended/completeness": 2.781807030528073,
+      "open_ended/relevance": 3.711617901374866,
+      "multiple_choice/final": 4.040003148588662,
+      "multiple_choice/correctness": 4.070826981112093,
+      "multiple_choice/reasoning_quality": 3.9680808727006536,
+      "true_false/final": 3.3624168072342804,
+      "true_false/correctness": 3.376924580960259,
+      "true_false/justification_quality": 3.340655146645313,
+      "macro_final": 3.5170096099928028
+    },
+    "lit_r1_08_oe_re2": {
+      "open_ended/final": 3.0981737361498762,
+      "open_ended/accuracy": 3.0000119023681893,
+      "open_ended/completeness": 2.6670333953836494,
+      "open_ended/relevance": 3.7156929397891094,
+      "multiple_choice/final": 4.040003148588662,
+      "multiple_choice/correctness": 4.070826981112093,
+      "multiple_choice/reasoning_quality": 3.9680808727006536,
+      "true_false/final": 3.3624168072342804,
+      "true_false/correctness": 3.376924580960259,
+      "true_false/justification_quality": 3.340655146645313,
+      "macro_final": 3.500197897324273
+    },
+    "lit_r1_10_triplet_re2": {
+      "open_ended/final": 3.0981737361498762,
+      "open_ended/accuracy": 3.0000119023681893,
+      "open_ended/completeness": 2.6670333953836494,
+      "open_ended/relevance": 3.7156929397891094,
+      "multiple_choice/final": 4.01353864716245,
+      "multiple_choice/correctness": 4.074475057652488,
+      "multiple_choice/reasoning_quality": 3.8713536893523646,
+      "true_false/final": 3.5663817429066595,
+      "true_false/correctness": 3.5923215296415467,
+      "true_false/justification_quality": 3.5274720628043297,
+      "macro_final": 3.5593647087396625
+    }
+  },
+  "paired_vs_axis": {
+    "lit_r1_08_oe_re2": {
+      "mean": -0.017581262896314804,
+      "low": -0.06891861503928672,
+      "high": 0.0347089444347585
+    },
+    "lit_r1_10_triplet_re2": {
+      "mean": 0.0390143216534129,
+      "low": -0.08599711335005318,
+      "high": 0.16332969550742732
+    }
+  },
+  "decisions": {
+    "lit_r1_08_oe_re2": {
+      "deltas": {
+        "multiple_choice/final": 0.0,
+        "multiple_choice/correctness": 0.0,
+        "multiple_choice/reasoning_quality": 0.0,
+        "open_ended/final": -0.05043513800558985,
+        "open_ended/accuracy": -0.0328196492266124,
+        "open_ended/completeness": -0.11477363514442374,
+        "open_ended/relevance": 0.004075038414243615,
+        "true_false/final": 0.0,
+        "true_false/correctness": 0.0,
+        "true_false/justification_quality": 0.0
+      },
+      "nonnegative": 7,
+      "improved": 1,
+      "oe_prompt_changed": true,
+      "oe_improved": 1,
+      "passed": false
+    },
+    "lit_r1_10_triplet_re2": {
+      "deltas": {
+        "multiple_choice/final": -0.026464501426211484,
+        "multiple_choice/correctness": 0.0036480765403945625,
+        "multiple_choice/reasoning_quality": -0.096727183348289,
+        "open_ended/final": -0.05043513800558985,
+        "open_ended/accuracy": -0.0328196492266124,
+        "open_ended/completeness": -0.11477363514442374,
+        "open_ended/relevance": 0.004075038414243615,
+        "true_false/final": 0.20396493567237917,
+        "true_false/correctness": 0.2153969486812879,
+        "true_false/justification_quality": 0.18681691615901652
+      },
+      "nonnegative": 5,
+      "improved": 5,
+      "oe_prompt_changed": true,
+      "oe_improved": 1,
+      "passed": false
+    }
+  },
+  "metadata": {
+    "record_count_per_mode": 284,
+    "prediction_rows": 852,
+    "score_rows": 2001,
+    "question_type_counts": {
+      "open_ended": 99,
+      "multiple_choice": 94,
+      "true_false": 91
+    },
+    "judge_models": {
+      "deepseek-v4-pro": 2001
+    },
+    "judge_providers": {
+      "deepseek": 2001
+    },
+    "score_methods": {
+      "exact_sample_mean_20": 19,
+      "final_score_top_logprobs": 1982
+    },
+    "predictions_sha256": "d97197cf775350eca0ace0670d41bc9e685c1704bdc8f5d575e702af2c8cdb5e",
+    "scores_sha256": "b15681500f111f74eb9f2cd2ca7e8429af0cdbd078490e9889a037fb8330818b"
+  },
+  "cases": []
+}

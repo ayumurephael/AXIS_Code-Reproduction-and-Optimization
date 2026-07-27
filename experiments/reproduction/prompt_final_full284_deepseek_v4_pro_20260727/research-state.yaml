@@ -1,6 +1,6 @@
 project:
   title: "AXIS final full-284 prompt evaluation"
-  status: protocol_frozen
+  status: completed_no_winner
   started: "2026-07-27"
 
 scope:
@@ -15,7 +15,7 @@ evaluation:
   record_count: 284
   formal_judge: deepseek-v4-pro
   released_checkpoint_sha256: d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7
-  baseline_full284_status: pending
+  baseline_full284_status: completed
   zero_correct_to_wrong_gate: removed
   final_success: "all 10 >= Baseline; at least 3 > Baseline; OE branch changed; at least 1 OE metric > Baseline"
 
@@ -26,11 +26,11 @@ screen:
     - lit_r1_10_triplet_re2
 
 execution:
-  gpu_inference: pending
-  judge: pending
-  audit: pending
-  prompt_final_md: pending
+  gpu_inference: completed
+  judge: completed
+  audit: completed
+  prompt_final_md: completed
   commit: pending
   push: pending
-  remote_secret_cleanup: pending
+  remote_secret_cleanup: completed
 

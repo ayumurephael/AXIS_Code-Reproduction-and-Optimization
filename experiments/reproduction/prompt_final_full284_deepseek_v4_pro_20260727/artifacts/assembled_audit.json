@@ -1,0 +1,27 @@
+{
+  "prediction_rows": 852,
+  "records": 284,
+  "prediction_modes": {
+    "base": 284,
+    "lit_r1_08_oe_re2": 284,
+    "lit_r1_10_triplet_re2": 284
+  },
+  "score_rows": 2001,
+  "score_methods": {
+    "exact_sample_mean_20": 19,
+    "final_score_top_logprobs": 1982
+  },
+  "score_models": {
+    "deepseek-v4-pro": 2001
+  },
+  "score_providers": {
+    "deepseek": 2001
+  },
+  "score_enable_thinking": {
+    "auto": 2001
+  },
+  "logprobs_returned": 1982,
+  "valid_prompt_hashes": 2001,
+  "errors": [],
+  "ok": true
+}

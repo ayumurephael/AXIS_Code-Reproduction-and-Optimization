@@ -443,10 +443,15 @@ def main() -> None:
             "rubric、同一评分读出。",
             "- 发布 checkpoint SHA-256："
             "`d22a0ab930d3929e91090923e2046269f1a7cd28eb8de37ee8566c67db1a97a7`。",
+            "- GPU 推理源提交："
+            "`c113d3080375f05cec2b73702e8c1d2f5bcffa0f`；后续提交只增加"
+            "精确复用、审计、报告与 Judge 断线恢复代码，未改变正式 Prompt。",
             f"- 组装后预测 `{metadata['prediction_rows']}` 行；评分 "
             f"`{metadata['score_rows']}` 行；每个 Prompt 284 个回答。",
             f"- Baseline 题型分布：`{metadata['question_type_counts']}`。",
-            f"- Judge 方法分布：`{metadata['score_methods']}`。",
+            "- 原始 Judge 方法：`final_score_top_logprobs=1322`，"
+            "`exact_sample_mean_20=12`；精确复用组装后方法分布："
+            f"`{metadata['score_methods']}`。",
             f"- 预测 SHA-256：`{metadata['predictions_sha256']}`。",
             f"- 评分 SHA-256：`{metadata['scores_sha256']}`。",
             "",

@@ -1,0 +1,26 @@
+{
+  "prediction_rows": 568,
+  "records": 284,
+  "prediction_modes": {
+    "base": 284,
+    "lit_r1_10_triplet_re2": 284
+  },
+  "score_rows": 1334,
+  "score_methods": {
+    "final_score_top_logprobs": 1322,
+    "exact_sample_mean_20": 12
+  },
+  "score_models": {
+    "deepseek-v4-pro": 1334
+  },
+  "score_providers": {
+    "deepseek": 1334
+  },
+  "score_enable_thinking": {
+    "auto": 1334
+  },
+  "logprobs_returned": 1322,
+  "valid_prompt_hashes": 1334,
+  "errors": [],
+  "ok": true
+}
