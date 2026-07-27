@@ -1,0 +1,42 @@
+project:
+  title: "AXIS prompt research v2: evidence-use and task-family protocols"
+  status: active
+  started: "2026-07-27"
+  continuation_of: "../prompt_literature_autoresearch_deepseek_v4_pro_20260727"
+
+constraints:
+  released_checkpoint_only: true
+  retraining_allowed: false
+  local_gpu_allowed: false
+  formal_judge: "deepseek-v4-pro"
+  do_not_repeat_known_failures: true
+  preserve_credentials: true
+
+evaluation:
+  paper_table_i_reference: "paper140"
+  broad_generalization_view: "full284"
+  development_pool: "the 144 non-paper140 QA, already exposed and used only for falsification"
+  success_criterion: "All ten Table-I metrics are no lower than the same-run Baseline; at least three are strictly higher; the OE prompt changes and at least one OE metric is strictly higher."
+  judge_variance_policy: "Use a locked primary run, then repeat paired Baseline/candidate judging for finalists because identical deepseek-v4-pro score prompts were empirically non-deterministic."
+
+baseline_audit:
+  old_paper140_scores: "../prompt_stage_a_deepseek_v4_pro_20260725/baseline_table.json"
+  current_full284_scores: "../prompt_final_full284_deepseek_v4_pro_20260727/final_results.json"
+  same_paper140_model_responses: "140/140"
+  same_paper140_prompt_texts: "140/140"
+  main_difference: "The former table uses 140 QA / 70 series; the later table uses all 284 QA / 142 series."
+  secondary_difference: "Repeated deepseek-v4-pro judging changed raw integer ratings despite identical score-prompt hashes."
+
+search:
+  current_round: round_1_preregistered
+  round_1_new_modes: 9
+  outer_loop_interval: "5-10 experiments"
+  paper140_candidate_runs: 0
+  full284_candidate_runs: 0
+
+workspace:
+  baseline_audit: "baseline-audit.md"
+  literature: "literature/survey.md"
+  log: "research-log.md"
+  findings: "findings.md"
+  round_1_protocol: "experiments/round-1/protocol.md"
