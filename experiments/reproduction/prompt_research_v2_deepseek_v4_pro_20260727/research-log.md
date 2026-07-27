@@ -45,3 +45,22 @@ The 144 non-paper records are used as an exposed falsification pool. Unchanged
 question families reuse canonical Baseline predictions and Judge scores
 exactly. No candidate may reach `paper140` merely because it improves a small
 24-QA screen.
+
+## 2026-07-27 — Round 1 screening24 and outer-loop synthesis
+
+Two A100s on the authorized Port-2225 node produced 684 full-series batch
+rows: 409 selected task-family components and 275 support rows. The selected
+count exactly matched the preregistered prompt-change calculation. Formal
+screening used 164 `deepseek-v4-pro` Judge dimensions: 162 probability-score
+rows and two registered exact-20 fallbacks.
+
+Both MC rules improved all three MC metrics, and the whole-statement TF rule
+improved TF Final and Justification with effectively unchanged Correctness.
+Four OE evidence-use rules raised Accuracy, but all lost Relevance on the
+small screen. Failure inspection showed that direct anomaly decisions often
+omitted requested boundary/method/subtype coverage. The Fixed-role postnote
+and exact TF-prefix rule reduced every changed-family dimension.
+
+The wide screen rejects only those two all-dimension failures. Seven modes
+advance to validation72 under the frozen
+`experiments/round-1/validation-protocol.md`.

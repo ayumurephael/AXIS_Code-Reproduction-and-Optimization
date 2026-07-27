@@ -34,3 +34,18 @@ recognition without the distribution shift and numeric salience caused by a
 full Evidence Contract. Because Table-I scoring is family-specific, the rule
 should be tested separately for OE, MC, and TF before exact-component
 combination.
+
+## Round 1 screening findings
+
+1. MC content errors are more responsive to short evidence arbitration than
+   to rigid answer formatting: two severe wrong-option cases became correct,
+   while the exact trained answer boundary was preserved.
+2. OE has two separable failure axes. Evidence-use wording can improve the
+   anomaly verdict, yet lower Relevance when the answer omits requested
+   methods, boundary comparisons, or multiple anomaly subtypes.
+3. A semantic explanation of Fixed tokens is not a harmless rename. Even a
+   post-token note reduced all OE dimensions, so role renaming should not be
+   reused with the released checkpoint.
+4. Whole-statement TF guidance can correct negated normality decisions, but
+   exact-prefix control reduced all TF metrics. Output cleanliness and answer
+   quality are not interchangeable objectives.

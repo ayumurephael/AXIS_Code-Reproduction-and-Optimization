@@ -28,8 +28,12 @@ baseline_audit:
   secondary_difference: "Repeated deepseek-v4-pro judging changed raw integer ratings despite identical score-prompt hashes."
 
 search:
-  current_round: round_1_preregistered
+  current_round: round_1_validation72
   round_1_new_modes: 9
+  round_1_gpu_outputs: "684 full-series batch rows / 409 changed components"
+  screening_judge_dimensions: 164
+  screening_survivors: 7
+  screening_rejected: ["v2_r1_05_oe_fixed_postnote", "v2_r1_09_tf_prefix_context"]
   outer_loop_interval: "5-10 experiments"
   paper140_candidate_runs: 0
   full284_candidate_runs: 0
@@ -40,3 +44,5 @@ workspace:
   log: "research-log.md"
   findings: "findings.md"
   round_1_protocol: "experiments/round-1/protocol.md"
+  round_1_screening_analysis: "experiments/round-1/screening-analysis.md"
+  round_1_validation_protocol: "experiments/round-1/validation-protocol.md"
