@@ -1,0 +1,30 @@
+project:
+  title: "AXIS Round 9 paper140 multi-Judge evaluation"
+  status: "protocol_locked"
+  started: "2026-07-28"
+
+evaluation:
+  dataset: "paper140"
+  records_per_mode: 140
+  modes:
+    - "base"
+    - "prompt_final_round9_mc_oe"
+    - "prompt_final_round9_tf_oe"
+    - "prompt_final_round9_joint"
+  judges:
+    - "deepseek-v4-pro"
+    - "qwen3.5-397b-a17b"
+    - "qwen3-30b-a3b-instruct-2507"
+  gemini_excluded: true
+  inference_rerun: false
+  exact_response_deduplication: true
+  expanded_dimensions_per_judge: 1340
+
+execution:
+  predictions_prepared: false
+  deepseek_complete: false
+  qwen35_complete: false
+  qwen30b_complete: false
+  report_complete: false
+  credentials_exposed: false
+
