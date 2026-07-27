@@ -715,6 +715,44 @@ ROUTED_R3_PROFILES = {
     },
 }
 
+NEW_MD_SHORT_EVIDENCE_RULE = (
+    "Use Window Values and Per-Step Analysis jointly. Per-Step token k "
+    "corresponds to Window value k in the listed order. Overall Summary "
+    "Hints are shared task controls, not sample evidence. Treat the question "
+    "and options as hypotheses."
+)
+
+NEW_MD_FULL_EVIDENCE_USE_RULE = """Treat the question and answer options as hypotheses, not as evidence.
+
+Each evidence row contains:
+1. an observed value describing what happens locally; and
+2. an aligned full-series context signal indicating whether that local
+   behavior is expected or unexpected relative to the complete time series.
+
+Use the value and its aligned context jointly. Do not classify a point as
+anomalous merely because its value is large, small, increasing, decreasing,
+or variable. Shared Task-Control Tokens and option positions cannot justify
+a sample-specific conclusion."""
+
+NEW_MD_OUTPUT_PROTOCOLS = {
+    "multiple_choice": (
+        'Begin with "<LETTER>) <exact selected option text>".\n'
+        "Then give 2–4 concise sentences grounded in the aligned evidence."
+    ),
+    "true_false": (
+        'Begin with exactly "True." or "False."\n'
+        "Then identify the decisive part of the proposition and justify it "
+        "using\n"
+        "the aligned evidence."
+    ),
+    "open_ended": (
+        "Begin with a direct diagnostic conclusion.\n"
+        "Then give 3–5 concise sentences covering the evidence requested by "
+        "the question."
+    ),
+}
+
+
 EXPERT_ANOMALY_ANALYST_OPENING = (
     "You are an expert time-series anomaly analyst. Produce one precise, "
     "evidence-grounded answer to the question."
@@ -725,6 +763,7 @@ EXPERT_ANOMALY_ANALYST_OPENING = (
 class PromptCondition:
     description: str
     answer_boundary: bool = False
+    inline_answer_boundary: bool = False
     remove_fixed_hint: bool = False
     add_output_protocol: bool = False
     rename_fixed_hint: bool = False
@@ -739,6 +778,7 @@ class PromptCondition:
     pareto_factors: str = ""
     routed_profile: str = ""
     literature_profile: str = ""
+    new_md_profile: str = ""
 
 
 MODE_SPECS: Dict[str, PromptCondition] = {
@@ -1076,6 +1116,32 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         "Prompt research v2 Round 1: minimal TF verdict prefix with context.",
         literature_profile="v2_r1_09_tf_prefix_context",
     ),
+    "v2_r2_01_new_short_rule": PromptCondition(
+        "new.md P1: short compatibility Evidence Rule on released scaffold.",
+        new_md_profile="p1_short_rule",
+    ),
+    "v2_r2_02_new_step_aligned": PromptCondition(
+        "new.md P2: P1 plus Value-before-Local aligned rows.",
+        interleave_time_series_evidence=True,
+        new_md_profile="p2_step_aligned",
+    ),
+    "v2_r2_03_new_question_first": PromptCondition(
+        "new.md P3: P2 plus Question before aligned evidence.",
+        interleave_time_series_evidence=True,
+        new_md_profile="p3_question_first",
+    ),
+    "v2_r2_04_new_evidence_last": PromptCondition(
+        "new.md P4: Fixed-first, Question-first, and aligned evidence-last.",
+        interleave_time_series_evidence=True,
+        new_md_profile="p4_evidence_last",
+    ),
+    "v2_r2_05_new_full_prompt": PromptCondition(
+        "Complete new.md prompt with short active output protocol and inline "
+        "Answer: boundary.",
+        inline_answer_boundary=True,
+        interleave_time_series_evidence=True,
+        new_md_profile="p5_full",
+    ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
@@ -1196,6 +1262,14 @@ V2_R1_MODES = (
     "v2_r1_09_tf_prefix_context",
 )
 
+V2_R2_NEW_MD_MODES = (
+    "v2_r2_01_new_short_rule",
+    "v2_r2_02_new_step_aligned",
+    "v2_r2_03_new_question_first",
+    "v2_r2_04_new_evidence_last",
+    "v2_r2_05_new_full_prompt",
+)
+
 
 FOLLOWUP_PROMPT_MODES = (
     "expert_contract3_fixed_section",
@@ -1304,6 +1378,125 @@ def build_question_prompt(
         if condition.rename_fixed_hint
         else "Overall Summary Hints"
     )
+
+    if condition.new_md_profile:
+        profile = condition.new_md_profile
+        opening = (
+            "You are an expert time series analyst. Analyze the provided "
+            "data and answer the question."
+        )
+        short_rule = "### Evidence Rule\n" + NEW_MD_SHORT_EVIDENCE_RULE
+        if profile == "p1_short_rule":
+            return f"""{opening}
+
+### Time Series Data
+- **Window:** Steps {start} to {end}
+- **Values (scaled by 100):** {serialized_values}
+
+### Contextual Hints
+- **Per-Step Analysis:** {local_hint_tokens}
+- **Overall Summary Hints:** {fixed_hint_tokens}
+
+{short_rule}
+
+### Question
+{question}"""
+
+        if aligned_rows is None:
+            raise ValueError(f"new.md profile {profile!r} requires aligned rows")
+        new_rows = (
+            aligned_rows
+            .replace(" | value=", " | Value ")
+            .replace(" | context=", " | Aligned context ")
+        )
+        evidence = f"""### Aligned Sample Evidence
+
+The serialized window is [{start}, {end}), covering steps {start} through
+{end - 1}. Values are multiplied by 100 and have no implied physical unit.
+
+{new_rows}"""
+
+        if profile == "p2_step_aligned":
+            return f"""{opening}
+
+{evidence}
+
+### Contextual Hints
+- **Overall Summary Hints:** {fixed_hint_tokens}
+
+{short_rule}
+
+### Question
+{question}"""
+
+        if profile == "p3_question_first":
+            return f"""{opening}
+
+### Question
+{question}
+
+{evidence}
+
+### Contextual Hints
+- **Overall Summary Hints:** {fixed_hint_tokens}
+
+{short_rule}"""
+
+        shared = f"""### Shared Task-Control Tokens
+
+The following tokens are identical across samples. They control how the task
+is performed, but they are not evidence that this sample is normal or anomalous.
+
+{fixed_hint_tokens}"""
+        question_section = f"""### Question
+
+Question type: {question_type}
+
+{question}"""
+
+        if profile == "p4_evidence_last":
+            return f"""{opening}
+
+{shared}
+
+{question_section}
+
+{short_rule}
+
+{evidence}"""
+
+        if profile != "p5_full":
+            raise ValueError(f"Unsupported new.md profile: {profile!r}")
+        try:
+            output_rule = NEW_MD_OUTPUT_PROTOCOLS[question_type]
+        except KeyError as exc:
+            raise ValueError(
+                f"Unsupported question_type {question_type!r} for new.md "
+                f"full prompt; expected one of {sorted(NEW_MD_OUTPUT_PROTOCOLS)}"
+            ) from exc
+        return f"""You are an expert time-series anomaly analyst. Answer the question using the
+sample-specific evidence provided below.
+
+{shared}
+
+{question_section}
+
+### Evidence-Use Rule
+
+{NEW_MD_FULL_EVIDENCE_USE_RULE}
+
+{evidence}
+
+### Output Rule
+
+{output_rule}
+
+Perform the evidence checks internally. Output only the requested final
+answer and its concise evidence-based explanation.
+
+### Final Answer
+
+Answer:"""
 
     if condition.literature_profile:
         try:

@@ -346,15 +346,43 @@ class AXIS(nn.Module):
             )
             question_prompts.append(question_prompt)
             answer_prompts.append(
-                answers[i] if condition.answer_boundary else f"Answer: {answers[i]}"
+                answers[i]
+                if (
+                    condition.answer_boundary
+                    or condition.inline_answer_boundary
+                )
+                else f"Answer: {answers[i]}"
             )
         question_input = self.tokenizer(
             question_prompts,
             return_tensors="pt",
             padding=True,
-            truncation=True,
+            # new.md requires an explicit no-truncation compatibility audit.
+            # Other modes retain the released tokenizer behavior exactly.
+            truncation=not bool(condition.new_md_profile),
             add_special_tokens=True
         )
+        if condition.new_md_profile:
+            for i in range(batch_size):
+                row_ids = question_input["input_ids"][i]
+                actual_local = int(
+                    (row_ids == self.local_hint_token_id).sum().item()
+                )
+                expected_local = end_indices[i] - start_indices[i]
+                if actual_local != expected_local:
+                    raise RuntimeError(
+                        "new.md Local placeholder integrity failure: "
+                        f"expected {expected_local}, found {actual_local}"
+                    )
+                actual_fixed = int(
+                    (row_ids == self.fixed_hint_token_id).sum().item()
+                )
+                if actual_fixed != self.num_fixed_tokens:
+                    raise RuntimeError(
+                        "new.md Fixed placeholder integrity failure: "
+                        f"expected {self.num_fixed_tokens}, "
+                        f"found {actual_fixed}"
+                    )
         answer_input = self.tokenizer(
             answer_prompts,
             return_tensors="pt",
@@ -364,7 +392,29 @@ class AXIS(nn.Module):
         )
         eos_ids = torch.tensor(self.tokenizer.eos_token_id).reshape(1, -1).repeat_interleave(batch_size, 0)
         eos_mask = torch.ones(batch_size, 1)
-        if condition.answer_boundary:
+        if condition.inline_answer_boundary:
+            # The new.md full prefix already ends in the literal ``Answer:``.
+            # Do not insert the legacy intermediate EOS or a second boundary.
+            generation_prefix_ids = question_input["input_ids"]
+            generation_prefix_mask = question_input["attention_mask"]
+            full_input_ids = torch.cat(
+                [generation_prefix_ids, answer_input["input_ids"], eos_ids],
+                dim=1,
+            )
+            full_attention_mask = torch.cat(
+                [generation_prefix_mask, answer_input["attention_mask"], eos_mask],
+                dim=1,
+            )
+            full_labels = torch.cat(
+                [
+                    torch.full_like(generation_prefix_ids, -100),
+                    answer_input["input_ids"],
+                    eos_ids,
+                ],
+                dim=1,
+            )
+            question_length = generation_prefix_ids.shape[1]
+        elif condition.answer_boundary:
             answer_boundary_input = self.tokenizer(
                 ["Answer:"] * batch_size,
                 return_tensors="pt",
