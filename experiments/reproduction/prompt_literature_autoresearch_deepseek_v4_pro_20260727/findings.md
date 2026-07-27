@@ -101,3 +101,17 @@ Round 1 is complete and audited. Results are exploratory because the split was e
 ## Final-cycle question
 
 Can either a structured-signature threshold or an explicit status-before-shape decomposition eliminate both normal-window MC regressions without losing the localized-oscillation repair? If not, does the existing TF-only negative-cue route pass both development and exposed-holdout gates and provide a formally valid non-regressive paper140 candidate?
+
+## Round 5 and final findings
+
+1. A structured anomaly-signature guard has a real MC benefit on exposed holdout48 (+0.547/+0.529/+0.588) but is not stable across partitions. On validation72 it loses all three MC metrics and suppresses a true central spike. Generic threshold language changes feature attribution, not only false-positive calibration.
+2. Status-before-shape is not modular for the released checkpoint. The first-stage normal/anomalous judgment anchors the second-stage option comparison; wrong initial status is then rationalized with a plausible distractor. Aggregate gains coexist with three development correct→wrong transitions.
+3. The explicit-negation TF RE2 route has the strongest repeatable family-level signal. It improves every TF metric on development and exposed holdout and yields more wrong→correct than correct→wrong decisions. It is nevertheless unsafe under a strict Pareto rule because one holdout anomaly is rewritten as normal.
+4. TF polarity help is not equivalent to deterministic label correction. The same natural-language instruction can alter evidence interpretation and answer polarity together. A post-generation symbolic normalizer would be a different intervention and must be evaluated separately.
+5. Exact component reuse is necessary for prompt routing research. It makes unchanged OE and protected question families literal Baseline ties and prevents repeated generation or Judge variance from masquerading as prompt effects.
+6. The final internal data show several Table-I-only Pareto routes, but none satisfies the preregistered zero correct→wrong guard across all four views. The difference must remain explicit: aggregate non-regression is not per-case non-regression.
+7. No prompt-only candidate has untouched-test evidence. `paper140` was not run because the unique-lock condition was never met. The released Baseline is therefore the only supported deployment prompt under the stated strict criterion.
+
+## Final recommendation
+
+Keep the released AXIS scaffold unchanged for deployment. Do not add Evidence Contracts, global anomaly priors, status-before-shape decomposition, or universal answer protocols to this checkpoint. If research continues, use a new untouched selection resource or a genuinely different intervention class (for example calibrated decoding, external symbolic polarity normalization, or an ensemble whose routing rule is frozen before evaluation). Do not tune another lexical exception on the exposed 144-QA pool, and do not use `paper140` for candidate selection.

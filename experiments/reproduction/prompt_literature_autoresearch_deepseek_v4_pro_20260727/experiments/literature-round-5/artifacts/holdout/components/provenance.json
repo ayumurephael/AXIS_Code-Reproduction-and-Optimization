@@ -1,0 +1,270 @@
+{
+  "baseline_records": 48,
+  "component_rows": 44,
+  "requirements": [
+    {
+      "record_id": "series_000006:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000006:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000011:1",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000020:0",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000022:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000022:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000022:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000022:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000044:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000044:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000045:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000045:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000046:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000046:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000046:1",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000054:0",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000071:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000071:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000077:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000077:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000078:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000078:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000078:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000078:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000079:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000079:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000079:1",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000097:0",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000097:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000097:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000099:0",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000108:0",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000108:1",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000111:1",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_01_tf_neg_re2",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000113:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000113:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000113:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000113:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000139:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000139:0",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000139:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000139:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000141:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_01_mc_structured_guard",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000141:1",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r5_02_mc_status_then_shape",
+      "prompt_sha256": null
+    }
+  ]
+}

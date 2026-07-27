@@ -1,7 +1,7 @@
 project:
   title: "AXIS literature-guided prompt robustness search"
   question: "Can a prompt-only intervention improve all MC/OE/TF Table-I metrics without falling below the released Baseline?"
-  status: running
+  status: completed_stopping_rule
   started: "2026-07-27"
   domain: "time-series QA, prompt sensitivity, and black-box evaluation"
 
@@ -13,6 +13,9 @@ evaluation:
   formal_judge_only: true
   success_criterion: "On paper140, all ten Table-I metrics are >= the locked Baseline; prefer all ten > Baseline."
   final_test_policy: "Lock exactly one candidate before generating its paper140 outputs; evaluate that candidate on paper140 once."
+  winner_locked: false
+  paper140_candidate_runs: 0
+  stop_reason: "No candidate passed all four frozen Round-5 gates under the 30-mode cap."
   baseline_source: "../prompt_stage_a_deepseek_v4_pro_20260725/baseline_table.json"
   baseline:
     mc_final: 4.255815217345678
@@ -62,11 +65,11 @@ hypotheses:
     status: supported_for_explicit_negation_not_broad_normality
   - id: H9
     statement: "A conservative MC threshold can preserve structured-anomaly gains while preventing ordinary irregularity from being overdiagnosed."
-    status: pending_round_5
+    status: contradicted_mixed
 search:
-  current_round: literature_round_5
+  current_round: concluded_no_candidate
   implemented_modes: 30
-  completed_modes: 26
+  completed_modes: 30
   total_new_modes_cap: 30
   outer_loop_interval: "5-10 completed experiments"
   ranking: "Lexicographic: nonnegative Table-I dimensions, worst delta, mean delta; closed-task correct-to-wrong transitions are a guard."
@@ -170,6 +173,37 @@ search:
       best_mean_delta: 0.0584596
       best_correct_to_wrong: 2
       advanced: []
+    - round: literature_round_5
+      split: exposed_development96_and_holdout48
+      raw_gpu_predictions:
+        development96: 192
+        exposed_holdout48: 144
+      unique_new_components:
+        development96: 83
+        exposed_holdout48: 44
+      unique_new_judge_scores:
+        development96: 136
+        exposed_holdout48: 88
+      assembled_predictions_with_baseline:
+        development96: 576
+        exposed_holdout48: 288
+      assembled_scores_with_baseline:
+        development96: 1326
+        exposed_holdout48: 666
+      audit_ok: true
+      score_model: deepseek-v4-pro
+      score_methods:
+        final_score_top_logprobs: 1975
+        exact_sample_mean_20: 17
+      best_table_only_holdout_mode: lit_r5_03_joint_structured_tf_neg_re2
+      best_table_only_holdout_nonnegative_dimensions: 10
+      best_table_only_holdout_worst_delta: 0.0
+      best_table_only_holdout_mean_delta: 0.23022349301799294
+      best_table_only_holdout_correct_to_wrong: 1
+      gate_passing_mode: null
+      advanced: []
+      paper140_candidate_runs: 0
+      stop_triggered: true
 workspace:
   literature: "literature/survey.md"
   search_strategy: "literature/search-strategy.md"
@@ -186,3 +220,5 @@ workspace:
   round_4_analysis: "experiments/literature-round-4/analysis.md"
   exposed_holdout_protocol: "experiments/exposed-holdout-confirmation/protocol.md"
   round_5_protocol: "experiments/literature-round-5/protocol.md"
+  round_5_analysis: "experiments/literature-round-5/analysis.md"
+  all_prompts: "all-prompts.md"

@@ -92,3 +92,13 @@ Failure inspection showed that semantic binding repaired a genuine localized-osc
 ## 2026-07-27 — Outer loop 5 and final-cycle preregistration
 
 Frozen the final four new modes under the 30-mode cap. Two MC mechanisms test a conservative structured-signature guard and a status-before-shape decomposition. Their joint versions reuse the already frozen explicit-negation TF RE2 route; OE remains exact Baseline. The existing TF-only route `lit_r4_01_tf_neg_re2` is included as a zero-new-mode fallback because it preserves MC/OE exactly and passed every development gate. Development96, both 24/72 constituents, and exposed holdout48 must independently have all ten nonnegative deltas and zero correct→wrong transitions before a unique candidate may reach paper140.
+
+## 2026-07-27 — Round 5 execution and final outer loop
+
+Round 5 completed 192/192 development and 144/144 exposed-holdout GPU predictions from source commit `4d3ace60c036cdb231a4c5aeafeec3cdf030aace`. Development selected 83 routed components and required 136 new `deepseek-v4-pro` dimensions; holdout selected 44 routed components and required 88 new dimensions. The assembled audits passed for 576 predictions / 1,326 scores on development and 288 predictions / 666 scores on holdout. All new scores use `deepseek-v4-pro`; one development dimension used the registered exact-20 fallback because complete score-token logprobs were unavailable.
+
+All five candidates had ten nonnegative holdout dimensions. The structured MC route increased holdout MC Final/Correctness/Reasoning by +0.547/+0.529/+0.588 with zero correct→wrong transitions, but it reduced the same metrics on validation72 by -0.208/-0.192/-0.246 and changed `series_000103:1` from the correct spike-plus-drift option to a decline/recovery distractor. The status-before-shape route remained aggregate-nonnegative on development and holdout, but introduced correct→wrong transitions on every partition.
+
+The TF-only explicit-negation RE2 fallback was exact Baseline on MC/OE and raised holdout TF Final/Correctness/Justification by +0.200/+0.125/+0.312. It passed every development gate with zero correct→wrong transitions, but changed holdout `series_000111:1` from the correct False verdict to True by reinterpreting a sharp spike as a gradual normal transition. Its four wrong→correct repairs therefore do not satisfy the frozen zero-harm guard.
+
+No route passed pooled development96, screening24, validation72 and exposed holdout48 simultaneously. The registered 30-mode stopping condition is met. No winner was locked, no candidate paper140 output was generated, and the formal set remained untouched. Selecting by mean gain or relaxing the per-case guard after seeing holdout would be post-hoc and was not done.
