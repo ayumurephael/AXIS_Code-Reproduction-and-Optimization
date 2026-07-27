@@ -78,10 +78,11 @@ def main() -> None:
     reused_keys = []
     for prediction in component_predictions:
         record_id = prediction["record_id"]
+        baseline_key = (record_id,)
         mode = prediction["mode"]
-        if record_id not in base_pred_index:
+        if baseline_key not in base_pred_index:
             raise RuntimeError(f"Missing Baseline prediction: {record_id}")
-        baseline = base_pred_index[record_id]
+        baseline = base_pred_index[baseline_key]
         reuse = normalized_response(prediction["response"]) == (
             normalized_response(baseline["response"])
         )

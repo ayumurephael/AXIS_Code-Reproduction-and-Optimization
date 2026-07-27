@@ -17,6 +17,11 @@ class Round5ScoreReuseTest(unittest.TestCase):
             normalized_response("Answer: normal."),
         )
 
+    def test_single_field_index_uses_a_tuple_key(self):
+        rows = [{"record_id": "x"}]
+        index = unique_index(rows, ("record_id",))
+        self.assertEqual(index[("x",)], rows[0])
+
     def test_unique_index_rejects_duplicate_keys(self):
         rows = [{"record_id": "x"}, {"record_id": "x"}]
         with self.assertRaises(RuntimeError):
