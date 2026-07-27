@@ -1,0 +1,13 @@
+{
+  "prediction_rows": 480,
+  "records": 96,
+  "prediction_modes": {
+    "lit_r3_01_mc_pointwise_qual": 96,
+    "lit_r3_02_mc_semantic_qual": 96,
+    "lit_r3_03_mc_salient_aftermath": 96,
+    "lit_r3_04_tf_re2_verdict": 96,
+    "lit_r3_05_tf_re2_qual_verdict": 96
+  },
+  "errors": [],
+  "ok": true
+}

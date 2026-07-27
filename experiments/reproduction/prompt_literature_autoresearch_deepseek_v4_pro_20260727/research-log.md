@@ -59,3 +59,15 @@ Failure analysis separated decision, evidence, and reporting errors. MC pointwis
 ## 2026-07-27 ? Cycle 3 preregistration
 
 Frozen seven Round-3 routes before new inference. Three MC components test qualitative pointwise, qualitative semantic binding, and salient-event/aftermath matching. Two TF components test RE2 plus explicit verdict, with and without a qualitative numeric guard. Two joint routes reuse exact components. OE remains byte-identical Baseline. The adaptive development96 union is reported pooled and by its 24/72 constituents; only strict passers can reach exposed holdout48.
+
+## 2026-07-27 — Outer loop 3
+
+Round 3 completed 480/480 GPU predictions and 336/336 new Judge dimensions. The assembled audit passed for 768 predictions and 1,768 scores: 1,754 top-logprob rows and 14 exact-20 fallbacks after canonical reuse.
+
+Qualitative semantic MC is the first literature route to pass the full development gate. It improves pooled MC Final/Correctness/Reasoning by +0.256/+0.324/+0.097, is nonnegative on both constituent splits, and has no closed-task correct→wrong transition. It advances unchanged to exposed holdout48.
+
+Universal qualitative TF RE2 improves pooled TF by +0.361/+0.379/+0.333 and fixes 14 parsed decisions, but still changes the positive spike-plus-sustained-rise case `series_000132:1` from True to False. The requested exact final verdict appears at the end in 0/33 cases; the model usually places `Answer:` at the beginning instead. The next cycle therefore tests question-surface routing and a natural prefix, not stronger universal formatting.
+
+## 2026-07-27 — Cycle 4 preregistration
+
+Frozen six routes. Four reuse existing components to test explicit-negation and broader non-anomaly routers with qualitative TF RE2, alone and with the successful semantic MC component. Two routes test an explicit-negation-only, no-reread TF prefix, alone and in the same joint candidate. Positive anomaly propositions and all OE records retain the exact Baseline prompt.

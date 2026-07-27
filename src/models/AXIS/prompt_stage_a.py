@@ -7,6 +7,7 @@ prompt factors and continue to use the released generation boundary.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from typing import Dict, Iterable, Optional, Sequence
 
@@ -289,6 +290,15 @@ LITERATURE_TF_RE2_QUALITATIVE_VERDICT_RULE = (
     "explanation consistent with that verdict."
 )
 
+LITERATURE_TF_PREFIX_RULE = (
+    "Preserve the proposition's polarity exactly as written. Decide whether "
+    "the complete statement is supported, and begin with exactly "
+    '"Answer: True." or "Answer: False." Then give a qualitative reason '
+    "consistent with that label. Do not quote exact values or step numbers "
+    "unless the question asks for them."
+)
+
+
 LITERATURE_OE_DIRECT_RULE = (
     "Answer exactly what the question asks, using evidence from this window. "
     "Include the requested conclusion or assessment and the brief reason "
@@ -418,6 +428,62 @@ LITERATURE_R3_PROFILES = {
         "open_ended": "base",
     },
 }
+
+TF_EXPLICIT_NEGATIVE_CUES = frozenset({
+    "no", "not", "without", "absence", "lack", "neither", "nor",
+    "cannot", "can't", "doesn't", "isn't", "aren't", "wasn't", "weren't",
+})
+TF_NONANOMALY_CUES = frozenset({
+    "normal", "stable", "consistent", "regular", "expected", "typical",
+})
+
+
+def _tf_question_tokens(question: str) -> frozenset[str]:
+    return frozenset(re.findall(r"[a-z]+(?:'[a-z]+)?", question.lower()))
+
+
+def _has_explicit_tf_negative_cue(question: str) -> bool:
+    return bool(_tf_question_tokens(question) & TF_EXPLICIT_NEGATIVE_CUES)
+
+
+def _has_tf_nonanomaly_cue(question: str) -> bool:
+    tokens = _tf_question_tokens(question)
+    return bool(tokens & (TF_EXPLICIT_NEGATIVE_CUES | TF_NONANOMALY_CUES))
+
+
+LITERATURE_R4_PROFILES = {
+    "lit_r4_01_tf_neg_re2": {
+        "multiple_choice": "base",
+        "true_false": "tf_neg_re2_router",
+        "open_ended": "base",
+    },
+    "lit_r4_02_joint_semantic_tf_neg_re2": {
+        "multiple_choice": "mc_semantic_qual",
+        "true_false": "tf_neg_re2_router",
+        "open_ended": "base",
+    },
+    "lit_r4_03_tf_nonanomaly_re2": {
+        "multiple_choice": "base",
+        "true_false": "tf_nonanomaly_re2_router",
+        "open_ended": "base",
+    },
+    "lit_r4_04_joint_semantic_tf_nonanomaly_re2": {
+        "multiple_choice": "mc_semantic_qual",
+        "true_false": "tf_nonanomaly_re2_router",
+        "open_ended": "base",
+    },
+    "lit_r4_05_tf_neg_prefix": {
+        "multiple_choice": "base",
+        "true_false": "tf_neg_prefix_router",
+        "open_ended": "base",
+    },
+    "lit_r4_06_joint_semantic_tf_neg_prefix": {
+        "multiple_choice": "mc_semantic_qual",
+        "true_false": "tf_neg_prefix_router",
+        "open_ended": "base",
+    },
+}
+
 
 ROUTED_R2_PROFILES = {
     "r2_01_minimal": {
@@ -762,6 +828,30 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         "Literature Round 3: semantic MC plus qualitative-verdict TF.",
         literature_profile="lit_r3_07_joint_semantic_tf_qual",
     ),
+    "lit_r4_01_tf_neg_re2": PromptCondition(
+        "Literature Round 4: negative-cue TF router with qualitative RE2.",
+        literature_profile="lit_r4_01_tf_neg_re2",
+    ),
+    "lit_r4_02_joint_semantic_tf_neg_re2": PromptCondition(
+        "Literature Round 4: semantic MC plus negative-cue TF RE2 router.",
+        literature_profile="lit_r4_02_joint_semantic_tf_neg_re2",
+    ),
+    "lit_r4_03_tf_nonanomaly_re2": PromptCondition(
+        "Literature Round 4: non-anomaly-cue TF router with qualitative RE2.",
+        literature_profile="lit_r4_03_tf_nonanomaly_re2",
+    ),
+    "lit_r4_04_joint_semantic_tf_nonanomaly_re2": PromptCondition(
+        "Literature Round 4: semantic MC plus non-anomaly TF RE2 router.",
+        literature_profile="lit_r4_04_joint_semantic_tf_nonanomaly_re2",
+    ),
+    "lit_r4_05_tf_neg_prefix": PromptCondition(
+        "Literature Round 4: negative-cue TF router with no-reread prefix.",
+        literature_profile="lit_r4_05_tf_neg_prefix",
+    ),
+    "lit_r4_06_joint_semantic_tf_neg_prefix": PromptCondition(
+        "Literature Round 4: semantic MC plus negative-cue TF prefix router.",
+        literature_profile="lit_r4_06_joint_semantic_tf_neg_prefix",
+    ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
@@ -852,6 +942,16 @@ LITERATURE_R3_MODES = (
     "lit_r3_06_joint_pointwise_tf_qual",
     "lit_r3_07_joint_semantic_tf_qual",
 )
+
+LITERATURE_R4_MODES = (
+    "lit_r4_01_tf_neg_re2",
+    "lit_r4_02_joint_semantic_tf_neg_re2",
+    "lit_r4_03_tf_nonanomaly_re2",
+    "lit_r4_04_joint_semantic_tf_nonanomaly_re2",
+    "lit_r4_05_tf_neg_prefix",
+    "lit_r4_06_joint_semantic_tf_neg_prefix",
+)
+
 
 FOLLOWUP_PROMPT_MODES = (
     "expert_contract3_fixed_section",
@@ -967,6 +1067,7 @@ def build_question_prompt(
                 **LITERATURE_R1_PROFILES,
                 **LITERATURE_R2_PROFILES,
                 **LITERATURE_R3_PROFILES,
+                **LITERATURE_R4_PROFILES,
             }
             literature_component = literature_profiles[
                 condition.literature_profile][question_type]
@@ -975,6 +1076,26 @@ def build_question_prompt(
                 f"Unsupported literature profile/question type: "
                 f"{condition.literature_profile!r}/{question_type!r}"
             ) from exc
+
+        if question_type == "true_false":
+            if literature_component == "tf_neg_re2_router":
+                literature_component = (
+                    "tf_re2_qual_verdict"
+                    if _has_explicit_tf_negative_cue(question)
+                    else "base"
+                )
+            elif literature_component == "tf_nonanomaly_re2_router":
+                literature_component = (
+                    "tf_re2_qual_verdict"
+                    if _has_tf_nonanomaly_cue(question)
+                    else "base"
+                )
+            elif literature_component == "tf_neg_prefix_router":
+                literature_component = (
+                    "tf_prefix"
+                    if _has_explicit_tf_negative_cue(question)
+                    else "base"
+                )
 
         if literature_component == "base":
             return build_question_prompt(
@@ -1009,6 +1130,7 @@ def build_question_prompt(
             "tf_re2_qual_verdict": (
                 LITERATURE_TF_RE2_QUALITATIVE_VERDICT_RULE
             ),
+            "tf_prefix": LITERATURE_TF_PREFIX_RULE,
             "oe_direct": LITERATURE_OE_DIRECT_RULE,
             **LITERATURE_DECOUPLED_RULES,
         }

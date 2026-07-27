@@ -59,3 +59,19 @@ Round 1 is complete and audited. Results are exploratory because the split was e
 - Can qualitative support lift MC Reasoning to nonnegative while preserving pointwise zero-regression decisions?
 - Does salient-event/aftermath matching repair missed compound anomalies without creating false positives?
 - Can an explicit final TF verdict retain RE2 gains, and does suppressing exact numbers repair its weakest justification case?
+
+## Round 3 findings
+
+1. Qualitative semantic binding is the first route to pass every development guard. It improves all three pooled MC metrics, remains nonnegative on both constituent splits, fixes two Baseline decisions, and introduces no correct→wrong decision.
+2. The qualitative guard repairs the earlier exact-number failure surface but does not make explanations factually perfect. A correct-answer response can still invent the trajectory, as in `series_000033:0`.
+3. Pointwise comparison remains decision-safe but spends explanation budget eliminating alternatives; pooled MC Reasoning is still slightly negative.
+4. Directing attention to “the most salient local change and aftermath” is harmful. The checkpoint may choose the wrong salient event and lose the complete option semantics.
+5. Qualitative TF RE2 has a strong aggregate gain and fixes the earlier `series_000109:1` report/numeric failure, but the repeated question still suppresses the real positive anomaly in `series_000132:1`.
+6. A rigid *final* verdict is mismatched to this checkpoint: 0/33 responses end with the requested exact string, while many naturally start with `Answer:`. Output placement and semantic truth evaluation must be treated separately.
+7. The next justified TF experiment is conditional: protect positive anomaly propositions with Baseline and apply polarity help only to explicit negative/non-anomaly language.
+
+## Current questions after Round 3
+
+- Does the semantic qualitative MC route survive the exposed holdout48 that defeated earlier header-renamed/stability MC prompts?
+- Can a question-only TF router retain negation-case gains with zero positive-anomaly regressions?
+- Is a no-reread `Answer:` prefix more compatible with the checkpoint than requiring an exact sentence at the end?

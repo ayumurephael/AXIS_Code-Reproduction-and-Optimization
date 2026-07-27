@@ -7,6 +7,7 @@ from src.models.AXIS.prompt_stage_a import (
     LITERATURE_R1_MODES,
     LITERATURE_R2_MODES,
     LITERATURE_R3_MODES,
+    LITERATURE_R4_MODES,
     PARETO_SCREEN_MODES,
     ROUTED_R2_MODES,
     ROUTED_R3_MODES,
@@ -17,10 +18,14 @@ from src.models.AXIS.prompt_stage_a import (
 )
 
 
-def _prompt(mode, question_type="multiple_choice"):
+def _prompt(
+    mode,
+    question_type="multiple_choice",
+    question="Which option?\nA) Flat\nB) Spike",
+):
     condition = get_condition(mode)
     return build_question_prompt(
-        question="Which option?\nA) Flat\nB) Spike",
+        question=question,
         question_type=question_type,
         start=7,
         end=10,
@@ -705,5 +710,89 @@ B) Spike
                 self.assertNotIn("### Evidence Contract", prompt)
                 self.assertEqual(prompt.count("<|fixed_hint|>"), 30)
 
+
+    def test_literature_round4_matrix_is_locked(self):
+        self.assertEqual(
+            LITERATURE_R4_MODES,
+            (
+                "lit_r4_01_tf_neg_re2",
+                "lit_r4_02_joint_semantic_tf_neg_re2",
+                "lit_r4_03_tf_nonanomaly_re2",
+                "lit_r4_04_joint_semantic_tf_nonanomaly_re2",
+                "lit_r4_05_tf_neg_prefix",
+                "lit_r4_06_joint_semantic_tf_neg_prefix",
+            ),
+        )
+        self.assertTrue(set(LITERATURE_R4_MODES).issubset(MODE_SPECS))
+
+    def test_literature_round4_negative_router_reuses_exact_components(self):
+        negative = "True or False: There is no evidence of an anomaly."
+        positive = "True or False: An upward spike is anomalous."
+        normality = "True or False: The window shows stable normal behavior."
+
+        self.assertEqual(
+            _prompt("lit_r4_01_tf_neg_re2", "true_false", negative),
+            _prompt("lit_r3_05_tf_re2_qual_verdict", "true_false", negative),
+        )
+        self.assertEqual(
+            _prompt("lit_r4_01_tf_neg_re2", "true_false", positive),
+            _prompt("base", "true_false", positive),
+        )
+        self.assertEqual(
+            _prompt("lit_r4_01_tf_neg_re2", "true_false", normality),
+            _prompt("base", "true_false", normality),
+        )
+        self.assertEqual(
+            _prompt("lit_r4_03_tf_nonanomaly_re2", "true_false", normality),
+            _prompt(
+                "lit_r3_05_tf_re2_qual_verdict",
+                "true_false",
+                normality,
+            ),
+        )
+
+    def test_literature_round4_prefix_router_does_not_reread(self):
+        negative = "True or False: The window does not contain an anomaly."
+        positive = "True or False: An upward spike is anomalous."
+        prompt = _prompt("lit_r4_05_tf_neg_prefix", "true_false", negative)
+        self.assertIn('begin with exactly "Answer: True."', prompt)
+        self.assertIn("Preserve the proposition's polarity", prompt)
+        self.assertNotIn("Read the question again:", prompt)
+        self.assertEqual(prompt.count(negative), 1)
+        self.assertEqual(
+            _prompt("lit_r4_05_tf_neg_prefix", "true_false", positive),
+            _prompt("base", "true_false", positive),
+        )
+
+    def test_literature_round4_joint_routes_preserve_scaffold(self):
+        negative = "True or False: There is no anomaly."
+        self.assertEqual(
+            _prompt(
+                "lit_r4_02_joint_semantic_tf_neg_re2",
+                "multiple_choice",
+            ),
+            _prompt("lit_r3_02_mc_semantic_qual", "multiple_choice"),
+        )
+        self.assertEqual(
+            _prompt(
+                "lit_r4_06_joint_semantic_tf_neg_prefix",
+                "multiple_choice",
+            ),
+            _prompt("lit_r3_02_mc_semantic_qual", "multiple_choice"),
+        )
+        for mode in LITERATURE_R4_MODES:
+            for question_type in (
+                "multiple_choice",
+                "open_ended",
+                "true_false",
+            ):
+                question = negative if question_type == "true_false" else (
+                    "Which option?\nA) Flat\nB) Spike"
+                )
+                prompt = _prompt(mode, question_type, question)
+                self.assertIn("Overall Summary Hints", prompt)
+                self.assertNotIn("Learned Task Guidance", prompt)
+                self.assertNotIn("### Evidence Contract", prompt)
+                self.assertEqual(prompt.count("<|fixed_hint|>"), 30)
 if __name__ == "__main__":
     unittest.main()

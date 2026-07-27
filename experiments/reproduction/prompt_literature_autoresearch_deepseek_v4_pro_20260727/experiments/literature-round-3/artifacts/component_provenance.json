@@ -1,0 +1,160 @@
+{
+  "baseline_rows": 96,
+  "raw_candidate_rows": 480,
+  "unique_new_component_rows": 168,
+  "assembled_route_rows": 672,
+  "component_question_types": {
+    "multiple_choice": 102,
+    "true_false": 66
+  },
+  "component_modes": {
+    "lit_r3_01_mc_pointwise_qual": 34,
+    "lit_r3_02_mc_semantic_qual": 34,
+    "lit_r3_03_mc_salient_aftermath": 34,
+    "lit_r3_04_tf_re2_verdict": 33,
+    "lit_r3_05_tf_re2_qual_verdict": 33
+  },
+  "component_provenance": {
+    "lit_r3_01_mc_pointwise_qual/multiple_choice": {
+      "rows": 34,
+      "representative_prompt_sha256": "e2d3e1cdbb25cc08a76562fd1f75810af9c08766295891f10ec17f43a4f51b7b"
+    },
+    "lit_r3_02_mc_semantic_qual/multiple_choice": {
+      "rows": 34,
+      "representative_prompt_sha256": "e5bb143cb12cde0a99fc5008b78a1160b36a6b11ede6e14fa0dfd252a35f0a5c"
+    },
+    "lit_r3_03_mc_salient_aftermath/multiple_choice": {
+      "rows": 34,
+      "representative_prompt_sha256": "5643e4407a55395cf1e13b46af951b4e4fed3ca27133b43fb723db5575934c28"
+    },
+    "lit_r3_04_tf_re2_verdict/true_false": {
+      "rows": 33,
+      "representative_prompt_sha256": "ecd906c41dad15c8cee77b1644fc8927c7a9993c257a8f8eeca6e0fd6ac9629f"
+    },
+    "lit_r3_05_tf_re2_qual_verdict/true_false": {
+      "rows": 33,
+      "representative_prompt_sha256": "52ee71d54d97723c619bf6baecb1bbd2f012fa12f4b47d44c104244fbae888b7"
+    }
+  },
+  "route_provenance": {
+    "lit_r3_01_mc_pointwise_qual": {
+      "open_ended": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "2839337c01b253c2b75f5e0d48b885f9470ba9b7794c7b4e62e669165cc7436c"
+      },
+      "multiple_choice": {
+        "component": "mc_pointwise_qual",
+        "source_mode": "lit_r3_01_mc_pointwise_qual",
+        "representative_prompt_sha256": "e2d3e1cdbb25cc08a76562fd1f75810af9c08766295891f10ec17f43a4f51b7b"
+      },
+      "true_false": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "653ca40c2f82fb18a791765e7bcca91ef4494426daa42c0dc72bda9237f99bdb"
+      }
+    },
+    "lit_r3_02_mc_semantic_qual": {
+      "open_ended": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "2839337c01b253c2b75f5e0d48b885f9470ba9b7794c7b4e62e669165cc7436c"
+      },
+      "multiple_choice": {
+        "component": "mc_semantic_qual",
+        "source_mode": "lit_r3_02_mc_semantic_qual",
+        "representative_prompt_sha256": "e5bb143cb12cde0a99fc5008b78a1160b36a6b11ede6e14fa0dfd252a35f0a5c"
+      },
+      "true_false": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "653ca40c2f82fb18a791765e7bcca91ef4494426daa42c0dc72bda9237f99bdb"
+      }
+    },
+    "lit_r3_03_mc_salient_aftermath": {
+      "open_ended": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "2839337c01b253c2b75f5e0d48b885f9470ba9b7794c7b4e62e669165cc7436c"
+      },
+      "multiple_choice": {
+        "component": "mc_salient_aftermath",
+        "source_mode": "lit_r3_03_mc_salient_aftermath",
+        "representative_prompt_sha256": "5643e4407a55395cf1e13b46af951b4e4fed3ca27133b43fb723db5575934c28"
+      },
+      "true_false": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "653ca40c2f82fb18a791765e7bcca91ef4494426daa42c0dc72bda9237f99bdb"
+      }
+    },
+    "lit_r3_04_tf_re2_verdict": {
+      "open_ended": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "2839337c01b253c2b75f5e0d48b885f9470ba9b7794c7b4e62e669165cc7436c"
+      },
+      "multiple_choice": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "e5e6454eb69a27dd04bb960c9b2c276f354973330f9225149521ae472dd369a6"
+      },
+      "true_false": {
+        "component": "tf_re2_verdict",
+        "source_mode": "lit_r3_04_tf_re2_verdict",
+        "representative_prompt_sha256": "ecd906c41dad15c8cee77b1644fc8927c7a9993c257a8f8eeca6e0fd6ac9629f"
+      }
+    },
+    "lit_r3_05_tf_re2_qual_verdict": {
+      "open_ended": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "2839337c01b253c2b75f5e0d48b885f9470ba9b7794c7b4e62e669165cc7436c"
+      },
+      "multiple_choice": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "e5e6454eb69a27dd04bb960c9b2c276f354973330f9225149521ae472dd369a6"
+      },
+      "true_false": {
+        "component": "tf_re2_qual_verdict",
+        "source_mode": "lit_r3_05_tf_re2_qual_verdict",
+        "representative_prompt_sha256": "52ee71d54d97723c619bf6baecb1bbd2f012fa12f4b47d44c104244fbae888b7"
+      }
+    },
+    "lit_r3_06_joint_pointwise_tf_qual": {
+      "open_ended": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "2839337c01b253c2b75f5e0d48b885f9470ba9b7794c7b4e62e669165cc7436c"
+      },
+      "multiple_choice": {
+        "component": "mc_pointwise_qual",
+        "source_mode": "lit_r3_01_mc_pointwise_qual",
+        "representative_prompt_sha256": "e2d3e1cdbb25cc08a76562fd1f75810af9c08766295891f10ec17f43a4f51b7b"
+      },
+      "true_false": {
+        "component": "tf_re2_qual_verdict",
+        "source_mode": "lit_r3_05_tf_re2_qual_verdict",
+        "representative_prompt_sha256": "52ee71d54d97723c619bf6baecb1bbd2f012fa12f4b47d44c104244fbae888b7"
+      }
+    },
+    "lit_r3_07_joint_semantic_tf_qual": {
+      "open_ended": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "2839337c01b253c2b75f5e0d48b885f9470ba9b7794c7b4e62e669165cc7436c"
+      },
+      "multiple_choice": {
+        "component": "mc_semantic_qual",
+        "source_mode": "lit_r3_02_mc_semantic_qual",
+        "representative_prompt_sha256": "e5bb143cb12cde0a99fc5008b78a1160b36a6b11ede6e14fa0dfd252a35f0a5c"
+      },
+      "true_false": {
+        "component": "tf_re2_qual_verdict",
+        "source_mode": "lit_r3_05_tf_re2_qual_verdict",
+        "representative_prompt_sha256": "52ee71d54d97723c619bf6baecb1bbd2f012fa12f4b47d44c104244fbae888b7"
+      }
+    }
+  }
+}
