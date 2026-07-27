@@ -48,3 +48,14 @@ TF RE2 improved all TF metrics by +0.111 and changed four wrong decisions to cor
 OE RE2 increased Accuracy and Completeness by +0.143 each but reduced Relevance by -0.143. It repeated or expanded the question and sometimes rendered scaled integers as apparent raw values. The direct OE rule reduced unsupported-number incidence and length, but lowered OE Final, Accuracy, and Relevance.
 
 Round 2 advances three zero-regression MC mechanisms. A fourth route combines the best MC RE2 component with TF RE2 and exact Baseline OE; it is an explicit risk review, not an automatic pass. Its 72-QA gate requires all ten metrics nonnegative and zero closed-task correct→wrong transitions.
+
+
+## 2026-07-27 ? Outer loop 2
+
+Round 2 completed 288/288 GPU predictions and 204/204 new `deepseek-v4-pro` dimensions. The combined audit passed for 360 predictions and 830 scores. No route passed: semantic binding and pointwise each reached 9/10, while MC Reasoning remained negative; semantic binding and RE2 each introduced one MC correct?wrong transition. TF RE2 raised all three TF metrics substantially but the combined route had one MC and one TF correct?wrong entry.
+
+Failure analysis separated decision, evidence, and reporting errors. MC pointwise kept zero correct?wrong and fixed one Baseline error, but ?brief reason? shortened recovery/contrast evidence and exact-number narration created `1.03`?`10.30`-type hallucinations. The TF correct?wrong entry began with a semantic True inside `<think>` but lacked an explicit verdict; the extractor encountered ?no sudden spikes? and returned False. The same response hallucinated ?21.70, so the repair needs both explicit verdict and qualitative evidence.
+
+## 2026-07-27 ? Cycle 3 preregistration
+
+Frozen seven Round-3 routes before new inference. Three MC components test qualitative pointwise, qualitative semantic binding, and salient-event/aftermath matching. Two TF components test RE2 plus explicit verdict, with and without a qualitative numeric guard. Two joint routes reuse exact components. OE remains byte-identical Baseline. The adaptive development96 union is reported pooled and by its 24/72 constituents; only strict passers can reach exposed holdout48.

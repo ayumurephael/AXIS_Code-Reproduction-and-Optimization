@@ -9,6 +9,7 @@ from pathlib import Path
 from src.models.AXIS.prompt_stage_a import (
     LITERATURE_R1_MODES,
     LITERATURE_R2_MODES,
+    LITERATURE_R3_MODES,
     PARETO_SCREEN_MODES,
     ROUTED_R2_MODES,
     ROUTED_R3_MODES,
@@ -33,6 +34,7 @@ def main() -> None:
             "routed_r3",
             "literature_r1",
             "literature_r2",
+            "literature_r3",
         ),
         default="screening",
     )
@@ -47,14 +49,17 @@ def main() -> None:
         modes = ROUTED_R3_MODES
     elif args.mode_set == "literature_r1":
         modes = LITERATURE_R1_MODES
-    else:
+    elif args.mode_set == "literature_r2":
         modes = LITERATURE_R2_MODES
+    else:
+        modes = LITERATURE_R3_MODES
     titles = {
         "screening": "Screening round 1 prompt catalog",
         "routed_r2": "Development round 2 routed prompt catalog",
         "routed_r3": "Development round 3 routed prompt catalog",
         "literature_r1": "Literature-guided round 1 prompt catalog",
         "literature_r2": "Literature-guided round 2 prompt catalog",
+        "literature_r3": "Literature-guided round 3 prompt catalog",
     }
     title = titles[args.mode_set]
 

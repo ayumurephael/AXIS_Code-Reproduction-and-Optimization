@@ -1,0 +1,12 @@
+{
+  "prediction_rows": 288,
+  "records": 72,
+  "prediction_modes": {
+    "lit_r1_01_mc_semantic_bind": 72,
+    "lit_r1_02_mc_pointwise": 72,
+    "lit_r1_03_mc_re2": 72,
+    "lit_r1_06_tf_re2": 72
+  },
+  "errors": [],
+  "ok": true
+}

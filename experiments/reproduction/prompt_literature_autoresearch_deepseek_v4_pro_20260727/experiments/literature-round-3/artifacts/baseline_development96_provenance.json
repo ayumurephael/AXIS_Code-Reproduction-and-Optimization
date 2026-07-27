@@ -1,0 +1,17 @@
+{
+  "literature-round-1": {
+    "prediction_rows": 24,
+    "score_rows": 55,
+    "prediction_sha256": "7b5093d9fc683b3554402848366c494091b4bc1645e9387058206b4c12cd579b",
+    "score_sha256": "c46bdf51bdb6059ed041e7baa667a32e1b8a494ebbd548ea521a4b82470227e1"
+  },
+  "literature-round-2": {
+    "prediction_rows": 72,
+    "score_rows": 166,
+    "prediction_sha256": "d02ae73c742bbc5761a2655e7ac0be540a41ab8b19d1235c33b394fc9517cb87",
+    "score_sha256": "447e39470ec843b4df13022c63716be05fc5640402d07e57dc4c3e3ffbd84127"
+  },
+  "prediction_rows": 96,
+  "score_rows": 221,
+  "record_ids_unique": 96
+}

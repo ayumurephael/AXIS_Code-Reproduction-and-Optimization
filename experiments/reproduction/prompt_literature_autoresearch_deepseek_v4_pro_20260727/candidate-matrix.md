@@ -27,3 +27,18 @@ All modes retain the released opening, evidence order, `Overall Summary Hints` t
 - RE2 suffix: the full question is repeated verbatim after `Read the question again:`.
 
 The three decision/report-decoupled wordings are stored verbatim in `src/models/AXIS/prompt_stage_a.py` and will be rendered into the prompt catalog before execution.
+
+
+# Candidate matrix ? Literature Round 3
+
+| Mode | MC component | TF component | OE | Targeted failure |
+|---|---|---|---|---|
+| `lit_r3_01_mc_pointwise_qual` | pointwise + qualitative pattern/aftermath/contrast | Base | Base | reasoning loss with safe decisions |
+| `lit_r3_02_mc_semantic_qual` | semantic binding + qualitative support | Base | Base | local-spike suppression |
+| `lit_r3_03_mc_salient_aftermath` | salient local change + immediate aftermath | Base | Base | compound anomaly matching |
+| `lit_r3_04_tf_re2_verdict` | Base | RE2 + explicit final verdict | Base | parser ambiguity |
+| `lit_r3_05_tf_re2_qual_verdict` | Base | RE2 + qualitative guard + verdict | Base | parser + numeric hallucination |
+| `lit_r3_06_joint_pointwise_tf_qual` | route 01 MC | route 05 TF | Base | compositional Pareto route |
+| `lit_r3_07_joint_semantic_tf_qual` | route 02 MC | route 05 TF | Base | alternate compositional route |
+
+All exact prompt strings and SHA-256 identities are frozen in `experiments/literature-round-3/prompt_catalog.md` and `.json`.

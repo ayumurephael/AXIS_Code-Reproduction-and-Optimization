@@ -6,6 +6,7 @@ from src.models.AXIS.prompt_stage_a import (
     FOLLOWUP_PROMPT_MODES,
     LITERATURE_R1_MODES,
     LITERATURE_R2_MODES,
+    LITERATURE_R3_MODES,
     PARETO_SCREEN_MODES,
     ROUTED_R2_MODES,
     ROUTED_R3_MODES,
@@ -612,6 +613,97 @@ B) Spike
             self.assertIn("Overall Summary Hints", prompt)
             self.assertNotIn("Learned Task Guidance", prompt)
             self.assertEqual(prompt.count("<|fixed_hint|>"), 30)
+
+    def test_literature_round3_matrix_is_locked(self):
+        self.assertEqual(
+            LITERATURE_R3_MODES,
+            (
+                "lit_r3_01_mc_pointwise_qual",
+                "lit_r3_02_mc_semantic_qual",
+                "lit_r3_03_mc_salient_aftermath",
+                "lit_r3_04_tf_re2_verdict",
+                "lit_r3_05_tf_re2_qual_verdict",
+                "lit_r3_06_joint_pointwise_tf_qual",
+                "lit_r3_07_joint_semantic_tf_qual",
+            ),
+        )
+        self.assertTrue(set(LITERATURE_R3_MODES).issubset(MODE_SPECS))
+
+    def test_literature_round3_single_task_routes_keep_other_tasks_exact(self):
+        baselines = {
+            "multiple_choice": _prompt("base", "multiple_choice"),
+            "true_false": _prompt("base", "true_false"),
+            "open_ended": _prompt("base", "open_ended"),
+        }
+        single_task_modes = {
+            "lit_r3_01_mc_pointwise_qual": "multiple_choice",
+            "lit_r3_02_mc_semantic_qual": "multiple_choice",
+            "lit_r3_03_mc_salient_aftermath": "multiple_choice",
+            "lit_r3_04_tf_re2_verdict": "true_false",
+            "lit_r3_05_tf_re2_qual_verdict": "true_false",
+        }
+        for mode, changed_type in single_task_modes.items():
+            for question_type, baseline in baselines.items():
+                prompt = _prompt(mode, question_type)
+                if question_type == changed_type:
+                    self.assertNotEqual(prompt, baseline)
+                else:
+                    self.assertEqual(prompt, baseline)
+
+    def test_literature_round3_rules_target_observed_failures(self):
+        pointwise = _prompt(
+            "lit_r3_01_mc_pointwise_qual", "multiple_choice"
+        )
+        self.assertIn("continuation or recovery support it", pointwise)
+        self.assertIn("Use qualitative evidence", pointwise)
+        self.assertNotIn("brief reason", pointwise)
+
+        salient = _prompt(
+            "lit_r3_03_mc_salient_aftermath", "multiple_choice"
+        )
+        self.assertIn("most salient local change", salient)
+        self.assertIn("what happens immediately afterward", salient)
+
+        verdict = _prompt(
+            "lit_r3_04_tf_re2_verdict", "true_false"
+        )
+        self.assertIn('End with exactly "Your answer: True."', verdict)
+        self.assertIn("Read the question again:", verdict)
+
+        qualitative_verdict = _prompt(
+            "lit_r3_05_tf_re2_qual_verdict", "true_false"
+        )
+        self.assertIn("Use qualitative shape, direction", qualitative_verdict)
+        self.assertIn("do not quote exact values", qualitative_verdict)
+        self.assertIn("Read the question again:", qualitative_verdict)
+
+    def test_literature_round3_joint_routes_reuse_exact_components(self):
+        self.assertEqual(
+            _prompt(
+                "lit_r3_06_joint_pointwise_tf_qual",
+                "multiple_choice",
+            ),
+            _prompt("lit_r3_01_mc_pointwise_qual", "multiple_choice"),
+        )
+        self.assertEqual(
+            _prompt("lit_r3_06_joint_pointwise_tf_qual", "true_false"),
+            _prompt("lit_r3_05_tf_re2_qual_verdict", "true_false"),
+        )
+        self.assertEqual(
+            _prompt("lit_r3_07_joint_semantic_tf_qual", "multiple_choice"),
+            _prompt("lit_r3_02_mc_semantic_qual", "multiple_choice"),
+        )
+        for mode in LITERATURE_R3_MODES:
+            for question_type in (
+                "multiple_choice",
+                "open_ended",
+                "true_false",
+            ):
+                prompt = _prompt(mode, question_type)
+                self.assertIn("Overall Summary Hints", prompt)
+                self.assertNotIn("Learned Task Guidance", prompt)
+                self.assertNotIn("### Evidence Contract", prompt)
+                self.assertEqual(prompt.count("<|fixed_hint|>"), 30)
 
 if __name__ == "__main__":
     unittest.main()

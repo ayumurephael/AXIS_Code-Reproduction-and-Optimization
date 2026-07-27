@@ -1,0 +1,15 @@
+{
+  "rows": 204,
+  "unique_keys": 204,
+  "methods": {
+    "final_score_top_logprobs": 204
+  },
+  "models": {
+    "deepseek-v4-pro": 204
+  },
+  "providers": {
+    "deepseek": 204
+  },
+  "valid_prompt_hashes": 204,
+  "logprobs_returned": 204
+}

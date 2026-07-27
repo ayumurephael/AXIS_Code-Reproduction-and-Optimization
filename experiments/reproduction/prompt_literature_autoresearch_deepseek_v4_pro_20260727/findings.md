@@ -42,3 +42,20 @@
 ## Result status
 
 Round 1 is complete and audited. Results are exploratory because the split was exposed. No paper140 candidate output has been generated.
+
+
+## Round 2 findings
+
+1. The strongest validation route reached only 9/10; the screening 10/10 MC RE2 result did not generalize.
+2. MC pointwise is the safest decision mechanism so far: zero correct?wrong and one wrong?correct on validation. Its weakness is explanation quality, not option selection.
+3. ?Brief reason? is not neutral for this checkpoint. It removes recovery, boundary, and alternative-discrimination evidence that the Reasoning rubric rewards.
+4. Exact numeric narration is a repeated failure surface (`1.03`?`10.30`, about `?1.77`?`?21.70`). Qualitative shape/direction/persistence should be tested without explaining scale.
+5. RE2 can reconstruct the evidence incorrectly: MC `series_000103:1` changed a spike-plus-drift C into a normal-range A.
+6. TF RE2 has a strong net gain (nine TF wrong?correct) but lacks a reliable answer boundary. `series_000109:1` was semantically True yet parsed False because a later ?no? was matched first; its numeric hallucination also lowered Judge quality.
+7. A task-specific final verdict is justified for TF, but a broad answer-first protocol remains unjustified for MC/OE.
+
+## Current questions after Round 2
+
+- Can qualitative support lift MC Reasoning to nonnegative while preserving pointwise zero-regression decisions?
+- Does salient-event/aftermath matching repair missed compound anomalies without creating false positives?
+- Can an explicit final TF verdict retain RE2 gains, and does suppressing exact numbers repair its weakest justification case?

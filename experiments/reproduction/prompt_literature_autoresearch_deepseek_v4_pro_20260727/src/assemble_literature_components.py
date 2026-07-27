@@ -11,6 +11,7 @@ from pathlib import Path
 from src.models.AXIS.prompt_stage_a import (
     LITERATURE_R1_PROFILES,
     LITERATURE_R2_PROFILES,
+    LITERATURE_R3_PROFILES,
     build_question_prompt,
 )
 from tools.axis_repro.build_tables import DIMS
@@ -65,11 +66,27 @@ COMPONENT_SOURCES = {
     "mc_semantic_bind_re2": {
         "multiple_choice": "lit_r1_12_mc_bind_re2",
     },
+    "mc_semantic_qual": {
+        "multiple_choice": "lit_r3_02_mc_semantic_qual",
+    },
+    "mc_pointwise_qual": {
+        "multiple_choice": "lit_r3_01_mc_pointwise_qual",
+    },
+    "mc_salient_aftermath": {
+        "multiple_choice": "lit_r3_03_mc_salient_aftermath",
+    },
+    "tf_re2_verdict": {
+        "true_false": "lit_r3_04_tf_re2_verdict",
+    },
+    "tf_re2_qual_verdict": {
+        "true_false": "lit_r3_05_tf_re2_qual_verdict",
+    },
 }
 
 ALL_LITERATURE_PROFILES = {
     **LITERATURE_R1_PROFILES,
     **LITERATURE_R2_PROFILES,
+    **LITERATURE_R3_PROFILES,
 }
 
 

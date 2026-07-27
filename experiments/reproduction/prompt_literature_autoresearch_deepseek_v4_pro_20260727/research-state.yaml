@@ -30,7 +30,8 @@ data_boundary:
   warning: "All 144 non-paper140 QA and the prior 24/72/48 partitions were exposed by the preceding search and are internal development resources only."
   round_1: "Reuse the prior 24-QA selection split for exploratory screening."
   round_2: "Reuse the prior 72-QA validation split for internal validation."
-  round_3: "Reuse the prior 48-QA holdout as an exposed robustness check, never as untouched confirmation."
+  round_3: "Adaptively evaluate seven failure-driven routes on the exposed development96 union; report screening24 and validation72 separately."
+  round_4: "Use the prior 48-QA holdout only for routes that pass Round 3; it is an exposed robustness check, never untouched confirmation."
   untouched_candidate_evaluation: "Candidate outputs on paper140 only; released Baseline paper140 scores are already known."
 
 hypotheses:
@@ -39,7 +40,7 @@ hypotheses:
     status: supported_on_screening
   - id: H2
     statement: "MC semantic option binding reduces letter/position errors without the numerical hallucinations induced by long Evidence Contracts."
-    status: supported_on_screening
+    status: mixed_on_validation
   - id: H3
     statement: "A short TF polarity or clause rule improves label-rationale consistency without suppressing legitimate anomalies."
     status: contradicted_for_static_rules
@@ -49,11 +50,17 @@ hypotheses:
   - id: H5
     statement: "RE2 question re-reading may improve question comprehension, but can also disrupt the learned 7B decoding pattern."
     status: supported_mixed
+  - id: H6
+    statement: "Qualitative evidence support can preserve MC pointwise decision gains while repairing reasoning and numeric hallucinations."
+    status: pending_round_3
+  - id: H7
+    statement: "An explicit final TF verdict plus qualitative evidence can retain RE2 Judge gains while eliminating parser and numeric failures."
+    status: pending_round_3
 
 search:
-  current_round: 2
-  implemented_modes: 13
-  completed_modes: 12
+  current_round: 3
+  implemented_modes: 20
+  completed_modes: 13
   total_new_modes_cap: 30
   outer_loop_interval: "5-10 completed experiments"
   ranking: "Lexicographic: nonnegative Table-I dimensions, worst delta, mean delta; closed-task correct-to-wrong transitions are a guard."
@@ -80,6 +87,24 @@ search:
         - lit_r1_02_mc_pointwise
         - lit_r1_01_mc_semantic_bind
         - lit_r2_01_mc_tf_re2_safe
+    - round: literature_round_2
+      split: exposed_validation72
+      raw_gpu_predictions: 288
+      unique_new_components: 102
+      unique_judge_scores: 204
+      assembled_predictions_with_baseline: 360
+      assembled_scores_with_baseline: 830
+      audit_ok: true
+      score_model: deepseek-v4-pro
+      score_methods:
+        final_score_top_logprobs: 826
+        exact_sample_mean_20: 4
+      best_mode: lit_r1_01_mc_semantic_bind
+      best_nonnegative_dimensions: 9
+      best_worst_delta: -0.07692306716719122
+      best_mean_delta: 0.009615220721101858
+      best_correct_to_wrong: 1
+      advanced: []
 
 workspace:
   literature: "literature/survey.md"
@@ -90,3 +115,5 @@ workspace:
   round_1_protocol: "experiments/literature-round-1/protocol.md"
   round_1_analysis: "experiments/literature-round-1/analysis.md"
   round_2_protocol: "experiments/literature-round-2/protocol.md"
+  round_2_analysis: "experiments/literature-round-2/analysis.md"
+  round_3_protocol: "experiments/literature-round-3/protocol.md"

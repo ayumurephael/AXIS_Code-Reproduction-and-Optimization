@@ -239,6 +239,31 @@ LITERATURE_MC_POINTWISE_RULE = (
     "attached letter and a brief reason."
 )
 
+LITERATURE_MC_SEMANTIC_QUALITATIVE_RULE = (
+    "Choose the option by its complete text before mapping it to A, B, C, "
+    "or D. Explain the observed qualitative pattern and its persistence or "
+    "recovery that distinguish the selected option from the strongest "
+    "alternative. Do not quote exact values or step numbers unless the "
+    "question explicitly asks for them."
+)
+
+LITERATURE_MC_POINTWISE_QUALITATIVE_RULE = (
+    "Test each option's complete claim independently against the supplied "
+    "evidence, then choose the best-supported option by its text. Explain "
+    "which observed pattern and continuation or recovery support it and "
+    "which part of the strongest alternative is absent. Use qualitative "
+    "evidence; do not quote exact values or step numbers unless the question "
+    "explicitly asks for them."
+)
+
+LITERATURE_MC_SALIENT_AFTERMATH_RULE = (
+    "Match the options to the most salient local change and what happens "
+    "immediately afterward. Select the option whose complete description "
+    "matches both, then explain the local change and its continuation or "
+    "recovery using qualitative evidence. Do not quote exact values or step "
+    "numbers unless the question explicitly asks for them."
+)
+
 LITERATURE_TF_MINIMAL_RULE = (
     "Judge whether the complete statement as written is true. Report True or "
     "False once, followed by a brief reason that supports the same truth value."
@@ -248,6 +273,20 @@ LITERATURE_TF_CLAUSE_RULE = (
     "Check every required clause and negation in the statement. It is false "
     "if any required clause is contradicted; report one truth label and a "
     "brief consistent reason."
+)
+
+LITERATURE_TF_RE2_VERDICT_RULE = (
+    'Evaluate the complete proposition exactly as written. End with exactly '
+    '"Your answer: True." or "Your answer: False.", and keep the explanation '
+    "consistent with that verdict."
+)
+
+LITERATURE_TF_RE2_QUALITATIVE_VERDICT_RULE = (
+    "Evaluate the complete proposition exactly as written. Use qualitative "
+    "shape, direction, persistence, and recovery; do not quote exact values "
+    "or step numbers unless the question explicitly asks for them. End with "
+    'exactly "Your answer: True." or "Your answer: False.", and keep the '
+    "explanation consistent with that verdict."
 )
 
 LITERATURE_OE_DIRECT_RULE = (
@@ -338,6 +377,44 @@ LITERATURE_R2_PROFILES = {
     "lit_r2_01_mc_tf_re2_safe": {
         "multiple_choice": "re2",
         "true_false": "re2",
+        "open_ended": "base",
+    },
+}
+
+LITERATURE_R3_PROFILES = {
+    "lit_r3_01_mc_pointwise_qual": {
+        "multiple_choice": "mc_pointwise_qual",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "lit_r3_02_mc_semantic_qual": {
+        "multiple_choice": "mc_semantic_qual",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "lit_r3_03_mc_salient_aftermath": {
+        "multiple_choice": "mc_salient_aftermath",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "lit_r3_04_tf_re2_verdict": {
+        "multiple_choice": "base",
+        "true_false": "tf_re2_verdict",
+        "open_ended": "base",
+    },
+    "lit_r3_05_tf_re2_qual_verdict": {
+        "multiple_choice": "base",
+        "true_false": "tf_re2_qual_verdict",
+        "open_ended": "base",
+    },
+    "lit_r3_06_joint_pointwise_tf_qual": {
+        "multiple_choice": "mc_pointwise_qual",
+        "true_false": "tf_re2_qual_verdict",
+        "open_ended": "base",
+    },
+    "lit_r3_07_joint_semantic_tf_qual": {
+        "multiple_choice": "mc_semantic_qual",
+        "true_false": "tf_re2_qual_verdict",
         "open_ended": "base",
     },
 }
@@ -657,6 +734,34 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         "Literature Round 2: MC and TF re-reading with exact Baseline OE.",
         literature_profile="lit_r2_01_mc_tf_re2_safe",
     ),
+    "lit_r3_01_mc_pointwise_qual": PromptCondition(
+        "Literature Round 3: MC pointwise comparison with qualitative support.",
+        literature_profile="lit_r3_01_mc_pointwise_qual",
+    ),
+    "lit_r3_02_mc_semantic_qual": PromptCondition(
+        "Literature Round 3: MC semantic binding with qualitative support.",
+        literature_profile="lit_r3_02_mc_semantic_qual",
+    ),
+    "lit_r3_03_mc_salient_aftermath": PromptCondition(
+        "Literature Round 3: MC salient-event and aftermath matching.",
+        literature_profile="lit_r3_03_mc_salient_aftermath",
+    ),
+    "lit_r3_04_tf_re2_verdict": PromptCondition(
+        "Literature Round 3: TF re-reading with an explicit final verdict.",
+        literature_profile="lit_r3_04_tf_re2_verdict",
+    ),
+    "lit_r3_05_tf_re2_qual_verdict": PromptCondition(
+        "Literature Round 3: TF re-reading, qualitative evidence, and verdict.",
+        literature_profile="lit_r3_05_tf_re2_qual_verdict",
+    ),
+    "lit_r3_06_joint_pointwise_tf_qual": PromptCondition(
+        "Literature Round 3: pointwise MC plus qualitative-verdict TF.",
+        literature_profile="lit_r3_06_joint_pointwise_tf_qual",
+    ),
+    "lit_r3_07_joint_semantic_tf_qual": PromptCondition(
+        "Literature Round 3: semantic MC plus qualitative-verdict TF.",
+        literature_profile="lit_r3_07_joint_semantic_tf_qual",
+    ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
@@ -736,6 +841,16 @@ LITERATURE_R1_MODES = (
 
 LITERATURE_R2_MODES = (
     "lit_r2_01_mc_tf_re2_safe",
+)
+
+LITERATURE_R3_MODES = (
+    "lit_r3_01_mc_pointwise_qual",
+    "lit_r3_02_mc_semantic_qual",
+    "lit_r3_03_mc_salient_aftermath",
+    "lit_r3_04_tf_re2_verdict",
+    "lit_r3_05_tf_re2_qual_verdict",
+    "lit_r3_06_joint_pointwise_tf_qual",
+    "lit_r3_07_joint_semantic_tf_qual",
 )
 
 FOLLOWUP_PROMPT_MODES = (
@@ -851,6 +966,7 @@ def build_question_prompt(
             literature_profiles = {
                 **LITERATURE_R1_PROFILES,
                 **LITERATURE_R2_PROFILES,
+                **LITERATURE_R3_PROFILES,
             }
             literature_component = literature_profiles[
                 condition.literature_profile][question_type]
@@ -876,14 +992,23 @@ def build_question_prompt(
         reread_question = literature_component in {
             "re2",
             "mc_semantic_bind_re2",
+            "tf_re2_verdict",
+            "tf_re2_qual_verdict",
         }
 
         literature_rules = {
             "mc_semantic_bind": LITERATURE_MC_SEMANTIC_BIND_RULE,
             "mc_semantic_bind_re2": LITERATURE_MC_SEMANTIC_BIND_RULE,
             "mc_pointwise": LITERATURE_MC_POINTWISE_RULE,
+            "mc_semantic_qual": LITERATURE_MC_SEMANTIC_QUALITATIVE_RULE,
+            "mc_pointwise_qual": LITERATURE_MC_POINTWISE_QUALITATIVE_RULE,
+            "mc_salient_aftermath": LITERATURE_MC_SALIENT_AFTERMATH_RULE,
             "tf_minimal": LITERATURE_TF_MINIMAL_RULE,
             "tf_clause": LITERATURE_TF_CLAUSE_RULE,
+            "tf_re2_verdict": LITERATURE_TF_RE2_VERDICT_RULE,
+            "tf_re2_qual_verdict": (
+                LITERATURE_TF_RE2_QUALITATIVE_VERDICT_RULE
+            ),
             "oe_direct": LITERATURE_OE_DIRECT_RULE,
             **LITERATURE_DECOUPLED_RULES,
         }
