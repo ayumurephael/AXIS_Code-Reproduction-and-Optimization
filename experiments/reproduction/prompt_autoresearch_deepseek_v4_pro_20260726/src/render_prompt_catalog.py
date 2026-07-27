@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from src.models.AXIS.prompt_stage_a import (
+    LITERATURE_R1_MODES,
     PARETO_SCREEN_MODES,
     ROUTED_R2_MODES,
     ROUTED_R3_MODES,
@@ -25,7 +26,7 @@ def main() -> None:
     parser.add_argument("--output", required=True)
     parser.add_argument(
         "--mode-set",
-        choices=("screening", "routed_r2", "routed_r3"),
+        choices=("screening", "routed_r2", "routed_r3", "literature_r1"),
         default="screening",
     )
     args = parser.parse_args()
@@ -35,12 +36,15 @@ def main() -> None:
         modes = PARETO_SCREEN_MODES
     elif args.mode_set == "routed_r2":
         modes = ROUTED_R2_MODES
-    else:
+    elif args.mode_set == "routed_r3":
         modes = ROUTED_R3_MODES
+    else:
+        modes = LITERATURE_R1_MODES
     titles = {
         "screening": "Screening round 1 prompt catalog",
         "routed_r2": "Development round 2 routed prompt catalog",
         "routed_r3": "Development round 3 routed prompt catalog",
+        "literature_r1": "Literature-guided round 1 prompt catalog",
     }
     title = titles[args.mode_set]
 
