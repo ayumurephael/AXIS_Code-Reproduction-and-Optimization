@@ -83,3 +83,12 @@ The broad non-anomaly router is rejected despite the highest pooled mean. It red
 ## 2026-07-27 — Exposed holdout preregistration
 
 Frozen exactly two candidates and the exact-component assembly rule before new holdout inference. Both share the semantic qualitative MC component. The joint candidate adds the narrow, no-reread TF prefix only when an explicit grammatical negation is present; all other TF and all OE records reuse exact Baseline. A candidate must retain all ten holdout metrics, have zero closed-task correct→wrong transitions, satisfy prefix compliance, and pass the provenance/Judge audit before it can be locked for the one permitted paper140 run.
+## 2026-07-27 — Exposed holdout outcome
+
+Completed 96/96 GPU predictions and 54/54 new `deepseek-v4-pro` dimensions. The assembled audit passed for 144 predictions and 333 scores. Both candidates failed: the shared semantic qualitative MC component reduced MC Final/Correctness/Reasoning by 0.076/0.059/0.118 and changed two Baseline-correct normal cases to wrong anomalous choices. The joint TF prefix component independently improved all three TF dimensions by +0.275/+0.250/+0.313 and produced four wrong→correct transitions, but one routed response missed the exact `Answer:` prefix. No candidate was locked.
+
+Failure inspection showed that semantic binding repaired a genuine localized-oscillation case (`series_000022:1`) but overdiagnosed ordinary alternating/random fluctuation (`series_000139:0`) and ordinary troughs (`series_000141:1`). The missing factor is an anomaly threshold between semantic option matching and evidence classification.
+
+## 2026-07-27 — Outer loop 5 and final-cycle preregistration
+
+Frozen the final four new modes under the 30-mode cap. Two MC mechanisms test a conservative structured-signature guard and a status-before-shape decomposition. Their joint versions reuse the already frozen explicit-negation TF RE2 route; OE remains exact Baseline. The existing TF-only route `lit_r4_01_tf_neg_re2` is included as a zero-new-mode fallback because it preserves MC/OE exactly and passed every development gate. Development96, both 24/72 constituents, and exposed holdout48 must independently have all ten nonnegative deltas and zero correct→wrong transitions before a unique candidate may reach paper140.

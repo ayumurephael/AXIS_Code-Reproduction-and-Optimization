@@ -8,6 +8,7 @@ from src.models.AXIS.prompt_stage_a import (
     LITERATURE_R2_MODES,
     LITERATURE_R3_MODES,
     LITERATURE_R4_MODES,
+    LITERATURE_R5_MODES,
     PARETO_SCREEN_MODES,
     ROUTED_R2_MODES,
     ROUTED_R3_MODES,
@@ -794,5 +795,70 @@ B) Spike
                 self.assertNotIn("Learned Task Guidance", prompt)
                 self.assertNotIn("### Evidence Contract", prompt)
                 self.assertEqual(prompt.count("<|fixed_hint|>"), 30)
+
+    def test_literature_round5_matrix_is_locked(self):
+        self.assertEqual(
+            LITERATURE_R5_MODES,
+            (
+                "lit_r5_01_mc_structured_guard",
+                "lit_r5_02_mc_status_then_shape",
+                "lit_r5_03_joint_structured_tf_neg_re2",
+                "lit_r5_04_joint_status_tf_neg_re2",
+            ),
+        )
+        self.assertTrue(set(LITERATURE_R5_MODES).issubset(MODE_SPECS))
+
+    def test_literature_round5_mc_rules_target_holdout_failures(self):
+        structured = _prompt(
+            "lit_r5_01_mc_structured_guard", "multiple_choice"
+        )
+        self.assertIn("ordinary peaks or troughs", structured)
+        self.assertIn("specific structured anomaly signature", structured)
+        self.assertIn("otherwise select the normal option", structured)
+
+        status_first = _prompt(
+            "lit_r5_02_mc_status_then_shape", "multiple_choice"
+        )
+        self.assertIn("First decide anomaly status", status_first)
+        self.assertIn("independently of the option wording", status_first)
+        self.assertIn("Then compare only options consistent", status_first)
+        for prompt in (structured, status_first):
+            self.assertIn("Overall Summary Hints", prompt)
+            self.assertNotIn("### Evidence Contract", prompt)
+            self.assertEqual(prompt.count("<|fixed_hint|>"), 30)
+
+    def test_literature_round5_joint_routes_reuse_exact_components(self):
+        negative = "True or False: There is no evidence of an anomaly."
+        positive = "True or False: An upward spike is anomalous."
+        self.assertEqual(
+            _prompt(
+                "lit_r5_03_joint_structured_tf_neg_re2",
+                "multiple_choice",
+            ),
+            _prompt("lit_r5_01_mc_structured_guard", "multiple_choice"),
+        )
+        self.assertEqual(
+            _prompt(
+                "lit_r5_04_joint_status_tf_neg_re2",
+                "multiple_choice",
+            ),
+            _prompt("lit_r5_02_mc_status_then_shape", "multiple_choice"),
+        )
+        for mode in (
+            "lit_r5_03_joint_structured_tf_neg_re2",
+            "lit_r5_04_joint_status_tf_neg_re2",
+        ):
+            self.assertEqual(
+                _prompt(mode, "true_false", negative),
+                _prompt("lit_r4_01_tf_neg_re2", "true_false", negative),
+            )
+            self.assertEqual(
+                _prompt(mode, "true_false", positive),
+                _prompt("base", "true_false", positive),
+            )
+            self.assertEqual(
+                _prompt(mode, "open_ended"),
+                _prompt("base", "open_ended"),
+            )
 if __name__ == "__main__":
     unittest.main()

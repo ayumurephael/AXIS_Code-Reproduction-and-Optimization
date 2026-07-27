@@ -248,6 +248,28 @@ LITERATURE_MC_SEMANTIC_QUALITATIVE_RULE = (
     "question explicitly asks for them."
 )
 
+LITERATURE_MC_STRUCTURED_GUARD_RULE = (
+    "Compare every option by its complete meaning. Treat alternating signs, "
+    "ordinary peaks or troughs, isolated large or small values, and irregular-"
+    "looking fluctuation as normal variability unless the supplied evidence "
+    "supports the option's specific structured anomaly signature, such as a "
+    "localized contrast, persistence, recovery, or boundary pattern. Select "
+    "an anomalous option only when that defining signature is supported; "
+    "otherwise select the normal option. Explain the decisive qualitative "
+    "pattern without quoting exact values or step numbers unless asked."
+)
+
+LITERATURE_MC_STATUS_THEN_SHAPE_RULE = (
+    "First decide anomaly status from the supplied Per-Step Analysis and "
+    "Overall Summary Hints, independently of the option wording. Ordinary "
+    "variance, alternating signs, isolated highs or lows, and irregular-looking "
+    "fluctuation are not anomalies by themselves. Then compare only options "
+    "consistent with that status and choose the one whose complete text best "
+    "matches the observed shape, persistence, recovery, and boundary behavior. "
+    "Explain the decisive qualitative evidence without quoting exact values or "
+    "step numbers unless asked."
+)
+
 LITERATURE_MC_POINTWISE_QUALITATIVE_RULE = (
     "Test each option's complete claim independently against the supplied "
     "evidence, then choose the best-supported option by its text. Explain "
@@ -480,6 +502,30 @@ LITERATURE_R4_PROFILES = {
     "lit_r4_06_joint_semantic_tf_neg_prefix": {
         "multiple_choice": "mc_semantic_qual",
         "true_false": "tf_neg_prefix_router",
+        "open_ended": "base",
+    },
+}
+
+
+LITERATURE_R5_PROFILES = {
+    "lit_r5_01_mc_structured_guard": {
+        "multiple_choice": "mc_structured_guard",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "lit_r5_02_mc_status_then_shape": {
+        "multiple_choice": "mc_status_then_shape",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "lit_r5_03_joint_structured_tf_neg_re2": {
+        "multiple_choice": "mc_structured_guard",
+        "true_false": "tf_neg_re2_router",
+        "open_ended": "base",
+    },
+    "lit_r5_04_joint_status_tf_neg_re2": {
+        "multiple_choice": "mc_status_then_shape",
+        "true_false": "tf_neg_re2_router",
         "open_ended": "base",
     },
 }
@@ -852,6 +898,22 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         "Literature Round 4: semantic MC plus negative-cue TF prefix router.",
         literature_profile="lit_r4_06_joint_semantic_tf_neg_prefix",
     ),
+    "lit_r5_01_mc_structured_guard": PromptCondition(
+        "Literature Round 5: conservative structured-signature MC guard.",
+        literature_profile="lit_r5_01_mc_structured_guard",
+    ),
+    "lit_r5_02_mc_status_then_shape": PromptCondition(
+        "Literature Round 5: decide MC anomaly status before option shape.",
+        literature_profile="lit_r5_02_mc_status_then_shape",
+    ),
+    "lit_r5_03_joint_structured_tf_neg_re2": PromptCondition(
+        "Literature Round 5: structured MC guard plus negative-cue TF RE2.",
+        literature_profile="lit_r5_03_joint_structured_tf_neg_re2",
+    ),
+    "lit_r5_04_joint_status_tf_neg_re2": PromptCondition(
+        "Literature Round 5: status-first MC plus negative-cue TF RE2.",
+        literature_profile="lit_r5_04_joint_status_tf_neg_re2",
+    ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
@@ -950,6 +1012,14 @@ LITERATURE_R4_MODES = (
     "lit_r4_04_joint_semantic_tf_nonanomaly_re2",
     "lit_r4_05_tf_neg_prefix",
     "lit_r4_06_joint_semantic_tf_neg_prefix",
+)
+
+
+LITERATURE_R5_MODES = (
+    "lit_r5_01_mc_structured_guard",
+    "lit_r5_02_mc_status_then_shape",
+    "lit_r5_03_joint_structured_tf_neg_re2",
+    "lit_r5_04_joint_status_tf_neg_re2",
 )
 
 
@@ -1068,6 +1138,7 @@ def build_question_prompt(
                 **LITERATURE_R2_PROFILES,
                 **LITERATURE_R3_PROFILES,
                 **LITERATURE_R4_PROFILES,
+                **LITERATURE_R5_PROFILES,
             }
             literature_component = literature_profiles[
                 condition.literature_profile][question_type]
@@ -1122,6 +1193,8 @@ def build_question_prompt(
             "mc_semantic_bind_re2": LITERATURE_MC_SEMANTIC_BIND_RULE,
             "mc_pointwise": LITERATURE_MC_POINTWISE_RULE,
             "mc_semantic_qual": LITERATURE_MC_SEMANTIC_QUALITATIVE_RULE,
+            "mc_structured_guard": LITERATURE_MC_STRUCTURED_GUARD_RULE,
+            "mc_status_then_shape": LITERATURE_MC_STATUS_THEN_SHAPE_RULE,
             "mc_pointwise_qual": LITERATURE_MC_POINTWISE_QUALITATIVE_RULE,
             "mc_salient_aftermath": LITERATURE_MC_SALIENT_AFTERMATH_RULE,
             "tf_minimal": LITERATURE_TF_MINIMAL_RULE,

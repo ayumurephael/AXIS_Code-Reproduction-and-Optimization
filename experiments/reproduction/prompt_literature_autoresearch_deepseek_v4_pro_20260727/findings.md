@@ -90,3 +90,14 @@ Round 1 is complete and audited. Results are exploratory because the split was e
 - Does semantic qualitative MC remain non-regressive on the exposed holdout48?
 - Does the narrow TF prefix add robust holdout value beyond the MC-only route?
 - If a unique route passes the frozen holdout gate, does it retain all ten formal paper140 metrics?
+## Exposed holdout findings
+
+1. The semantic qualitative MC gain does not generalize robustly: it loses all three MC metrics and creates two correct→wrong decisions on exposed holdout48.
+2. Complete-option binding solves a reporting/symbol problem but not the anomaly threshold. An anomaly-worded distractor can still cause the model to reinterpret ordinary variation as unexpected.
+3. Raw irregularity is an ambiguous feature. It correctly identifies localized rapid oscillations in `series_000022:1`, but falsely triggers on ordinary alternating fluctuation in `series_000139:0`; persistence, localization, recovery, and learned context must disambiguate it.
+4. The narrow explicit-negation TF intervention has a strong independent signal on holdout: all three TF dimensions increase and four wrong decisions become correct. Its semantic value survives even though one response misses the requested literal prefix.
+5. Exact-component routing remains essential. It isolates the MC regression from the TF gain and provides a viable TF-only fallback with MC/OE byte-identical Baseline behavior.
+
+## Final-cycle question
+
+Can either a structured-signature threshold or an explicit status-before-shape decomposition eliminate both normal-window MC regressions without losing the localized-oscillation repair? If not, does the existing TF-only negative-cue route pass both development and exposed-holdout gates and provide a formally valid non-regressive paper140 candidate?

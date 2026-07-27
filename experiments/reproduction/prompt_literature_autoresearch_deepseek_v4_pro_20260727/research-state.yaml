@@ -40,7 +40,7 @@ hypotheses:
     status: supported_on_screening
   - id: H2
     statement: "MC semantic option binding reduces letter/position errors without the numerical hallucinations induced by long Evidence Contracts."
-    status: mixed_on_validation
+    status: contradicted_on_exposed_holdout
   - id: H3
     statement: "A short TF polarity or clause rule improves label-rationale consistency without suppressing legitimate anomalies."
     status: contradicted_for_static_rules
@@ -60,9 +60,12 @@ hypotheses:
   - id: H8
     statement: "Question-surface routing can confine TF polarity help to negative/non-anomaly propositions while preserving positive-anomaly Baseline behavior."
     status: supported_for_explicit_negation_not_broad_normality
+  - id: H9
+    statement: "A conservative MC threshold can preserve structured-anomaly gains while preventing ordinary irregularity from being overdiagnosed."
+    status: pending_round_5
 search:
-  current_round: exposed_holdout_confirmation
-  implemented_modes: 26
+  current_round: literature_round_5
+  implemented_modes: 30
   completed_modes: 26
   total_new_modes_cap: 30
   outer_loop_interval: "5-10 completed experiments"
@@ -149,6 +152,24 @@ search:
       advanced:
         - lit_r3_02_mc_semantic_qual
         - lit_r4_06_joint_semantic_tf_neg_prefix
+    - round: exposed_holdout_confirmation
+      split: exposed_holdout48
+      raw_gpu_predictions: 96
+      unique_new_components: 27
+      unique_judge_scores: 54
+      assembled_predictions_with_baseline: 144
+      assembled_scores_with_baseline: 333
+      audit_ok: true
+      score_model: deepseek-v4-pro
+      score_methods:
+        final_score_top_logprobs: 330
+        exact_sample_mean_20: 3
+      best_mode: lit_r4_06_joint_semantic_tf_neg_prefix
+      best_nonnegative_dimensions: 7
+      best_worst_delta: -0.1176206
+      best_mean_delta: 0.0584596
+      best_correct_to_wrong: 2
+      advanced: []
 workspace:
   literature: "literature/survey.md"
   search_strategy: "literature/search-strategy.md"
@@ -164,3 +185,4 @@ workspace:
   round_4_protocol: "experiments/literature-round-4/protocol.md"
   round_4_analysis: "experiments/literature-round-4/analysis.md"
   exposed_holdout_protocol: "experiments/exposed-holdout-confirmation/protocol.md"
+  round_5_protocol: "experiments/literature-round-5/protocol.md"

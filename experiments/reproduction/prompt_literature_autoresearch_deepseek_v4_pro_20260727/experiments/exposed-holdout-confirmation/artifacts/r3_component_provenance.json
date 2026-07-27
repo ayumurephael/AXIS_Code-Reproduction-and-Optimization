@@ -1,0 +1,37 @@
+{
+  "baseline_rows": 48,
+  "raw_candidate_rows": 96,
+  "unique_new_component_rows": 17,
+  "assembled_route_rows": 48,
+  "component_question_types": {
+    "multiple_choice": 17
+  },
+  "component_modes": {
+    "lit_r3_02_mc_semantic_qual": 17
+  },
+  "component_provenance": {
+    "lit_r3_02_mc_semantic_qual/multiple_choice": {
+      "rows": 17,
+      "representative_prompt_sha256": "e5bb143cb12cde0a99fc5008b78a1160b36a6b11ede6e14fa0dfd252a35f0a5c"
+    }
+  },
+  "route_provenance": {
+    "lit_r3_02_mc_semantic_qual": {
+      "multiple_choice": {
+        "component": "mc_semantic_qual",
+        "source_mode": "lit_r3_02_mc_semantic_qual",
+        "representative_prompt_sha256": "e5bb143cb12cde0a99fc5008b78a1160b36a6b11ede6e14fa0dfd252a35f0a5c"
+      },
+      "true_false": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "653ca40c2f82fb18a791765e7bcca91ef4494426daa42c0dc72bda9237f99bdb"
+      },
+      "open_ended": {
+        "component": "base",
+        "source_mode": "base",
+        "representative_prompt_sha256": "2839337c01b253c2b75f5e0d48b885f9470ba9b7794c7b4e62e669165cc7436c"
+      }
+    }
+  }
+}

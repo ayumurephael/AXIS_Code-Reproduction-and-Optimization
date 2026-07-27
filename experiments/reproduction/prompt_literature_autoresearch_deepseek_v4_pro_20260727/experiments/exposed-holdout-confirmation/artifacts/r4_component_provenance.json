@@ -1,0 +1,346 @@
+{
+  "routes": [
+    "lit_r4_06_joint_semantic_tf_neg_prefix"
+  ],
+  "records": 48,
+  "prediction_rows": 48,
+  "score_rows": 111,
+  "components": [
+    {
+      "record_id": "series_000006:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000006:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000007:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000007:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000011:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000011:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000020:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000020:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000022:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000022:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000027:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000027:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000037:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000037:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000044:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000044:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000045:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000045:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000046:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000046:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000054:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000054:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000062:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000062:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000071:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000071:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000077:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000077:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000078:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000078:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000079:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000079:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000097:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000097:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000099:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000099:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000108:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000108:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000111:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000111:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "lit_r4_05_tf_neg_prefix",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000113:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000113:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000136:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "true_false",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000136:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000139:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000139:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000141:0",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "open_ended",
+      "source_mode": "base",
+      "prompt_sha256": null
+    },
+    {
+      "record_id": "series_000141:1",
+      "route": "lit_r4_06_joint_semantic_tf_neg_prefix",
+      "question_type": "multiple_choice",
+      "source_mode": "lit_r3_02_mc_semantic_qual",
+      "prompt_sha256": null
+    }
+  ]
+}
