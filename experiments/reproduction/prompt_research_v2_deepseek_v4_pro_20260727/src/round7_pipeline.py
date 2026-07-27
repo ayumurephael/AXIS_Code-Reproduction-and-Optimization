@@ -23,16 +23,26 @@ from tools.axis_repro.common import read_jsonl
 
 ROUND5_SOURCE_MODE = "v2_r5_02_oe_verbatim_or_add"
 ROUND7_MODE = "v2_r7_01_oe_unclosed_think_answer_repair"
+ROUND8_MODE = "v2_r8_01_oe_no_anomaly_boundary_repair"
+BOUNDARY_REPAIR_MODES = (ROUND7_MODE, ROUND8_MODE)
 ANSWER_MARKER = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:final\s+)?answer\s*:",
     flags=re.IGNORECASE | re.MULTILINE,
 )
-round1_pipeline.ACTIVE_FAMILY = {ROUND7_MODE: "open_ended"}
+NO_ANOMALY_CONCLUSION = re.compile(
+    r"\b(?:no|without)\b[^.\n]{0,80}\b"
+    r"(?:anomal(?:y|ies|ous)?|irregularit(?:y|ies))\b",
+    flags=re.IGNORECASE,
+)
+round1_pipeline.ACTIVE_FAMILY = {
+    mode: "open_ended" for mode in BOUNDARY_REPAIR_MODES
+}
 
 
 def select_repaired_answer(
     baseline_response: str,
     candidate_response: str,
+    require_no_anomaly: bool = False,
 ) -> bool:
     """Use the revision only for an objectively malformed Baseline answer."""
     baseline_lower = baseline_response.lower()
@@ -47,7 +57,30 @@ def select_repaired_answer(
         and "</think>" not in candidate_lower
         and ANSWER_MARKER.search(candidate_response) is not None
     )
-    return baseline_is_unclosed_reasoning and candidate_has_clean_answer_boundary
+    if not (baseline_is_unclosed_reasoning and candidate_has_clean_answer_boundary):
+        return False
+    if require_no_anomaly:
+        return (
+            NO_ANOMALY_CONCLUSION.search(baseline_response) is not None
+            and NO_ANOMALY_CONCLUSION.search(candidate_response) is not None
+        )
+    return True
+
+
+def selected_for_mode(
+    mode: str,
+    baseline_response: str,
+    candidate_response: str,
+) -> bool:
+    if mode == ROUND7_MODE:
+        return select_repaired_answer(baseline_response, candidate_response)
+    if mode == ROUND8_MODE:
+        return select_repaired_answer(
+            baseline_response,
+            candidate_response,
+            require_no_anomaly=True,
+        )
+    raise ValueError(f"Unknown boundary-repair mode: {mode!r}")
 
 
 def analyze(args: argparse.Namespace) -> None:
@@ -55,6 +88,10 @@ def analyze(args: argparse.Namespace) -> None:
 
 
 def assemble(args: argparse.Namespace) -> None:
+    modes = tuple(args.modes or BOUNDARY_REPAIR_MODES)
+    unknown = set(modes) - set(BOUNDARY_REPAIR_MODES)
+    if unknown:
+        raise ValueError(f"Unknown boundary-repair modes: {sorted(unknown)}")
     allowed = allowed_series(args.split_manifest, args.split_key)
     base_predictions = baseline_rows(args.baseline_predictions, allowed)
     record_ids = {row["record_id"] for row in base_predictions}
@@ -81,45 +118,48 @@ def assemble(args: argparse.Namespace) -> None:
     output_predictions = [copy.deepcopy(row) for row in base_predictions]
     output_scores = [copy.deepcopy(row) for row in base_scores]
     provenance = []
-    selected_count = 0
-    for base in base_predictions:
-        selected = False
-        source_mode = "base"
-        source_prediction = base_pred_index[(base["record_id"], "base")]
-        score_source = base_score_index
-        if base["question_type"] == "open_ended":
-            candidate = candidate_pred_index[
-                (base["record_id"], ROUND5_SOURCE_MODE)
-            ]
-            selected = select_repaired_answer(
-                base["response"],
-                candidate["response"],
+    selected_counts = {mode: 0 for mode in modes}
+    for mode in modes:
+        for base in base_predictions:
+            selected = False
+            source_mode = "base"
+            source_prediction = base_pred_index[(base["record_id"], "base")]
+            score_source = base_score_index
+            if base["question_type"] == "open_ended":
+                candidate = candidate_pred_index[
+                    (base["record_id"], ROUND5_SOURCE_MODE)
+                ]
+                selected = selected_for_mode(
+                    mode,
+                    base["response"],
+                    candidate["response"],
+                )
+                if selected:
+                    selected_counts[mode] += 1
+                    source_mode = ROUND5_SOURCE_MODE
+                    source_prediction = candidate
+                    score_source = candidate_score_index
+            prediction = copy.deepcopy(source_prediction)
+            prediction["mode"] = mode
+            prediction["component_source_mode"] = source_mode
+            prediction["boundary_repair_selected"] = selected
+            output_predictions.append(prediction)
+            for dimension in DIMS[base["question_type"]]:
+                score = copy.deepcopy(
+                    score_source[(base["record_id"], source_mode, dimension)]
+                )
+                score["mode"] = mode
+                score["component_source_mode"] = source_mode
+                output_scores.append(score)
+            provenance.append(
+                {
+                    "record_id": base["record_id"],
+                    "mode": mode,
+                    "question_type": base["question_type"],
+                    "selected": selected,
+                    "component_source_mode": source_mode,
+                }
             )
-            if selected:
-                selected_count += 1
-                source_mode = ROUND5_SOURCE_MODE
-                source_prediction = candidate
-                score_source = candidate_score_index
-        prediction = copy.deepcopy(source_prediction)
-        prediction["mode"] = ROUND7_MODE
-        prediction["component_source_mode"] = source_mode
-        prediction["boundary_repair_selected"] = selected
-        output_predictions.append(prediction)
-        for dimension in DIMS[base["question_type"]]:
-            score = copy.deepcopy(
-                score_source[(base["record_id"], source_mode, dimension)]
-            )
-            score["mode"] = ROUND7_MODE
-            score["component_source_mode"] = source_mode
-            output_scores.append(score)
-        provenance.append(
-            {
-                "record_id": base["record_id"],
-                "question_type": base["question_type"],
-                "selected": selected,
-                "component_source_mode": source_mode,
-            }
-        )
 
     output_predictions.sort(key=lambda row: (row["record_id"], row["mode"]))
     output_scores.sort(
@@ -129,9 +169,9 @@ def assemble(args: argparse.Namespace) -> None:
     write_jsonl(args.output_scores, output_scores)
     manifest = {
         "split_key": args.split_key,
-        "mode": ROUND7_MODE,
+        "modes": list(modes),
         "records_per_mode": len(base_predictions),
-        "selected_repairs": selected_count,
+        "selected_repairs": selected_counts,
         "prediction_rows": len(output_predictions),
         "score_rows": len(output_scores),
         "components": provenance,
@@ -157,6 +197,11 @@ def main() -> None:
     assemble_parser.add_argument("--candidate-scores", required=True)
     assemble_parser.add_argument("--split-manifest", required=True)
     assemble_parser.add_argument("--split-key", required=True)
+    assemble_parser.add_argument(
+        "--modes",
+        nargs="+",
+        choices=sorted(BOUNDARY_REPAIR_MODES),
+    )
     assemble_parser.add_argument("--output-predictions", required=True)
     assemble_parser.add_argument("--output-scores", required=True)
     assemble_parser.add_argument("--provenance", required=True)
