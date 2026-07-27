@@ -13,6 +13,16 @@ class Round6SelectorTest(unittest.TestCase):
         self.assertEqual(len(ROUND6_MODES), 3)
         self.assertEqual(set(ROUND6_MODES), set(SELECTOR_RULES))
 
+    def test_pipeline_registers_every_mode_as_oe(self):
+        from experiments.reproduction.prompt_research_v2_deepseek_v4_pro_20260727.src import (
+            round6_pipeline,
+        )
+
+        self.assertEqual(
+            round6_pipeline.round1_pipeline.ACTIVE_FAMILY,
+            {mode: "open_ended" for mode in ROUND6_MODES},
+        )
+
     def test_selector_prompt_contains_both_frozen_candidates(self):
         for mode in ROUND6_MODES:
             prompt = selector_question("Question?", "Draft A", "Draft B", mode)

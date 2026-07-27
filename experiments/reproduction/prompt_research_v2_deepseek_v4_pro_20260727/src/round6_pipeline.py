@@ -7,6 +7,9 @@ import copy
 import json
 from pathlib import Path
 
+from experiments.reproduction.prompt_research_v2_deepseek_v4_pro_20260727.src import (
+    round1_pipeline,
+)
 from experiments.reproduction.prompt_research_v2_deepseek_v4_pro_20260727.src.round1_pipeline import (
     analyze,
     allowed_series,
@@ -20,6 +23,11 @@ from experiments.reproduction.prompt_research_v2_deepseek_v4_pro_20260727.src.ru
 )
 from tools.axis_repro.build_tables import DIMS
 from tools.axis_repro.common import read_jsonl
+
+
+round1_pipeline.ACTIVE_FAMILY = {
+    mode: "open_ended" for mode in ROUND6_MODES
+}
 
 
 def assemble(args: argparse.Namespace) -> None:
