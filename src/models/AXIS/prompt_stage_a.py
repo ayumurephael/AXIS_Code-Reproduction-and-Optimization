@@ -635,6 +635,24 @@ V2_R1_PROFILES = {
     },
 }
 
+V2_R3_MAIN_PROFILES = {
+    "v2_r3_01_oe_balanced_support": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_balanced_support_router",
+    },
+    "v2_r3_02_oe_boundary_balanced": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_boundary_balanced_router",
+    },
+    "v2_r3_03_oe_assessment_balanced": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_assessment_balanced_router",
+    },
+}
+
 OE_EVIDENCE_QUESTION_PATTERNS = (
     re.compile(r"\bwhat evidence\b", flags=re.I),
     re.compile(r"\bwhat features?\b", flags=re.I),
@@ -653,6 +671,47 @@ OE_EVIDENCE_QUESTION_PATTERNS = (
 
 def _is_oe_evidence_question(question: str) -> bool:
     return any(pattern.search(question) for pattern in OE_EVIDENCE_QUESTION_PATTERNS)
+
+
+OE_BALANCED_SUPPORT_PATTERN = re.compile(
+    r"\bsupport(?:s|ed|ing)?\b",
+    flags=re.I,
+)
+OE_COUNTEREVIDENCE_PATTERN = re.compile(
+    r"\b(?:refute|refutes|refuted|refuting|challenge|challenges|challenged|"
+    r"challenging)\b",
+    flags=re.I,
+)
+OE_MULTIPLICITY_PATTERN = re.compile(
+    r"\bmultiple (?:types?|kinds?)\b",
+    flags=re.I,
+)
+OE_BOUNDARY_PATTERN = re.compile(
+    r"\bboundar(?:y|ies)\b|\bedges?\b",
+    flags=re.I,
+)
+OE_ASSESSMENT_PATTERN = re.compile(
+    r"\b(?:whether|assess|assessment|determine|evaluate)\b",
+    flags=re.I,
+)
+
+
+def _is_oe_balanced_support_question(
+    question: str,
+    *,
+    require_boundary: bool = False,
+    require_assessment: bool = False,
+) -> bool:
+    matched = (
+        OE_BALANCED_SUPPORT_PATTERN.search(question) is not None
+        and OE_COUNTEREVIDENCE_PATTERN.search(question) is not None
+        and OE_MULTIPLICITY_PATTERN.search(question) is None
+    )
+    if require_boundary:
+        matched = matched and OE_BOUNDARY_PATTERN.search(question) is not None
+    if require_assessment:
+        matched = matched and OE_ASSESSMENT_PATTERN.search(question) is not None
+    return matched
 
 
 ROUTED_R2_PROFILES = {
@@ -1142,6 +1201,18 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         interleave_time_series_evidence=True,
         new_md_profile="p5_full",
     ),
+    "v2_r3_01_oe_balanced_support": PromptCondition(
+        "Round 3 main: balanced support/counterevidence OE router.",
+        literature_profile="v2_r3_01_oe_balanced_support",
+    ),
+    "v2_r3_02_oe_boundary_balanced": PromptCondition(
+        "Round 3 main: boundary-qualified balanced-evidence OE router.",
+        literature_profile="v2_r3_02_oe_boundary_balanced",
+    ),
+    "v2_r3_03_oe_assessment_balanced": PromptCondition(
+        "Round 3 main: assessment-qualified balanced-evidence OE router.",
+        literature_profile="v2_r3_03_oe_assessment_balanced",
+    ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
@@ -1268,6 +1339,12 @@ V2_R2_NEW_MD_MODES = (
     "v2_r2_03_new_question_first",
     "v2_r2_04_new_evidence_last",
     "v2_r2_05_new_full_prompt",
+)
+
+V2_R3_MAIN_MODES = (
+    "v2_r3_01_oe_balanced_support",
+    "v2_r3_02_oe_boundary_balanced",
+    "v2_r3_03_oe_assessment_balanced",
 )
 
 
@@ -1507,6 +1584,7 @@ Answer:"""
                 **LITERATURE_R4_PROFILES,
                 **LITERATURE_R5_PROFILES,
                 **V2_R1_PROFILES,
+                **V2_R3_MAIN_PROFILES,
             }
             literature_component = literature_profiles[
                 condition.literature_profile][question_type]
@@ -1535,15 +1613,35 @@ Answer:"""
                     if _has_explicit_tf_negative_cue(question)
                     else "base"
                 )
-        elif (
-            question_type == "open_ended"
-            and literature_component == "v2_oe_evidence_router"
-        ):
-            literature_component = (
-                "v2_oe_evidence"
-                if _is_oe_evidence_question(question)
-                else "base"
-            )
+        elif question_type == "open_ended":
+            if literature_component == "v2_oe_evidence_router":
+                literature_component = (
+                    "v2_oe_evidence"
+                    if _is_oe_evidence_question(question)
+                    else "base"
+                )
+            elif literature_component in {
+                "v2_oe_balanced_support_router",
+                "v2_oe_boundary_balanced_router",
+                "v2_oe_assessment_balanced_router",
+            }:
+                requirements = {
+                    "v2_oe_balanced_support_router": (False, False),
+                    "v2_oe_boundary_balanced_router": (True, False),
+                    "v2_oe_assessment_balanced_router": (False, True),
+                }
+                require_boundary, require_assessment = requirements[
+                    literature_component
+                ]
+                literature_component = (
+                    "v2_oe_evidence"
+                    if _is_oe_balanced_support_question(
+                        question,
+                        require_boundary=require_boundary,
+                        require_assessment=require_assessment,
+                    )
+                    else "base"
+                )
 
         if literature_component == "base":
             return build_question_prompt(
