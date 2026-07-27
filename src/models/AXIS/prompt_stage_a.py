@@ -327,6 +327,63 @@ LITERATURE_OE_DIRECT_RULE = (
     "needed to support it."
 )
 
+V2_OE_CONTEXT_BALANCED_RULE = (
+    "Use Per-Step Analysis as sample-specific context for whether the "
+    "displayed local behavior is expected in the complete time series. It can "
+    "support either normality or anomaly; do not decide from displayed "
+    "magnitude alone."
+)
+
+V2_OE_CONTEXT_CONTRAST_RULE = (
+    "Combine the window shape with Per-Step Analysis. Do not dismiss an "
+    "anomaly merely because the displayed values look smooth, and do not call "
+    "a value anomalous merely because it is extreme."
+)
+
+V2_OE_EVIDENCE_RULE = (
+    "First state what the supplied window and Per-Step Analysis currently "
+    "support, then address the requested evidence or boundary qualification. "
+    "Do not replace the supplied-window assessment with a generic tutorial."
+)
+
+V2_OE_CONTEXT_DIRECT_RULE = (
+    "Use Per-Step Analysis as context for whether the window behavior is "
+    "expected. Start with a direct answer to the question, then give only the "
+    "window pattern and contextual evidence needed to support it."
+)
+
+V2_OE_FIXED_POSTNOTE_RULE = (
+    "Overall Summary Hints are shared learned task guidance, not "
+    "sample-specific evidence. Use the Window and Per-Step Analysis to assess "
+    "this sample."
+)
+
+V2_MC_CONTEXT_BALANCED_RULE = (
+    "Use Per-Step Analysis to judge whether each displayed local behavior is "
+    "expected in the complete time series. Choose the option whose full "
+    "description best matches both that context and the window shape; value "
+    "magnitude alone is not evidence of anomaly."
+)
+
+V2_MC_CONTENT_OUTPUT_RULE = (
+    "Select the best-supported option by its complete meaning before mapping "
+    "it to a letter. Begin with that letter and option text, then give one "
+    "concise reason from the Window and Per-Step Analysis."
+)
+
+V2_TF_CONTEXT_WHOLE_RULE = (
+    "Judge the complete statement against both the Window and Per-Step "
+    "Analysis. That context can support either normality or anomaly; preserve "
+    "every negation and keep the reason consistent with one True or False "
+    "verdict."
+)
+
+V2_TF_PREFIX_CONTEXT_RULE = (
+    "Judge the complete statement using the Window and Per-Step Analysis. "
+    "Begin with exactly True. or False., then give a concise reason consistent "
+    "with that verdict."
+)
+
 LITERATURE_DECOUPLED_RULES = {
     "mc_decoupled": (
         "First determine which complete option text is best supported by the "
@@ -529,6 +586,73 @@ LITERATURE_R5_PROFILES = {
         "open_ended": "base",
     },
 }
+
+V2_R1_PROFILES = {
+    "v2_r1_01_oe_context_balanced": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_context_balanced",
+    },
+    "v2_r1_02_oe_context_contrast": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_context_contrast",
+    },
+    "v2_r1_03_oe_evidence_router": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_evidence_router",
+    },
+    "v2_r1_04_oe_context_direct": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_context_direct",
+    },
+    "v2_r1_05_oe_fixed_postnote": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_fixed_postnote",
+    },
+    "v2_r1_06_mc_context_balanced": {
+        "multiple_choice": "v2_mc_context_balanced",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "v2_r1_07_mc_content_output": {
+        "multiple_choice": "v2_mc_content_output",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "v2_r1_08_tf_context_whole": {
+        "multiple_choice": "base",
+        "true_false": "v2_tf_context_whole",
+        "open_ended": "base",
+    },
+    "v2_r1_09_tf_prefix_context": {
+        "multiple_choice": "base",
+        "true_false": "v2_tf_prefix_context",
+        "open_ended": "base",
+    },
+}
+
+OE_EVIDENCE_QUESTION_PATTERNS = (
+    re.compile(r"\bwhat evidence\b", flags=re.I),
+    re.compile(r"\bwhat features?\b", flags=re.I),
+    re.compile(r"\bwhat indicators?\b", flags=re.I),
+    re.compile(
+        r"\bwhat (?:would|should) you (?:look for|examine|check)\b",
+        flags=re.I,
+    ),
+    re.compile(
+        r"\bhow (?:would|could|should) you "
+        r"(?:identify|determine|assess|distinguish)\b",
+        flags=re.I,
+    ),
+)
+
+
+def _is_oe_evidence_question(question: str) -> bool:
+    return any(pattern.search(question) for pattern in OE_EVIDENCE_QUESTION_PATTERNS)
 
 
 ROUTED_R2_PROFILES = {
@@ -914,6 +1038,44 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         "Literature Round 5: status-first MC plus negative-cue TF RE2.",
         literature_profile="lit_r5_04_joint_status_tf_neg_re2",
     ),
+    "v2_r1_01_oe_context_balanced": PromptCondition(
+        "Prompt research v2 Round 1: balanced OE Per-Step context use.",
+        literature_profile="v2_r1_01_oe_context_balanced",
+    ),
+    "v2_r1_02_oe_context_contrast": PromptCondition(
+        "Prompt research v2 Round 1: balanced smooth/extreme OE contrast.",
+        literature_profile="v2_r1_02_oe_context_contrast",
+    ),
+    "v2_r1_03_oe_evidence_router": PromptCondition(
+        "Prompt research v2 Round 1: short rule for evidence-seeking OE "
+        "questions only.",
+        literature_profile="v2_r1_03_oe_evidence_router",
+    ),
+    "v2_r1_04_oe_context_direct": PromptCondition(
+        "Prompt research v2 Round 1: direct OE answer with Per-Step context.",
+        literature_profile="v2_r1_04_oe_context_direct",
+    ),
+    "v2_r1_05_oe_fixed_postnote": PromptCondition(
+        "Prompt research v2 Round 1: clarify Fixed role after preserving its "
+        "released header and token prefix.",
+        literature_profile="v2_r1_05_oe_fixed_postnote",
+    ),
+    "v2_r1_06_mc_context_balanced": PromptCondition(
+        "Prompt research v2 Round 1: balanced MC Per-Step context use.",
+        literature_profile="v2_r1_06_mc_context_balanced",
+    ),
+    "v2_r1_07_mc_content_output": PromptCondition(
+        "Prompt research v2 Round 1: short MC content-to-letter output rule.",
+        literature_profile="v2_r1_07_mc_content_output",
+    ),
+    "v2_r1_08_tf_context_whole": PromptCondition(
+        "Prompt research v2 Round 1: complete-proposition TF context rule.",
+        literature_profile="v2_r1_08_tf_context_whole",
+    ),
+    "v2_r1_09_tf_prefix_context": PromptCondition(
+        "Prompt research v2 Round 1: minimal TF verdict prefix with context.",
+        literature_profile="v2_r1_09_tf_prefix_context",
+    ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
@@ -1020,6 +1182,18 @@ LITERATURE_R5_MODES = (
     "lit_r5_02_mc_status_then_shape",
     "lit_r5_03_joint_structured_tf_neg_re2",
     "lit_r5_04_joint_status_tf_neg_re2",
+)
+
+V2_R1_MODES = (
+    "v2_r1_01_oe_context_balanced",
+    "v2_r1_02_oe_context_contrast",
+    "v2_r1_03_oe_evidence_router",
+    "v2_r1_04_oe_context_direct",
+    "v2_r1_05_oe_fixed_postnote",
+    "v2_r1_06_mc_context_balanced",
+    "v2_r1_07_mc_content_output",
+    "v2_r1_08_tf_context_whole",
+    "v2_r1_09_tf_prefix_context",
 )
 
 
@@ -1139,6 +1313,7 @@ def build_question_prompt(
                 **LITERATURE_R3_PROFILES,
                 **LITERATURE_R4_PROFILES,
                 **LITERATURE_R5_PROFILES,
+                **V2_R1_PROFILES,
             }
             literature_component = literature_profiles[
                 condition.literature_profile][question_type]
@@ -1167,6 +1342,15 @@ def build_question_prompt(
                     if _has_explicit_tf_negative_cue(question)
                     else "base"
                 )
+        elif (
+            question_type == "open_ended"
+            and literature_component == "v2_oe_evidence_router"
+        ):
+            literature_component = (
+                "v2_oe_evidence"
+                if _is_oe_evidence_question(question)
+                else "base"
+            )
 
         if literature_component == "base":
             return build_question_prompt(
@@ -1205,6 +1389,15 @@ def build_question_prompt(
             ),
             "tf_prefix": LITERATURE_TF_PREFIX_RULE,
             "oe_direct": LITERATURE_OE_DIRECT_RULE,
+            "v2_oe_context_balanced": V2_OE_CONTEXT_BALANCED_RULE,
+            "v2_oe_context_contrast": V2_OE_CONTEXT_CONTRAST_RULE,
+            "v2_oe_evidence": V2_OE_EVIDENCE_RULE,
+            "v2_oe_context_direct": V2_OE_CONTEXT_DIRECT_RULE,
+            "v2_oe_fixed_postnote": V2_OE_FIXED_POSTNOTE_RULE,
+            "v2_mc_context_balanced": V2_MC_CONTEXT_BALANCED_RULE,
+            "v2_mc_content_output": V2_MC_CONTENT_OUTPUT_RULE,
+            "v2_tf_context_whole": V2_TF_CONTEXT_WHOLE_RULE,
+            "v2_tf_prefix_context": V2_TF_PREFIX_CONTEXT_RULE,
             **LITERATURE_DECOUPLED_RULES,
         }
         literature_task_rule = literature_rules.get(literature_component)
