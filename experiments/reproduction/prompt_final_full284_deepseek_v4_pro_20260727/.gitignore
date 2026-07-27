@@ -1,0 +1,4 @@
+artifacts/**/.deepseek_key
+artifacts/**/job.pid
+artifacts/**/*.log
+artifacts/**/rank*.jsonl
