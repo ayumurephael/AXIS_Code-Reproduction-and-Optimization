@@ -30,7 +30,7 @@ execution:
   judge: completed
   audit: completed
   prompt_final_md: completed
-  commit: pending
-  push: pending
+  commit: completed
+  push: completed
   remote_secret_cleanup: completed
 
