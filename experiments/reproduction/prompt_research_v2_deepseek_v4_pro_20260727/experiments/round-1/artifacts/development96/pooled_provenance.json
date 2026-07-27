@@ -1,0 +1,19 @@
+{
+  "source_splits": [
+    "screening_series",
+    "validation_series"
+  ],
+  "modes": [
+    "v2_r1_01_oe_context_balanced",
+    "v2_r1_02_oe_context_contrast",
+    "v2_r1_03_oe_evidence_router",
+    "v2_r1_04_oe_context_direct",
+    "v2_r1_06_mc_context_balanced",
+    "v2_r1_07_mc_content_output",
+    "v2_r1_08_tf_context_whole"
+  ],
+  "counts": {
+    "predictions": 768,
+    "scores": 1768
+  }
+}

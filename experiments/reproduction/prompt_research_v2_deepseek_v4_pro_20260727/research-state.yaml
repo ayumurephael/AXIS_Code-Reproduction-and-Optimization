@@ -28,12 +28,19 @@ baseline_audit:
   secondary_difference: "Repeated deepseek-v4-pro judging changed raw integer ratings despite identical score-prompt hashes."
 
 search:
-  current_round: round_1_validation72
+  current_round: round_2_new_md_screening24
   round_1_new_modes: 9
   round_1_gpu_outputs: "684 full-series batch rows / 409 changed components"
   screening_judge_dimensions: 164
   screening_survivors: 7
   screening_rejected: ["v2_r1_05_oe_fixed_postnote", "v2_r1_09_tf_prefix_context"]
+  validation_judge_dimensions: 398
+  validation_survivors:
+    - "v2_r1_06_mc_context_balanced"
+    - "v2_r1_07_mc_content_output"
+  validation_rejected_oe_tf: 5
+  round_2_new_md_modes: 5
+  round_2_status: "screening24 GPU inference running on authorized Port-2225 GPU0/1"
   outer_loop_interval: "5-10 experiments"
   paper140_candidate_runs: 0
   full284_candidate_runs: 0
@@ -46,3 +53,6 @@ workspace:
   round_1_protocol: "experiments/round-1/protocol.md"
   round_1_screening_analysis: "experiments/round-1/screening-analysis.md"
   round_1_validation_protocol: "experiments/round-1/validation-protocol.md"
+  round_1_validation_analysis: "experiments/round-1/validation-analysis.md"
+  round_2_protocol: "experiments/round-2-new-md/protocol.md"
+  round_2_source: "../../../architecture_redesign_fixedhint_frozen/改进系列说明/prompt 改进/new.md"

@@ -64,3 +64,28 @@ and exact TF-prefix rule reduced every changed-family dimension.
 The wide screen rejects only those two all-dimension failures. Seven modes
 advance to validation72 under the frozen
 `experiments/round-1/validation-protocol.md`.
+
+## 2026-07-27 — Round 1 validation72 and outer-loop synthesis
+
+All 398 preregistered validation score dimensions completed under
+`deepseek-v4-pro`, including ten registered fallback rows. Both MC components
+improve Correctness, Reasoning, and Final on validation72 and pooled
+development96. Every OE component loses at least one of Accuracy,
+Completeness, or Relevance. The TF whole-statement rule reverses its screening
+gain and lowers all three TF metrics on validation72.
+
+Case analysis shows that OE context rules are not selectively correcting
+Baseline: they recover some missed anomalies but also overwrite correct
+anomaly decisions with false-normal answers. TF losses are dominated by
+Boolean polarity binding, where `False` precedes a rationale that says the
+negative statement is true. Round 1 therefore retains the two MC components
+only; it does not satisfy the required changed-and-improved OE condition.
+
+## 2026-07-27 — `new.md` compatibility protocol launched
+
+The user-supplied `new.md` was decomposed into five frozen interventions:
+short compatibility rule, aligned Value-before-Local rows, Question-first,
+evidence-last with Fixed-first, and the full document template. The document
+itself says the full information-flow design should be paired with Phase-II
+retraining, so these released-checkpoint results test compatibility only.
+Prompt integrity tests passed before two-GPU screening24 inference began.

@@ -49,3 +49,23 @@ combination.
 4. Whole-statement TF guidance can correct negated normality decisions, but
    exact-prefix control reduced all TF metrics. Output cleanliness and answer
    quality are not interchangeable objectives.
+
+## Round 1 validation and outer-loop findings
+
+1. Both MC rules generalized: all three MC metrics improved on validation72
+   and on pooled development96. The balanced content/context rule is stronger
+   than the shorter content-to-letter rule.
+2. No OE rule generalized across all four dimensions. The evidence router is
+   close to neutral and improves Accuracy, but still loses Completeness and
+   pooled Relevance.
+3. OE failures are bidirectional. The same context instruction can correct a
+   false-normal Baseline case and turn a correct anomaly decision into a
+   false-normal answer. A textual alignment claim is not a decoder for learned
+   Local vectors.
+4. The TF whole-statement rule failed through polarity binding: several
+   responses begin `False` while the explanation explicitly supports the
+   truth of the negative statement.
+5. The released checkpoint supports modest, family-specific semantic steering
+   for MC. Larger causal reordering of Question, Fixed, Value, and Local should
+   be treated as an old-checkpoint compatibility test, not as a clean test of
+   the retrained information-flow proposal in `new.md`.
