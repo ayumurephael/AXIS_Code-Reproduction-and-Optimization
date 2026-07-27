@@ -227,6 +227,113 @@ ROUTED_OE_QUALITATIVE_SYNTHESIS_RULE = (
     "alignment is not explicit."
 )
 
+LITERATURE_MC_SEMANTIC_BIND_RULE = (
+    "Choose the option by its complete text before mapping it to A, B, C, "
+    "or D. Report that option once and give a brief reason from the supplied "
+    "evidence."
+)
+
+LITERATURE_MC_POINTWISE_RULE = (
+    "Test each option's complete claim independently against the supplied "
+    "evidence. Choose the best-supported option by its text, then report its "
+    "attached letter and a brief reason."
+)
+
+LITERATURE_TF_MINIMAL_RULE = (
+    "Judge whether the complete statement as written is true. Report True or "
+    "False once, followed by a brief reason that supports the same truth value."
+)
+
+LITERATURE_TF_CLAUSE_RULE = (
+    "Check every required clause and negation in the statement. It is false "
+    "if any required clause is contradicted; report one truth label and a "
+    "brief consistent reason."
+)
+
+LITERATURE_OE_DIRECT_RULE = (
+    "Answer exactly what the question asks, using evidence from this window. "
+    "Include the requested conclusion or assessment and the brief reason "
+    "needed to support it."
+)
+
+LITERATURE_DECOUPLED_RULES = {
+    "mc_decoupled": (
+        "First determine which complete option text is best supported by the "
+        "evidence. Then report its attached letter once and give one brief reason."
+    ),
+    "tf_decoupled": (
+        "First determine whether the complete statement is supported. Then "
+        "report True or False once and give one brief reason consistent with it."
+    ),
+    "oe_decoupled": (
+        "First determine the analysis requested by the question. Then answer "
+        "it directly with a brief reason from the supplied evidence."
+    ),
+}
+
+LITERATURE_R1_PROFILES = {
+    "lit_r1_01_mc_semantic_bind": {
+        "multiple_choice": "mc_semantic_bind",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "lit_r1_02_mc_pointwise": {
+        "multiple_choice": "mc_pointwise",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "lit_r1_03_mc_re2": {
+        "multiple_choice": "re2",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+    "lit_r1_04_tf_minimal": {
+        "multiple_choice": "base",
+        "true_false": "tf_minimal",
+        "open_ended": "base",
+    },
+    "lit_r1_05_tf_clause": {
+        "multiple_choice": "base",
+        "true_false": "tf_clause",
+        "open_ended": "base",
+    },
+    "lit_r1_06_tf_re2": {
+        "multiple_choice": "base",
+        "true_false": "re2",
+        "open_ended": "base",
+    },
+    "lit_r1_07_oe_direct": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "oe_direct",
+    },
+    "lit_r1_08_oe_re2": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "re2",
+    },
+    "lit_r1_09_triplet_minimal": {
+        "multiple_choice": "mc_semantic_bind",
+        "true_false": "tf_minimal",
+        "open_ended": "oe_direct",
+    },
+    "lit_r1_10_triplet_re2": {
+        "multiple_choice": "re2",
+        "true_false": "re2",
+        "open_ended": "re2",
+    },
+    "lit_r1_11_decoupled": {
+        "multiple_choice": "mc_decoupled",
+        "true_false": "tf_decoupled",
+        "open_ended": "oe_decoupled",
+    },
+    "lit_r1_12_mc_bind_re2": {
+        "multiple_choice": "mc_semantic_bind_re2",
+        "true_false": "base",
+        "open_ended": "base",
+    },
+}
+
 ROUTED_R2_PROFILES = {
     "r2_01_minimal": {
         "multiple_choice": "mc_f0",
@@ -310,6 +417,7 @@ class PromptCondition:
     interleave_time_series_evidence: bool = False
     pareto_factors: str = ""
     routed_profile: str = ""
+    literature_profile: str = ""
 
 
 MODE_SPECS: Dict[str, PromptCondition] = {
@@ -488,7 +596,56 @@ MODE_SPECS: Dict[str, PromptCondition] = {
     "route_r3_08_historical": PromptCondition(
         "Round 3: fixed-role MC, Baseline TF, historical OE Contract.",
         routed_profile="r3_08_historical",
-    ),    # Released-code ablations remain available for compatibility.
+    ),
+    "lit_r1_01_mc_semantic_bind": PromptCondition(
+        "Literature Round 1: MC semantic option binding on the released scaffold.",
+        literature_profile="lit_r1_01_mc_semantic_bind",
+    ),
+    "lit_r1_02_mc_pointwise": PromptCondition(
+        "Literature Round 1: MC pointwise option verification.",
+        literature_profile="lit_r1_02_mc_pointwise",
+    ),
+    "lit_r1_03_mc_re2": PromptCondition(
+        "Literature Round 1: MC question re-reading (RE2).",
+        literature_profile="lit_r1_03_mc_re2",
+    ),
+    "lit_r1_04_tf_minimal": PromptCondition(
+        "Literature Round 1: minimal TF polarity-consistent response.",
+        literature_profile="lit_r1_04_tf_minimal",
+    ),
+    "lit_r1_05_tf_clause": PromptCondition(
+        "Literature Round 1: TF clause and negation verification.",
+        literature_profile="lit_r1_05_tf_clause",
+    ),
+    "lit_r1_06_tf_re2": PromptCondition(
+        "Literature Round 1: TF question re-reading (RE2).",
+        literature_profile="lit_r1_06_tf_re2",
+    ),
+    "lit_r1_07_oe_direct": PromptCondition(
+        "Literature Round 1: direct OE answering rule.",
+        literature_profile="lit_r1_07_oe_direct",
+    ),
+    "lit_r1_08_oe_re2": PromptCondition(
+        "Literature Round 1: OE question re-reading (RE2).",
+        literature_profile="lit_r1_08_oe_re2",
+    ),
+    "lit_r1_09_triplet_minimal": PromptCondition(
+        "Literature Round 1: task-specific minimal rules for all task types.",
+        literature_profile="lit_r1_09_triplet_minimal",
+    ),
+    "lit_r1_10_triplet_re2": PromptCondition(
+        "Literature Round 1: question re-reading for all task types.",
+        literature_profile="lit_r1_10_triplet_re2",
+    ),
+    "lit_r1_11_decoupled": PromptCondition(
+        "Literature Round 1: decision/report decoupling for all task types.",
+        literature_profile="lit_r1_11_decoupled",
+    ),
+    "lit_r1_12_mc_bind_re2": PromptCondition(
+        "Literature Round 1: MC semantic binding plus question re-reading.",
+        literature_profile="lit_r1_12_mc_bind_re2",
+    ),
+    # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
         remove_local_hint=True,
@@ -548,6 +705,21 @@ ROUTED_R3_MODES = (
     "route_r3_06_oe_q2",
     "route_r3_07_oe_q3",
     "route_r3_08_historical",
+)
+
+LITERATURE_R1_MODES = (
+    "lit_r1_01_mc_semantic_bind",
+    "lit_r1_02_mc_pointwise",
+    "lit_r1_03_mc_re2",
+    "lit_r1_04_tf_minimal",
+    "lit_r1_05_tf_clause",
+    "lit_r1_06_tf_re2",
+    "lit_r1_07_oe_direct",
+    "lit_r1_08_oe_re2",
+    "lit_r1_09_triplet_minimal",
+    "lit_r1_10_triplet_re2",
+    "lit_r1_11_decoupled",
+    "lit_r1_12_mc_bind_re2",
 )
 
 FOLLOWUP_PROMPT_MODES = (
@@ -657,6 +829,81 @@ def build_question_prompt(
         if condition.rename_fixed_hint
         else "Overall Summary Hints"
     )
+
+    if condition.literature_profile:
+        try:
+            literature_component = LITERATURE_R1_PROFILES[
+                condition.literature_profile
+            ][question_type]
+        except KeyError as exc:
+            raise ValueError(
+                f"Unsupported literature profile/question type: "
+                f"{condition.literature_profile!r}/{question_type!r}"
+            ) from exc
+
+        if literature_component == "base":
+            return build_question_prompt(
+                question=question,
+                question_type=question_type,
+                start=start,
+                end=end,
+                serialized_values=serialized_values,
+                local_hint_tokens=local_hint_tokens,
+                fixed_hint_tokens=fixed_hint_tokens,
+                mode="base",
+                aligned_rows=aligned_rows,
+            )
+
+        reread_question = literature_component in {
+            "re2",
+            "mc_semantic_bind_re2",
+        }
+
+        literature_rules = {
+            "mc_semantic_bind": LITERATURE_MC_SEMANTIC_BIND_RULE,
+            "mc_semantic_bind_re2": LITERATURE_MC_SEMANTIC_BIND_RULE,
+            "mc_pointwise": LITERATURE_MC_POINTWISE_RULE,
+            "tf_minimal": LITERATURE_TF_MINIMAL_RULE,
+            "tf_clause": LITERATURE_TF_CLAUSE_RULE,
+            "oe_direct": LITERATURE_OE_DIRECT_RULE,
+            **LITERATURE_DECOUPLED_RULES,
+        }
+        literature_task_rule = literature_rules.get(literature_component)
+        if literature_component != "re2" and literature_task_rule is None:
+            raise ValueError(
+                f"Unsupported literature component {literature_component!r}"
+            )
+
+        if literature_task_rule is None:
+            literature_task_section = ""
+        else:
+            literature_task_section = (
+                "\n            ### Answering Rule\n"
+                f"            {literature_task_rule}\n"
+            )
+
+        if reread_question:
+            literature_reread_section = (
+                "\n\n            Read the question again:\n"
+                f"            {question}"
+            )
+        else:
+            literature_reread_section = ""
+
+        return f"""
+            You are an expert time series analyst. Analyze the provided data and answer the question.
+
+            ### Time Series Data
+            - **Window:** Steps {start} to {end}
+            - **Values (scaled by 100):** {serialized_values}
+
+            ### Contextual Hints
+            - **Per-Step Analysis:** {local_hint_tokens}
+            - **Overall Summary Hints:** {fixed_hint_tokens}
+{literature_task_section}
+            ### Question
+            {question}{literature_reread_section}
+            """
 
     if condition.routed_profile:
         routed_profiles = {**ROUTED_R2_PROFILES, **ROUTED_R3_PROFILES}

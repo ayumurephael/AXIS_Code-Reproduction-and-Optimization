@@ -4,6 +4,7 @@ from src.models.AXIS.prompt_stage_a import (
     MODE_SPECS,
     OUTPUT_PROTOCOLS,
     FOLLOWUP_PROMPT_MODES,
+    LITERATURE_R1_MODES,
     PARETO_SCREEN_MODES,
     ROUTED_R2_MODES,
     ROUTED_R3_MODES,
@@ -496,5 +497,93 @@ B) Spike
             _prompt("route_r3_08_historical", "open_ended"),
             _prompt("route_r2_04_oe_old_contract", "open_ended"),
         )
+
+    def test_literature_round1_matrix_is_locked(self):
+        self.assertEqual(
+            LITERATURE_R1_MODES,
+            (
+                "lit_r1_01_mc_semantic_bind",
+                "lit_r1_02_mc_pointwise",
+                "lit_r1_03_mc_re2",
+                "lit_r1_04_tf_minimal",
+                "lit_r1_05_tf_clause",
+                "lit_r1_06_tf_re2",
+                "lit_r1_07_oe_direct",
+                "lit_r1_08_oe_re2",
+                "lit_r1_09_triplet_minimal",
+                "lit_r1_10_triplet_re2",
+                "lit_r1_11_decoupled",
+                "lit_r1_12_mc_bind_re2",
+            ),
+        )
+        self.assertTrue(set(LITERATURE_R1_MODES).issubset(MODE_SPECS))
+
+    def test_literature_round1_preserves_released_scaffold(self):
+        for mode in LITERATURE_R1_MODES:
+            for question_type in ("multiple_choice", "open_ended", "true_false"):
+                with self.subTest(mode=mode, question_type=question_type):
+                    prompt = _prompt(mode, question_type)
+                    self.assertIn("### Time Series Data", prompt)
+                    self.assertIn("### Contextual Hints", prompt)
+                    self.assertIn("Overall Summary Hints", prompt)
+                    self.assertNotIn("Learned Task Guidance", prompt)
+                    self.assertNotIn("### Evidence Contract", prompt)
+                    self.assertNotIn("Answer:", prompt)
+                    self.assertEqual(prompt.count("<|fixed_hint|>"), 30)
+                    self.assertLess(
+                        prompt.index("Per-Step Analysis"),
+                        prompt.index("Overall Summary Hints"),
+                    )
+
+    def test_literature_round1_routes_only_the_registered_task(self):
+        base_mc = _prompt("base", "multiple_choice")
+        base_tf = _prompt("base", "true_false")
+        base_oe = _prompt("base", "open_ended")
+        single_task_modes = {
+            "lit_r1_01_mc_semantic_bind": "multiple_choice",
+            "lit_r1_02_mc_pointwise": "multiple_choice",
+            "lit_r1_03_mc_re2": "multiple_choice",
+            "lit_r1_04_tf_minimal": "true_false",
+            "lit_r1_05_tf_clause": "true_false",
+            "lit_r1_06_tf_re2": "true_false",
+            "lit_r1_07_oe_direct": "open_ended",
+            "lit_r1_08_oe_re2": "open_ended",
+            "lit_r1_12_mc_bind_re2": "multiple_choice",
+        }
+        baselines = {
+            "multiple_choice": base_mc,
+            "true_false": base_tf,
+            "open_ended": base_oe,
+        }
+        for mode, changed_type in single_task_modes.items():
+            for question_type, baseline in baselines.items():
+                if question_type == changed_type:
+                    self.assertNotEqual(_prompt(mode, question_type), baseline)
+                else:
+                    self.assertEqual(_prompt(mode, question_type), baseline)
+
+    def test_literature_round1_re2_repeats_question_exactly(self):
+        for mode, question_type in (
+            ("lit_r1_03_mc_re2", "multiple_choice"),
+            ("lit_r1_06_tf_re2", "true_false"),
+            ("lit_r1_08_oe_re2", "open_ended"),
+            ("lit_r1_10_triplet_re2", "multiple_choice"),
+            ("lit_r1_10_triplet_re2", "true_false"),
+            ("lit_r1_10_triplet_re2", "open_ended"),
+            ("lit_r1_12_mc_bind_re2", "multiple_choice"),
+        ):
+            prompt = _prompt(mode, question_type)
+            self.assertIn("Read the question again:", prompt)
+            self.assertEqual(prompt.count("Which option?"), 2)
+
+    def test_literature_round1_combined_mc_has_rule_and_re2(self):
+        prompt = _prompt("lit_r1_12_mc_bind_re2", "multiple_choice")
+        self.assertIn("complete text before mapping it", prompt)
+        self.assertIn("Read the question again:", prompt)
+
+    def test_literature_round1_rejects_unknown_question_type(self):
+        with self.assertRaises(ValueError):
+            _prompt("lit_r1_09_triplet_minimal", "unknown")
+
 if __name__ == "__main__":
     unittest.main()

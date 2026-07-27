@@ -1,0 +1,68 @@
+project:
+  title: "AXIS literature-guided prompt robustness search"
+  question: "Can a prompt-only intervention improve all MC/OE/TF Table-I metrics without falling below the released Baseline?"
+  status: preregistered
+  started: "2026-07-27"
+  domain: "time-series QA, prompt sensitivity, and black-box evaluation"
+
+evaluation:
+  released_checkpoint_only: true
+  retraining_allowed: false
+  local_gpu_allowed: false
+  formal_judge: "deepseek-v4-pro"
+  formal_judge_only: true
+  success_criterion: "On paper140, all ten Table-I metrics are >= the locked Baseline; prefer all ten > Baseline."
+  final_test_policy: "Lock exactly one candidate before generating its paper140 outputs; evaluate that candidate on paper140 once."
+  baseline_source: "../prompt_stage_a_deepseek_v4_pro_20260725/baseline_table.json"
+  baseline:
+    mc_final: 4.255815217345678
+    mc_corr: 4.32558409021178
+    mc_rsn: 4.093021180658102
+    oe_final: 3.085930669870713
+    oe_acc: 2.836508828155388
+    oe_comp: 2.7700417591659106
+    oe_rel: 3.7454598810275286
+    tf_final: 3.642142370108918
+    tf_corr: 3.641666401443943
+    tf_justif: 3.6428563231063786
+
+data_boundary:
+  warning: "All 144 non-paper140 QA and the prior 24/72/48 partitions were exposed by the preceding search and are internal development resources only."
+  round_1: "Reuse the prior 24-QA selection split for exploratory screening."
+  round_2: "Reuse the prior 72-QA validation split for internal validation."
+  round_3: "Reuse the prior 48-QA holdout as an exposed robustness check, never as untouched confirmation."
+  untouched_candidate_evaluation: "Candidate outputs on paper140 only; released Baseline paper140 scores are already known."
+
+hypotheses:
+  - id: H1
+    statement: "Preserving the released scaffold while adding one short task-specific rule avoids the Fixed-token role-distribution shift that confounded earlier experiments."
+    status: pending
+  - id: H2
+    statement: "MC semantic option binding reduces letter/position errors without the numerical hallucinations induced by long Evidence Contracts."
+    status: pending
+  - id: H3
+    statement: "A short TF polarity or clause rule improves label-rationale consistency without suppressing legitimate anomalies."
+    status: pending
+  - id: H4
+    statement: "A direct OE speech-act rule can increase answer coverage without over-constraining anomaly diagnosis."
+    status: pending
+  - id: H5
+    statement: "RE2 question re-reading may improve question comprehension, but can also disrupt the learned 7B decoding pattern."
+    status: pending
+
+search:
+  current_round: 1
+  implemented_modes: 12
+  completed_modes: 0
+  total_new_modes_cap: 30
+  outer_loop_interval: "5-10 completed experiments"
+  ranking: "Lexicographic: nonnegative Table-I dimensions, worst delta, mean delta; closed-task correct-to-wrong transitions are a guard."
+  stopping: "Stop after a paper140 success, or after <=30 new modes and at least three mechanistically distinct cycles yield no candidate that passes all internal gates."
+
+workspace:
+  literature: "literature/survey.md"
+  search_strategy: "literature/search-strategy.md"
+  candidate_matrix: "candidate-matrix.md"
+  log: "research-log.md"
+  findings: "findings.md"
+  round_1_protocol: "experiments/literature-round-1/protocol.md"
