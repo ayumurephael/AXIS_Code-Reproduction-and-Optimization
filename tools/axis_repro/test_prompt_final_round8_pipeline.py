@@ -38,7 +38,7 @@ class FinalRound8PipelineTest(unittest.TestCase):
         )
         revision = row(
             "open_ended",
-            response="Answer: There are no anomalies.",
+            response=("Answer: There are no anomalies. " + "supporting detail " * 20),
         )
         source, selected = component_source(base, base, revision)
         self.assertEqual(source, ROUND5_SOURCE_MODE)

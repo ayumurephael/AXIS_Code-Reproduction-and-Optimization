@@ -24,11 +24,13 @@ from tools.axis_repro.common import read_jsonl
 ROUND5_SOURCE_MODE = "v2_r5_02_oe_verbatim_or_add"
 ROUND7_MODE = "v2_r7_01_oe_unclosed_think_answer_repair"
 ROUND8_MODE = "v2_r8_01_oe_no_anomaly_boundary_repair"
-BOUNDARY_REPAIR_MODES = (ROUND7_MODE, ROUND8_MODE)
+ROUND9_MODE = "v2_r9_01_oe_no_anomaly_content_retention_repair"
+BOUNDARY_REPAIR_MODES = (ROUND7_MODE, ROUND8_MODE, ROUND9_MODE)
 ANSWER_MARKER = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:final\s+)?answer\s*:",
     flags=re.IGNORECASE | re.MULTILINE,
 )
+WORD_TOKEN = re.compile(r"\b\w+\b")
 NO_ANOMALY_CONCLUSION = re.compile(
     r"\b(?:no|without)\b[^.\n]{0,80}\b"
     r"(?:anomal(?:y|ies|ous)?|irregularit(?:y|ies))\b",
@@ -43,6 +45,7 @@ def select_repaired_answer(
     baseline_response: str,
     candidate_response: str,
     require_no_anomaly: bool = False,
+    min_word_retention: float | None = None,
 ) -> bool:
     """Use the revision only for an objectively malformed Baseline answer."""
     baseline_lower = baseline_response.lower()
@@ -59,11 +62,18 @@ def select_repaired_answer(
     )
     if not (baseline_is_unclosed_reasoning and candidate_has_clean_answer_boundary):
         return False
-    if require_no_anomaly:
-        return (
-            NO_ANOMALY_CONCLUSION.search(baseline_response) is not None
-            and NO_ANOMALY_CONCLUSION.search(candidate_response) is not None
-        )
+    if require_no_anomaly and not (
+        NO_ANOMALY_CONCLUSION.search(baseline_response) is not None
+        and NO_ANOMALY_CONCLUSION.search(candidate_response) is not None
+    ):
+        return False
+    if min_word_retention is not None:
+        baseline_words = WORD_TOKEN.findall(baseline_response)
+        candidate_words = WORD_TOKEN.findall(candidate_response)
+        if not baseline_words:
+            return False
+        if len(candidate_words) / len(baseline_words) < min_word_retention:
+            return False
     return True
 
 
@@ -79,6 +89,13 @@ def selected_for_mode(
             baseline_response,
             candidate_response,
             require_no_anomaly=True,
+        )
+    if mode == ROUND9_MODE:
+        return select_repaired_answer(
+            baseline_response,
+            candidate_response,
+            require_no_anomaly=True,
+            min_word_retention=0.60,
         )
     raise ValueError(f"Unknown boundary-repair mode: {mode!r}")
 

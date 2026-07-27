@@ -13,7 +13,7 @@ from experiments.reproduction.prompt_research_v2_deepseek_v4_pro_20260727.src.ro
 )
 from experiments.reproduction.prompt_research_v2_deepseek_v4_pro_20260727.src.round7_pipeline import (
     ROUND5_SOURCE_MODE,
-    ROUND8_MODE,
+    ROUND9_MODE,
     selected_for_mode,
 )
 from src.models.AXIS.prompt_stage_a import _has_explicit_tf_negative_cue
@@ -60,7 +60,7 @@ def component_source(
         return "base", baseline
     if question_type == "open_ended":
         if selected_for_mode(
-            ROUND8_MODE,
+            ROUND9_MODE,
             baseline["response"],
             oe_revision["response"],
         ):

@@ -4,6 +4,7 @@ from experiments.reproduction.prompt_research_v2_deepseek_v4_pro_20260727.src.ro
     BOUNDARY_REPAIR_MODES,
     ROUND7_MODE,
     ROUND8_MODE,
+    ROUND9_MODE,
     round1_pipeline,
     select_repaired_answer,
     selected_for_mode,
@@ -78,5 +79,14 @@ class Round7BoundaryRepairTest(unittest.TestCase):
         )
 
 
+    def test_content_retention_mode_rejects_large_deletion(self):
+        baseline = (
+            "<think>There is no evidence of anomalies. "
+            + "supporting detail " * 20
+        )
+        short = "Answer: There are no anomalies."
+        retained = "Answer: There are no anomalies. " + "detail " * 30
+        self.assertFalse(selected_for_mode(ROUND9_MODE, baseline, short))
+        self.assertTrue(selected_for_mode(ROUND9_MODE, baseline, retained))
 if __name__ == "__main__":
     unittest.main()
