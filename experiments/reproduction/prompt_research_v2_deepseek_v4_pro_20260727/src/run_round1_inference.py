@@ -25,6 +25,7 @@ if str(REPO) not in sys.path:
 
 from src.models.AXIS.prompt_stage_a import (  # noqa: E402
     V2_R1_MODES,
+    V2_R4_MAIN_MODES,
     build_question_prompt,
     mode_manifest,
 )
@@ -37,9 +38,21 @@ from tools.axis_repro.model_utils import (  # noqa: E402
 )
 
 from experiments.reproduction.prompt_research_v2_deepseek_v4_pro_20260727.src.round1_selection import (  # noqa: E402,E501
-    ACTIVE_FAMILY,
-    prompt_changed,
+    ACTIVE_FAMILY as ROUND1_ACTIVE_FAMILY,
+    prompt_changed as round1_prompt_changed,
 )
+from experiments.reproduction.prompt_research_v2_deepseek_v4_pro_20260727.src.round4_selection import (  # noqa: E402,E501
+    ACTIVE_FAMILY as ROUND4_ACTIVE_FAMILY,
+    prompt_changed as round4_prompt_changed,
+)
+
+ACTIVE_FAMILY = {**ROUND1_ACTIVE_FAMILY, **ROUND4_ACTIVE_FAMILY}
+
+
+def prompt_changed(record, mode):
+    if mode in ROUND4_ACTIVE_FAMILY:
+        return round4_prompt_changed(record, mode)
+    return round1_prompt_changed(record, mode)
 
 
 def distributed_info() -> tuple[int, int, int]:
@@ -65,7 +78,7 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument(
         "--modes",
         nargs="+",
-        choices=sorted(V2_R1_MODES),
+        choices=sorted(V2_R1_MODES + V2_R4_MAIN_MODES),
         default=list(V2_R1_MODES),
     )
     value.add_argument("--skip-loss", action="store_true")

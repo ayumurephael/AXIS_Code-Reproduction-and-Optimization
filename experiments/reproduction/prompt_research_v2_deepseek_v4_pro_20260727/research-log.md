@@ -89,3 +89,34 @@ evidence-last with Fixed-first, and the full document template. The document
 itself says the full information-flow design should be paired with Phase-II
 retraining, so these released-checkpoint results test compatibility only.
 Prompt integrity tests passed before two-GPU screening24 inference began.
+
+## 2026-07-27 — `new.md` supplemental compatibility results
+
+All five `new.md` modes completed GPU inference and 275
+`deepseek-v4-pro` Judge dimensions. None passed the screening24
+all-ten-nonlower gate. P1 and P2 improved some MC dimensions, and P2 improved
+OE Completeness, but both reduced OE Relevance substantially and changed some
+real anomalies to false-normal. Question-first, evidence-last, and the full
+template reduced every task family.
+
+The result is scoped to the released checkpoint. Textual row alignment does
+not create learned alignment, and question-first cannot alter the already
+computed Local representations without the proposed Phase-II retraining.
+According to the frozen protocol, no Local corruption/swap test is run because
+there is no performance survivor.
+
+## 2026-07-27 — Round 3 main holdout48 and outer-loop synthesis
+
+Round 3 evaluated the two Round-1 MC survivors and three increasingly narrow
+OE balanced-evidence routers. All 74 planned holdout Judge dimensions
+completed. The two MC modes, despite gains on screening24, validation72, and
+pooled development96, lost all three MC metrics on holdout48. The broad and
+boundary OE routers lost `0.1333` on both Accuracy and Completeness; the
+assessment router lost `0.0667` on each.
+
+Failure inspection rejected the routing premise. Lexical matches for
+“support/refute” and “boundary” included records whose Baseline already
+covered every requested part; the extra rule introduced an open `<think>`
+prefix, dropped boundary-specific conclusions, or added speculative trends.
+The next OE round will target answer coverage and relevance without imposing
+an anomaly-status prior or claiming that text decodes learned Local vectors.

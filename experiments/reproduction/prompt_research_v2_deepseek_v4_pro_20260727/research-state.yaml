@@ -28,7 +28,7 @@ baseline_audit:
   secondary_difference: "Repeated deepseek-v4-pro judging changed raw integer ratings despite identical score-prompt hashes."
 
 search:
-  current_round: round_2_new_md_screening24
+  current_round: round_4_oe_coverage_design
   round_1_new_modes: 9
   round_1_gpu_outputs: "684 full-series batch rows / 409 changed components"
   screening_judge_dimensions: 164
@@ -40,7 +40,12 @@ search:
     - "v2_r1_07_mc_content_output"
   validation_rejected_oe_tf: 5
   round_2_new_md_modes: 5
-  round_2_status: "screening24 GPU inference running on authorized Port-2225 GPU0/1"
+  round_2_status: "complete; all five released-checkpoint compatibility modes failed screening24"
+  round_2_survivors: []
+  round_3_main_modes: 5
+  round_3_holdout_judge_dimensions: 74
+  round_3_status: "complete; both MC components and all three OE lexical routers failed holdout48"
+  round_3_survivors: []
   outer_loop_interval: "5-10 experiments"
   paper140_candidate_runs: 0
   full284_candidate_runs: 0
@@ -55,4 +60,7 @@ workspace:
   round_1_validation_protocol: "experiments/round-1/validation-protocol.md"
   round_1_validation_analysis: "experiments/round-1/validation-analysis.md"
   round_2_protocol: "experiments/round-2-new-md/protocol.md"
+  round_2_analysis: "experiments/round-2-new-md/analysis.md"
   round_2_source: "../../../architecture_redesign_fixedhint_frozen/改进系列说明/prompt 改进/new.md"
+  round_3_protocol: "experiments/round-3-main/protocol.md"
+  round_3_holdout_analysis: "experiments/round-3-main/holdout-analysis.md"

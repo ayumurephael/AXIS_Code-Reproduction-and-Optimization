@@ -69,3 +69,32 @@ combination.
    for MC. Larger causal reordering of Question, Fixed, Value, and Local should
    be treated as an old-checkpoint compatibility test, not as a clean test of
    the retrained information-flow proposal in `new.md`.
+
+## Round 2 `new.md` compatibility findings
+
+1. Even the short P1 compatibility rule is an active decision prior, not a
+   neutral explanation of the inputs. It fixes some records and creates both
+   false-anomaly and false-normal failures on others.
+2. Value-before-Local rows improve human readability and some MC behavior, but
+   textual one-to-one alignment is not learned causal alignment. OE Relevance
+   falls by `0.6000` on screening24.
+3. Question-first and evidence-last are strongly out of distribution for the
+   released checkpoint. Their failure does not test the proposed retrained
+   Local generator.
+4. Cleaner parsing can coexist with worse Table-I scores. P4 raises OE strict
+   parse rate to `85.7%` while all four OE metrics fall.
+
+## Round 3 holdout findings
+
+1. The Round-1 MC gains do not generalize to holdout48. Short context rules
+   can make ordinary alternating variation sound anomalous and can shorten an
+   otherwise complete correct explanation.
+2. A development-derived lexical OE router is not a robust content router.
+   Words such as “support,” “refute,” and “boundary” do not imply that the
+   Baseline omitted those requested parts.
+3. When the Baseline is already complete, an extra OE rule creates only
+   downside: open `<think>` text, omitted qualifications, and unasked
+   speculation.
+4. The next OE intervention should control coverage and relevance without
+   prescribing anomaly status or asserting a natural-language semantics for
+   Local embeddings.

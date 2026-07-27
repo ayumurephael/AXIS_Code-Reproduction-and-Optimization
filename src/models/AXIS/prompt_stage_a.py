@@ -384,6 +384,37 @@ V2_TF_PREFIX_CONTEXT_RULE = (
     "with that verdict."
 )
 
+V2_OE_REQUESTED_PARTS_RULE = (
+    "Answer every distinct part of the question. Give the requested conclusion "
+    "or assessment first, followed by only the evidence and qualifications "
+    "needed for those parts."
+)
+
+V2_OE_HYPOTHESIS_CHECK_RULE = (
+    "Treat any anomaly description in the question as a hypothesis, not a fact. "
+    "State whether the supplied evidence supports or refutes it, then answer "
+    "every remaining requested part without unrelated speculation."
+)
+
+V2_OE_SILENT_CHECKLIST_RULE = (
+    "Before responding, silently identify the question's requested parts. In "
+    "the answer, address each part exactly once with a direct conclusion and "
+    "concise supplied-window evidence. Do not add unasked possibilities."
+)
+
+V2_OE_EVIDENCE_SCOPE_RULE = (
+    "Base the answer only on the supplied evidence. Do not mention tokens or "
+    "prompt mechanics, invent exact values, or speculate beyond the window. "
+    "Directly answer every requested part."
+)
+
+V2_OE_COMPACT_FACETS_RULE = (
+    "Use one compact paragraph: give the conclusion or assessment, the decisive "
+    "observed pattern, then any specifically requested boundary, subtype, "
+    "method, or counterevidence qualification. Omit categories the question "
+    "does not ask for."
+)
+
 LITERATURE_DECOUPLED_RULES = {
     "mc_decoupled": (
         "First determine which complete option text is best supported by the "
@@ -650,6 +681,34 @@ V2_R3_MAIN_PROFILES = {
         "multiple_choice": "base",
         "true_false": "base",
         "open_ended": "v2_oe_assessment_balanced_router",
+    },
+}
+
+V2_R4_MAIN_PROFILES = {
+    "v2_r4_01_oe_requested_parts": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_requested_parts",
+    },
+    "v2_r4_02_oe_hypothesis_check": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_hypothesis_check",
+    },
+    "v2_r4_03_oe_silent_checklist": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_silent_checklist",
+    },
+    "v2_r4_04_oe_evidence_scope": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_evidence_scope",
+    },
+    "v2_r4_05_oe_compact_facets": {
+        "multiple_choice": "base",
+        "true_false": "base",
+        "open_ended": "v2_oe_compact_facets",
     },
 }
 
@@ -1213,6 +1272,26 @@ MODE_SPECS: Dict[str, PromptCondition] = {
         "Round 3 main: assessment-qualified balanced-evidence OE router.",
         literature_profile="v2_r3_03_oe_assessment_balanced",
     ),
+    "v2_r4_01_oe_requested_parts": PromptCondition(
+        "Round 4 main: concise coverage of every requested OE part.",
+        literature_profile="v2_r4_01_oe_requested_parts",
+    ),
+    "v2_r4_02_oe_hypothesis_check": PromptCondition(
+        "Round 4 main: treat leading OE anomaly descriptions as hypotheses.",
+        literature_profile="v2_r4_02_oe_hypothesis_check",
+    ),
+    "v2_r4_03_oe_silent_checklist": PromptCondition(
+        "Round 4 main: silently identify and cover requested OE parts.",
+        literature_profile="v2_r4_03_oe_silent_checklist",
+    ),
+    "v2_r4_04_oe_evidence_scope": PromptCondition(
+        "Round 4 main: constrain OE answers to supplied evidence.",
+        literature_profile="v2_r4_04_oe_evidence_scope",
+    ),
+    "v2_r4_05_oe_compact_facets": PromptCondition(
+        "Round 4 main: adaptive compact OE facet order.",
+        literature_profile="v2_r4_05_oe_compact_facets",
+    ),
     # Released-code ablations remain available for compatibility.
     "wo_local_hint": PromptCondition(
         "Released-code ablation without local-hint placeholders.",
@@ -1345,6 +1424,14 @@ V2_R3_MAIN_MODES = (
     "v2_r3_01_oe_balanced_support",
     "v2_r3_02_oe_boundary_balanced",
     "v2_r3_03_oe_assessment_balanced",
+)
+
+V2_R4_MAIN_MODES = (
+    "v2_r4_01_oe_requested_parts",
+    "v2_r4_02_oe_hypothesis_check",
+    "v2_r4_03_oe_silent_checklist",
+    "v2_r4_04_oe_evidence_scope",
+    "v2_r4_05_oe_compact_facets",
 )
 
 
@@ -1585,6 +1672,7 @@ Answer:"""
                 **LITERATURE_R5_PROFILES,
                 **V2_R1_PROFILES,
                 **V2_R3_MAIN_PROFILES,
+                **V2_R4_MAIN_PROFILES,
             }
             literature_component = literature_profiles[
                 condition.literature_profile][question_type]
@@ -1689,6 +1777,11 @@ Answer:"""
             "v2_mc_content_output": V2_MC_CONTENT_OUTPUT_RULE,
             "v2_tf_context_whole": V2_TF_CONTEXT_WHOLE_RULE,
             "v2_tf_prefix_context": V2_TF_PREFIX_CONTEXT_RULE,
+            "v2_oe_requested_parts": V2_OE_REQUESTED_PARTS_RULE,
+            "v2_oe_hypothesis_check": V2_OE_HYPOTHESIS_CHECK_RULE,
+            "v2_oe_silent_checklist": V2_OE_SILENT_CHECKLIST_RULE,
+            "v2_oe_evidence_scope": V2_OE_EVIDENCE_SCOPE_RULE,
+            "v2_oe_compact_facets": V2_OE_COMPACT_FACETS_RULE,
             **LITERATURE_DECOUPLED_RULES,
         }
         literature_task_rule = literature_rules.get(literature_component)
