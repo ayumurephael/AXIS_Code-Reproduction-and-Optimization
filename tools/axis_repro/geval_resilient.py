@@ -40,7 +40,10 @@ def is_retriable_error(exc: Exception) -> bool:
     """Classify transport and HTTP failures without exposing response bodies."""
     if isinstance(exc, urllib.error.HTTPError):
         return exc.code in {408, 409, 425, 429} or 500 <= exc.code <= 599
-    return isinstance(exc, (urllib.error.URLError, TimeoutError))
+    return isinstance(
+        exc,
+        (urllib.error.URLError, TimeoutError, ConnectionError),
+    )
 
 
 def task_key(row: dict, dimension: str) -> tuple[str, str, str]:

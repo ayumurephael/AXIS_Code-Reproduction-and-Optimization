@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import urllib.error
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from .geval_resilient import (
     PermanentAPIError,
     RetryExhaustedError,
+    is_retriable_error,
     run_retrying,
 )
 
@@ -61,6 +63,12 @@ def test_transient_http_error_retries_then_succeeds():
     ))
     assert results == ["row"]
     assert attempts == 2
+
+
+def test_remote_disconnect_is_retriable():
+    assert is_retriable_error(
+        http.client.RemoteDisconnected("remote disconnected")
+    )
 
 
 def test_transient_http_error_has_bounded_retry_rounds():
