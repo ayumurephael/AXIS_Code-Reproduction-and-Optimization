@@ -37,6 +37,10 @@ class MultiheadAttention(nn.Module):
         self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=False)
 
+    # The Perceiver owns the complete trainable path into the frozen LLM.
+    # Keep its projections and SDPA backward in FP32 even when the surrounding
+    # formal Phase-II run uses BF16 autocast.
+    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(
         self,
         query: torch.Tensor,
@@ -151,6 +155,10 @@ class Perceiver(nn.Module):
         # Initialize prompt embeddings
         nn.init.normal_(self.fix_prompt_embeddings, mean=0.0, std=0.02)
     
+    # This linear reduction spans the complete 151k-token vocabulary in the
+    # formal model.  FP32 accumulation prevents a finite BF16 forward pass from
+    # producing an overflowing backward gradient after prolonged training.
+    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def get_source_embeddings(self, word_embeddings: torch.Tensor) -> torch.Tensor:
         """Transform word embeddings to source embeddings for cross-attention.
         

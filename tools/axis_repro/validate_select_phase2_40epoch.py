@@ -29,6 +29,7 @@ from .train_phase2_treatment_40epoch_ddp import (
     EXPERIMENT,
     FORMAL_ALPHA,
     FORMAL_EPOCHS,
+    FORMAL_GRADIENT_SKIP_THRESHOLD,
     FORMAL_LR,
     FORMAL_MAX_GRAD_NORM,
     FORMAL_SEED,
@@ -38,11 +39,12 @@ from .train_phase2_treatment_40epoch_ddp import (
     FORMAL_TRAIN_SERIES,
     FORMAL_VALIDATION_SERIES,
     FORMAL_WEIGHT_DECAY,
-    FORMAL_WORLD_SIZE,
     LEGACY_STEPS_PER_EPOCH,
-    LEGACY_WORLD_SIZE,
-    MIGRATION_COMPLETED_EPOCH,
+    RESUMED_WORLD_SIZE,
     expected_global_step_for_epoch,
+    planned_steps_for_completed_epoch,
+    steps_per_epoch_for_completed_epoch,
+    world_size_for_completed_epoch,
 )
 
 
@@ -195,16 +197,9 @@ def validate_checkpoint_identity(
     if step != expected_global_step_for_epoch(epoch):
         raise ValueError("checkpoint step is not the complete epoch boundary")
     meta = payload.get("reproduction_meta", {})
-    is_legacy_epoch = epoch <= MIGRATION_COMPLETED_EPOCH
-    expected_world = LEGACY_WORLD_SIZE if is_legacy_epoch else FORMAL_WORLD_SIZE
-    expected_steps_per_epoch = (
-        LEGACY_STEPS_PER_EPOCH if is_legacy_epoch else FORMAL_STEPS_PER_EPOCH
-    )
-    expected_planned_steps = (
-        FORMAL_EPOCHS * LEGACY_STEPS_PER_EPOCH
-        if is_legacy_epoch
-        else FORMAL_TOTAL_STEPS
-    )
+    expected_world = world_size_for_completed_epoch(epoch)
+    expected_steps_per_epoch = steps_per_epoch_for_completed_epoch(epoch)
+    expected_planned_steps = planned_steps_for_completed_epoch(epoch)
     expected = {
         "experiment": EXPERIMENT,
         "objective": "treatment",
@@ -229,14 +224,34 @@ def validate_checkpoint_identity(
             )
     if meta.get("source_dirty") is not False:
         raise ValueError("candidate checkpoint was produced from a dirty source tree")
-    if not is_legacy_epoch:
+    if 2 <= epoch <= 3:
         schedule = meta.get("optimizer_step_schedule", {})
         if schedule.get("epoch_1") != LEGACY_STEPS_PER_EPOCH:
             raise ValueError("4-GPU candidate lost the legacy epoch-1 schedule")
         if schedule.get("epochs_2_40") != FORMAL_STEPS_PER_EPOCH:
             raise ValueError("4-GPU candidate has the wrong active step schedule")
-        if schedule.get("total") != FORMAL_TOTAL_STEPS:
+        if schedule.get("total") != planned_steps_for_completed_epoch(epoch):
             raise ValueError("4-GPU candidate has the wrong total step schedule")
+    elif epoch >= 4:
+        schedule = meta.get("optimizer_step_schedule", {})
+        expected_schedule = {
+            "epoch_1": LEGACY_STEPS_PER_EPOCH,
+            "epochs_2_3": FORMAL_STEPS_PER_EPOCH,
+            "epochs_4_40": steps_per_epoch_for_completed_epoch(epoch),
+            "total": FORMAL_TOTAL_STEPS,
+        }
+        if schedule != expected_schedule:
+            raise ValueError("5-GPU resumed candidate has the wrong step schedule")
+        stability = meta.get("numerical_stability", {})
+        if stability.get("gradient_skip_threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
+            raise ValueError("candidate gradient-guard threshold changed")
+        if stability.get("unsafe_updates_applied") is not False:
+            raise ValueError("candidate does not prove fail-closed optimizer updates")
+        guard = meta.get("optimization_diagnostics", {}).get(
+            "gradient_guard", {}
+        )
+        if guard.get("threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
+            raise ValueError("candidate lacks gradient-guard audit evidence")
     state = payload.get("model_state_dict", {})
     if "fixed_hint_reference" not in state:
         raise ValueError("Treatment candidate has no cached F0")
@@ -248,6 +263,10 @@ def validate_checkpoint_identity(
         "training_data_audit_sha256": meta.get("data_audit_sha256"),
         "fixed_hint_sha256": meta.get("fixed_hint", {}).get("sha256"),
         "prompt_protocol": meta.get("prompt_protocol"),
+        "gradient_guard": meta.get("optimization_diagnostics", {}).get(
+            "gradient_guard"
+        ),
+        "numerical_stability": meta.get("numerical_stability"),
     }
 
 
@@ -270,7 +289,7 @@ def main() -> None:
     rank = int(os.environ["RANK"])
     world = int(os.environ["WORLD_SIZE"])
     local_rank = int(os.environ["LOCAL_RANK"])
-    if world != FORMAL_WORLD_SIZE:
+    if world != RESUMED_WORLD_SIZE:
         raise ValueError("formal selection requires exactly five DDP ranks")
     torch.cuda.set_device(local_rank)
     torch.distributed.init_process_group(
