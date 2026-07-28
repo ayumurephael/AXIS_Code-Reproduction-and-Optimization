@@ -33,11 +33,16 @@ from .train_phase2_treatment_40epoch_ddp import (
     FORMAL_MAX_GRAD_NORM,
     FORMAL_SEED,
     FORMAL_STEPS_PER_EPOCH,
+    FORMAL_TOTAL_STEPS,
     FORMAL_TRAIN_RATIO,
     FORMAL_TRAIN_SERIES,
     FORMAL_VALIDATION_SERIES,
     FORMAL_WEIGHT_DECAY,
     FORMAL_WORLD_SIZE,
+    LEGACY_STEPS_PER_EPOCH,
+    LEGACY_WORLD_SIZE,
+    MIGRATION_COMPLETED_EPOCH,
+    expected_global_step_for_epoch,
 )
 
 
@@ -187,17 +192,27 @@ def validate_checkpoint_identity(
         raise ValueError(
             f"checkpoint epoch {epoch} does not match candidate {expected_epoch}"
         )
-    if step != epoch * FORMAL_STEPS_PER_EPOCH:
+    if step != expected_global_step_for_epoch(epoch):
         raise ValueError("checkpoint step is not the complete epoch boundary")
     meta = payload.get("reproduction_meta", {})
+    is_legacy_epoch = epoch <= MIGRATION_COMPLETED_EPOCH
+    expected_world = LEGACY_WORLD_SIZE if is_legacy_epoch else FORMAL_WORLD_SIZE
+    expected_steps_per_epoch = (
+        LEGACY_STEPS_PER_EPOCH if is_legacy_epoch else FORMAL_STEPS_PER_EPOCH
+    )
+    expected_planned_steps = (
+        FORMAL_EPOCHS * LEGACY_STEPS_PER_EPOCH
+        if is_legacy_epoch
+        else FORMAL_TOTAL_STEPS
+    )
     expected = {
         "experiment": EXPERIMENT,
         "objective": "treatment",
         "run_purpose": "formal",
-        "world_size": FORMAL_WORLD_SIZE,
+        "world_size": expected_world,
         "epochs": FORMAL_EPOCHS,
-        "steps_per_rank_epoch": FORMAL_STEPS_PER_EPOCH,
-        "planned_steps": FORMAL_EPOCHS * FORMAL_STEPS_PER_EPOCH,
+        "steps_per_rank_epoch": expected_steps_per_epoch,
+        "planned_steps": expected_planned_steps,
         "seed": FORMAL_SEED,
         "segment_alpha": FORMAL_ALPHA,
         "lr": FORMAL_LR,
@@ -214,6 +229,14 @@ def validate_checkpoint_identity(
             )
     if meta.get("source_dirty") is not False:
         raise ValueError("candidate checkpoint was produced from a dirty source tree")
+    if not is_legacy_epoch:
+        schedule = meta.get("optimizer_step_schedule", {})
+        if schedule.get("epoch_1") != LEGACY_STEPS_PER_EPOCH:
+            raise ValueError("4-GPU candidate lost the legacy epoch-1 schedule")
+        if schedule.get("epochs_2_40") != FORMAL_STEPS_PER_EPOCH:
+            raise ValueError("4-GPU candidate has the wrong active step schedule")
+        if schedule.get("total") != FORMAL_TOTAL_STEPS:
+            raise ValueError("4-GPU candidate has the wrong total step schedule")
     state = payload.get("model_state_dict", {})
     if "fixed_hint_reference" not in state:
         raise ValueError("Treatment candidate has no cached F0")
@@ -345,7 +368,6 @@ def main() -> None:
         identity_fields = {
             key: identity[key]
             for key in (
-                "checkpoint_source_commit",
                 "phase1_checkpoint_sha256",
                 "training_data_audit_sha256",
                 "fixed_hint_sha256",

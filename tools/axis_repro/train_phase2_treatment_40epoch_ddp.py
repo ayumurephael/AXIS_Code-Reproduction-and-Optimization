@@ -3,7 +3,8 @@
 This is a new experiment, not a continuation of the author's released
 Phase-II checkpoint.  It loads only the repository-recorded Phase-I time-series
 checkpoint, initializes a fresh Hint Tuner/Perceiver, caches F0 at step zero,
-and trains for exactly 40 epochs on five data-parallel ranks.
+and trains for exactly 40 epochs. Epoch 1 was completed on five ranks; at the
+user-requested complete-epoch boundary, epochs 2--40 migrate to four ranks.
 """
 from __future__ import annotations
 
@@ -65,17 +66,36 @@ from .train_loss_e2e_ddp import (
 
 EXPERIMENT = "loss_e2e_0723_phase2_40epoch"
 FORMAL_EPOCHS = 40
-FORMAL_WORLD_SIZE = 5
+LEGACY_WORLD_SIZE = 5
+LEGACY_STEPS_PER_EPOCH = 5_700
+MIGRATION_COMPLETED_EPOCH = 1
+FORMAL_WORLD_SIZE = 4
 FORMAL_SEED = 72
 FORMAL_TRAIN_RATIO = 0.95
 FORMAL_TRAIN_SERIES = 28_500
 FORMAL_VALIDATION_SERIES = 1_500
-FORMAL_STEPS_PER_EPOCH = 5_700
+FORMAL_STEPS_PER_EPOCH = 7_125
+FORMAL_TOTAL_STEPS = (
+    MIGRATION_COMPLETED_EPOCH * LEGACY_STEPS_PER_EPOCH
+    + (FORMAL_EPOCHS - MIGRATION_COMPLETED_EPOCH) * FORMAL_STEPS_PER_EPOCH
+)
 FORMAL_LR = 1e-4
 FORMAL_WEIGHT_DECAY = 1e-5
 FORMAL_ALPHA = 0.40
 FORMAL_MAX_GRAD_NORM = 1.0
 FROZEN_LLM_DTYPE = torch.bfloat16
+
+
+def expected_global_step_for_epoch(epoch: int) -> int:
+    """Return the complete-boundary step under the 5-to-4 GPU schedule."""
+    if not 0 <= epoch <= FORMAL_EPOCHS:
+        raise ValueError(f"epoch must be in [0, {FORMAL_EPOCHS}]")
+    legacy_epochs = min(epoch, MIGRATION_COMPLETED_EPOCH)
+    four_gpu_epochs = max(0, epoch - MIGRATION_COMPLETED_EPOCH)
+    return (
+        legacy_epochs * LEGACY_STEPS_PER_EPOCH
+        + four_gpu_epochs * FORMAL_STEPS_PER_EPOCH
+    )
 
 
 def _git_value(*args: str) -> str:
@@ -327,17 +347,27 @@ def validate_resume_checkpoint(
     step = int(payload["global_step"])
     if not 1 <= epoch < FORMAL_EPOCHS:
         raise ValueError("resume epoch must be a completed epoch in [1, 39]")
-    if step != epoch * FORMAL_STEPS_PER_EPOCH:
+    if step != expected_global_step_for_epoch(epoch):
         raise ValueError("resume checkpoint is not at a complete epoch boundary")
     meta = payload["reproduction_meta"]
+    is_legacy_epoch = epoch <= MIGRATION_COMPLETED_EPOCH
+    expected_world = LEGACY_WORLD_SIZE if is_legacy_epoch else FORMAL_WORLD_SIZE
+    expected_steps_per_epoch = (
+        LEGACY_STEPS_PER_EPOCH if is_legacy_epoch else FORMAL_STEPS_PER_EPOCH
+    )
+    expected_planned_steps = (
+        FORMAL_EPOCHS * LEGACY_STEPS_PER_EPOCH
+        if is_legacy_epoch
+        else FORMAL_TOTAL_STEPS
+    )
     expected = {
         "experiment": EXPERIMENT,
         "run_purpose": "formal",
         "objective": "treatment",
-        "world_size": FORMAL_WORLD_SIZE,
+        "world_size": expected_world,
         "epochs": FORMAL_EPOCHS,
-        "steps_per_rank_epoch": FORMAL_STEPS_PER_EPOCH,
-        "planned_steps": FORMAL_EPOCHS * FORMAL_STEPS_PER_EPOCH,
+        "steps_per_rank_epoch": expected_steps_per_epoch,
+        "planned_steps": expected_planned_steps,
         "seed": FORMAL_SEED,
         "segment_alpha": FORMAL_ALPHA,
         "lr": FORMAL_LR,
@@ -354,6 +384,8 @@ def validate_resume_checkpoint(
                 f"resume checkpoint identity mismatch for {key}: "
                 f"{meta.get(key)!r} != {value!r}"
             )
+    if meta.get("source_dirty") is not False:
+        raise ValueError("resume checkpoint was produced from a dirty source tree")
     if "fixed_hint_reference" not in payload["model_state_dict"]:
         raise ValueError("resume Treatment checkpoint has no cached F0")
     if set(METRIC_KEYS).difference(payload["cumulative_training_metrics"]):
@@ -407,6 +439,10 @@ def _validate_args(args, world: int) -> None:
             raise ValueError("formal 40-epoch protocol mismatch: " + "; ".join(mismatches))
         if args.max_steps is not None:
             raise ValueError("formal training forbids --max-steps")
+        if args.resume_from is None:
+            raise ValueError(
+                "formal 4-GPU migration requires a complete-epoch --resume-from"
+            )
     elif args.max_steps is None or args.max_steps <= 0:
         raise ValueError("smoke training requires a positive --max-steps")
 
@@ -610,7 +646,7 @@ def main() -> None:
             f"expected {FORMAL_STEPS_PER_EPOCH} optimizer steps per epoch, "
             f"got {len(loader)}"
         )
-    planned_steps = args.epochs * len(loader)
+    planned_steps = FORMAL_TOTAL_STEPS
     source_dirty = bool(_git_value("status", "--porcelain"))
     if args.run_purpose == "formal" and source_dirty:
         raise RuntimeError("formal training requires a clean source worktree")
@@ -632,10 +668,26 @@ def main() -> None:
         "micro_batch_series_per_rank": 1,
         "gradient_accumulation_steps": 1,
         "global_batch_series": world,
+        "world_size_schedule": {
+            "epoch_1": LEGACY_WORLD_SIZE,
+            "epochs_2_40": FORMAL_WORLD_SIZE,
+        },
         "qa_rows_per_series": 2,
         "epochs": args.epochs,
         "steps_per_rank_epoch": len(loader),
         "planned_steps": planned_steps,
+        "optimizer_step_schedule": {
+            "epoch_1": LEGACY_STEPS_PER_EPOCH,
+            "epochs_2_40": FORMAL_STEPS_PER_EPOCH,
+            "total": FORMAL_TOTAL_STEPS,
+        },
+        "migration": {
+            "policy": "complete_epoch_boundary_only",
+            "completed_5gpu_epochs": MIGRATION_COMPLETED_EPOCH,
+            "active_4gpu_epochs": FORMAL_EPOCHS - MIGRATION_COMPLETED_EPOCH,
+            "partial_epoch_2_steps_discarded": 1_050,
+            "reason": "user_requested_one_free_H100",
+        },
         "checkpoint_schedule": "every_complete_epoch",
         "declared_candidate_epochs": list(range(1, args.epochs + 1)),
         "lr": args.lr,
@@ -707,6 +759,8 @@ def main() -> None:
             "checkpoint_epoch": int(resume_payload["epoch"]),
             "checkpoint_global_step": int(resume_payload["global_step"]),
             "optimizer_state_restored": True,
+            "source_world_size": resume_meta["world_size"],
+            "active_world_size": world,
             "cumulative_metrics_restored": True,
             "mid_epoch_batches_skipped": 0,
         }
@@ -836,9 +890,8 @@ def main() -> None:
                         {
                             "step": global_step,
                             "epoch": epoch,
-                            "step_in_epoch": (
-                                global_step - (epoch - 1) * len(loader)
-                            ),
+                            "step_in_epoch": global_step
+                            - expected_global_step_for_epoch(epoch - 1),
                             "step_metrics": _summary(
                                 dict(zip(METRIC_KEYS, packed.tolist()))
                             ),
@@ -912,7 +965,7 @@ def main() -> None:
             "formal_complete": (
                 not stopped_early
                 and completed_epoch == args.epochs
-                and global_step == planned_steps
+                and global_step == FORMAL_TOTAL_STEPS
             ),
             "wall_seconds_this_process": elapsed,
             "steps_executed_this_process": global_step - process_start_step,
