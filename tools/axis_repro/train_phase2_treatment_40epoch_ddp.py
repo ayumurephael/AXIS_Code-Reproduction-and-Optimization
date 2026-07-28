@@ -69,15 +69,24 @@ FORMAL_EPOCHS = 40
 LEGACY_WORLD_SIZE = 5
 LEGACY_STEPS_PER_EPOCH = 5_700
 MIGRATION_COMPLETED_EPOCH = 1
-FORMAL_WORLD_SIZE = 4
+FOUR_GPU_WORLD_SIZE = 4
+FOUR_GPU_FIRST_EPOCH = 2
+FOUR_GPU_LAST_EPOCH = 3
+RESUMED_FIVE_GPU_FIRST_EPOCH = 4
+FORMAL_WORLD_SIZE = FOUR_GPU_WORLD_SIZE
 FORMAL_SEED = 72
 FORMAL_TRAIN_RATIO = 0.95
 FORMAL_TRAIN_SERIES = 28_500
 FORMAL_VALIDATION_SERIES = 1_500
 FORMAL_STEPS_PER_EPOCH = 7_125
+RESUMED_WORLD_SIZE = 5
+RESUMED_STEPS_PER_EPOCH = 5_700
 FORMAL_TOTAL_STEPS = (
-    MIGRATION_COMPLETED_EPOCH * LEGACY_STEPS_PER_EPOCH
-    + (FORMAL_EPOCHS - MIGRATION_COMPLETED_EPOCH) * FORMAL_STEPS_PER_EPOCH
+    LEGACY_STEPS_PER_EPOCH
+    + (FOUR_GPU_LAST_EPOCH - FOUR_GPU_FIRST_EPOCH + 1)
+    * FORMAL_STEPS_PER_EPOCH
+    + (FORMAL_EPOCHS - RESUMED_FIVE_GPU_FIRST_EPOCH + 1)
+    * RESUMED_STEPS_PER_EPOCH
 )
 FORMAL_LR = 1e-4
 FORMAL_WEIGHT_DECAY = 1e-5
@@ -87,15 +96,48 @@ FROZEN_LLM_DTYPE = torch.bfloat16
 
 
 def expected_global_step_for_epoch(epoch: int) -> int:
-    """Return the complete-boundary step under the 5-to-4 GPU schedule."""
+    """Return a boundary step under the actual 5-to-4-to-5 GPU schedule."""
     if not 0 <= epoch <= FORMAL_EPOCHS:
         raise ValueError(f"epoch must be in [0, {FORMAL_EPOCHS}]")
     legacy_epochs = min(epoch, MIGRATION_COMPLETED_EPOCH)
-    four_gpu_epochs = max(0, epoch - MIGRATION_COMPLETED_EPOCH)
+    four_gpu_epochs = max(
+        0,
+        min(epoch, FOUR_GPU_LAST_EPOCH) - FOUR_GPU_FIRST_EPOCH + 1,
+    )
+    resumed_epochs = max(0, epoch - RESUMED_FIVE_GPU_FIRST_EPOCH + 1)
     return (
         legacy_epochs * LEGACY_STEPS_PER_EPOCH
         + four_gpu_epochs * FORMAL_STEPS_PER_EPOCH
+        + resumed_epochs * RESUMED_STEPS_PER_EPOCH
     )
+
+
+def world_size_for_completed_epoch(epoch: int) -> int:
+    if epoch <= MIGRATION_COMPLETED_EPOCH:
+        return LEGACY_WORLD_SIZE
+    if epoch <= FOUR_GPU_LAST_EPOCH:
+        return FOUR_GPU_WORLD_SIZE
+    return RESUMED_WORLD_SIZE
+
+
+def steps_per_epoch_for_completed_epoch(epoch: int) -> int:
+    if epoch <= MIGRATION_COMPLETED_EPOCH:
+        return LEGACY_STEPS_PER_EPOCH
+    if epoch <= FOUR_GPU_LAST_EPOCH:
+        return FORMAL_STEPS_PER_EPOCH
+    return RESUMED_STEPS_PER_EPOCH
+
+
+def planned_steps_for_completed_epoch(epoch: int) -> int:
+    if epoch <= MIGRATION_COMPLETED_EPOCH:
+        return FORMAL_EPOCHS * LEGACY_STEPS_PER_EPOCH
+    if epoch <= FOUR_GPU_LAST_EPOCH:
+        return (
+            MIGRATION_COMPLETED_EPOCH * LEGACY_STEPS_PER_EPOCH
+            + (FORMAL_EPOCHS - MIGRATION_COMPLETED_EPOCH)
+            * FORMAL_STEPS_PER_EPOCH
+        )
+    return FORMAL_TOTAL_STEPS
 
 
 def _git_value(*args: str) -> str:
@@ -350,16 +392,9 @@ def validate_resume_checkpoint(
     if step != expected_global_step_for_epoch(epoch):
         raise ValueError("resume checkpoint is not at a complete epoch boundary")
     meta = payload["reproduction_meta"]
-    is_legacy_epoch = epoch <= MIGRATION_COMPLETED_EPOCH
-    expected_world = LEGACY_WORLD_SIZE if is_legacy_epoch else FORMAL_WORLD_SIZE
-    expected_steps_per_epoch = (
-        LEGACY_STEPS_PER_EPOCH if is_legacy_epoch else FORMAL_STEPS_PER_EPOCH
-    )
-    expected_planned_steps = (
-        FORMAL_EPOCHS * LEGACY_STEPS_PER_EPOCH
-        if is_legacy_epoch
-        else FORMAL_TOTAL_STEPS
-    )
+    expected_world = world_size_for_completed_epoch(epoch)
+    expected_steps_per_epoch = steps_per_epoch_for_completed_epoch(epoch)
+    expected_planned_steps = planned_steps_for_completed_epoch(epoch)
     expected = {
         "experiment": EXPERIMENT,
         "run_purpose": "formal",
@@ -421,7 +456,7 @@ def parser() -> argparse.ArgumentParser:
 
 def _validate_args(args, world: int) -> None:
     locked = {
-        "world_size": (world, FORMAL_WORLD_SIZE),
+        "world_size": (world, RESUMED_WORLD_SIZE),
         "epochs": (args.epochs, FORMAL_EPOCHS),
         "seed": (args.seed, FORMAL_SEED),
         "lr": (args.lr, FORMAL_LR),
@@ -441,7 +476,7 @@ def _validate_args(args, world: int) -> None:
             raise ValueError("formal training forbids --max-steps")
         if args.resume_from is None:
             raise ValueError(
-                "formal 4-GPU migration requires a complete-epoch --resume-from"
+                "formal 5-GPU recovery requires a complete-epoch --resume-from"
             )
     elif args.max_steps is None or args.max_steps <= 0:
         raise ValueError("smoke training requires a positive --max-steps")
@@ -641,9 +676,9 @@ def main() -> None:
         persistent_workers=args.num_workers > 0,
         collate_fn=collate_fn,
     )
-    if len(loader) != FORMAL_STEPS_PER_EPOCH:
+    if len(loader) != RESUMED_STEPS_PER_EPOCH:
         raise RuntimeError(
-            f"expected {FORMAL_STEPS_PER_EPOCH} optimizer steps per epoch, "
+            f"expected {RESUMED_STEPS_PER_EPOCH} optimizer steps per epoch, "
             f"got {len(loader)}"
         )
     planned_steps = FORMAL_TOTAL_STEPS
@@ -670,7 +705,8 @@ def main() -> None:
         "global_batch_series": world,
         "world_size_schedule": {
             "epoch_1": LEGACY_WORLD_SIZE,
-            "epochs_2_40": FORMAL_WORLD_SIZE,
+            "epochs_2_3": FOUR_GPU_WORLD_SIZE,
+            "epochs_4_40": RESUMED_WORLD_SIZE,
         },
         "qa_rows_per_series": 2,
         "epochs": args.epochs,
@@ -678,15 +714,17 @@ def main() -> None:
         "planned_steps": planned_steps,
         "optimizer_step_schedule": {
             "epoch_1": LEGACY_STEPS_PER_EPOCH,
-            "epochs_2_40": FORMAL_STEPS_PER_EPOCH,
+            "epochs_2_3": FORMAL_STEPS_PER_EPOCH,
+            "epochs_4_40": RESUMED_STEPS_PER_EPOCH,
             "total": FORMAL_TOTAL_STEPS,
         },
         "migration": {
             "policy": "complete_epoch_boundary_only",
             "completed_5gpu_epochs": MIGRATION_COMPLETED_EPOCH,
-            "active_4gpu_epochs": FORMAL_EPOCHS - MIGRATION_COMPLETED_EPOCH,
+            "completed_4gpu_epochs": FOUR_GPU_LAST_EPOCH - FOUR_GPU_FIRST_EPOCH + 1,
+            "resumed_5gpu_epochs": FORMAL_EPOCHS - RESUMED_FIVE_GPU_FIRST_EPOCH + 1,
             "partial_epoch_2_steps_discarded": 1_050,
-            "reason": "user_requested_one_free_H100",
+            "reason": "user restored five-GPU training after epoch-3 boundary",
         },
         "checkpoint_schedule": "every_complete_epoch",
         "declared_candidate_epochs": list(range(1, args.epochs + 1)),
