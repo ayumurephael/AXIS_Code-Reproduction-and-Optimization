@@ -1,0 +1,30 @@
+{
+  "prediction_rows": 560,
+  "records": 140,
+  "prediction_modes": {
+    "base": 140,
+    "prompt_final_round9_mc_oe": 140,
+    "prompt_final_round9_tf_oe": 140,
+    "prompt_final_round9_joint": 140
+  },
+  "score_rows": 1340,
+  "score_methods": {
+    "final_score_top_logprobs_bounded": 1322,
+    "final_score_top_logprobs_readout": 10,
+    "exact_sample_mean_20": 4,
+    "final_score_top_logprobs": 4
+  },
+  "score_models": {
+    "qwen3.5-397b-a17b": 1340
+  },
+  "score_providers": {
+    "qwen": 1340
+  },
+  "score_enable_thinking": {
+    "false": 1340
+  },
+  "logprobs_returned": 1336,
+  "valid_prompt_hashes": 1340,
+  "errors": [],
+  "ok": true
+}

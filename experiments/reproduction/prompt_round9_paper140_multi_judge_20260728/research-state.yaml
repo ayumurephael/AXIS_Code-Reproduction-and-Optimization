@@ -1,6 +1,6 @@
 project:
   title: "AXIS Round 9 paper140 multi-Judge evaluation"
-  status: "protocol_locked"
+  status: "complete"
   started: "2026-07-28"
 
 evaluation:
@@ -21,10 +21,22 @@ evaluation:
   expanded_dimensions_per_judge: 1340
 
 execution:
-  predictions_prepared: false
-  deepseek_complete: false
-  qwen35_complete: false
-  qwen30b_complete: false
-  report_complete: false
+  predictions_prepared: true
+  deepseek_complete: true
+  qwen35_complete: true
+  qwen30b_complete: true
+  report_complete: true
   credentials_exposed: false
+  integrity_audit_ok: true
+  unit_tests: "19 passed"
 
+qwen35_exception:
+  authorized_by_user: true
+  scope: "series_000096:0 / base / open_ended accuracy"
+  method: "exact_sample_mean_20"
+  valid_samples: 20
+
+result:
+  cross_judge_all_ten_nonlower_prompt: null
+  qwen30_all_ten_nonlower_prompt: "prompt_final_round9_tf_oe"
+  paper140_oe_changed_responses: 0
