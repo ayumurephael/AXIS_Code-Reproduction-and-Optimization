@@ -3,9 +3,9 @@
 This is a new experiment, not a continuation of the author's released
 Phase-II checkpoint.  It loads only the repository-recorded Phase-I time-series
 checkpoint, initializes a fresh Hint Tuner/Perceiver, caches F0 at step zero,
-and trains for exactly 40 epochs. The recorded run uses a 5-to-4-to-5 rank
-schedule and resumes only at complete-epoch boundaries. Wide Perceiver math is
-kept in FP32 and a synchronized guard rejects unsafe optimizer updates.
+and trains for exactly 40 epochs. Five ranks accumulate 26 microbatches per
+optimizer attempt (global batch 130); the final short window uses its actual
+global valid-row denominator. The local-input normalization arm is explicit.
 """
 
 from __future__ import annotations
@@ -19,6 +19,8 @@ import platform
 import random
 import subprocess
 import time
+from contextlib import nullcontext
+from datetime import timedelta
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -28,11 +30,18 @@ import transformers
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 
+from src.models.AXIS.AXIS import (
+    DEFAULT_LOCAL_INPUT_RMSNORM_EPS,
+    LOCAL_INPUT_NORM_MODES,
+    LOCAL_INPUT_NORM_NONE,
+)
 from src.models.AXIS.AXIS_test import collate_fn
 from src.models.AXIS.dataset import AXISAnomalyQADataset
 
 from .loss_e2e import ERROR_ANSWER
 from .loss_e2e_40epoch_runtime import (
+    LOCAL_INPUT_MAX_METRIC_KEYS,
+    LOCAL_INPUT_SUM_METRIC_KEYS,
     Phase2TreatmentObjectiveModel,
     fixed_hint_checkpoint_state,
     initialize_fixed_hint_reference,
@@ -51,6 +60,18 @@ from .numerical_stability import (
     top_gradient_diagnostics,
     validate_completed_epoch_guard_audit,
 )
+from .phase2_accumulation import (
+    AccumulationPlan,
+    add_numeric_totals,
+    ddp_window_loss_multiplier,
+    expected_micro_step,
+    expected_optimizer_attempt_step,
+    iter_accumulation_windows,
+    local_scale_summary,
+    new_window_numerical_totals,
+    summarize_window_numerics,
+    validate_accumulated_objective_denominator,
+)
 from .prompt_boundary import (
     SIMPLIFIED_FINAL_ANSWER_V1,
     answer_continuations,
@@ -61,8 +82,6 @@ from .train_loss_e2e_ddp import (
     METRIC_KEYS,
     _ensure_frozen_llm_storage_dtype,
     _gradient_l2_norm,
-    _optimization_state_from_summary,
-    _optimization_summary,
     _parameter_snapshot,
     _relative_parameter_change,
     _summary,
@@ -72,112 +91,113 @@ from .train_loss_e2e_ddp import (
 )
 
 
-EXPERIMENT = "loss_e2e_0723_phase2_40epoch"
+EXPERIMENT = "loss_e2e_0723_phase2_40epoch_accumulation_v2"
+FORMAL_PROTOCOL_VERSION = 2
 FORMAL_EPOCHS = 40
-LEGACY_WORLD_SIZE = 5
-LEGACY_STEPS_PER_EPOCH = 5_700
-MIGRATION_COMPLETED_EPOCH = 1
-FOUR_GPU_WORLD_SIZE = 4
-FOUR_GPU_FIRST_EPOCH = 2
-FOUR_GPU_LAST_EPOCH = 3
-RESUMED_FIVE_GPU_FIRST_EPOCH = 4
-RESUMED_WORLD_SIZE = 5
-FORMAL_WORLD_SIZE = RESUMED_WORLD_SIZE
+FORMAL_WORLD_SIZE = 5
 FORMAL_SEED = 72
 FORMAL_TRAIN_RATIO = 0.95
 FORMAL_TRAIN_SERIES = 28_500
 FORMAL_VALIDATION_SERIES = 1_500
-FORMAL_STEPS_PER_EPOCH = 7_125
-RESUMED_STEPS_PER_EPOCH = 5_700
-FORMAL_TOTAL_STEPS = (
-    LEGACY_STEPS_PER_EPOCH
-    + (FOUR_GPU_LAST_EPOCH - FOUR_GPU_FIRST_EPOCH + 1) * FORMAL_STEPS_PER_EPOCH
-    + (FORMAL_EPOCHS - RESUMED_FIVE_GPU_FIRST_EPOCH + 1) * RESUMED_STEPS_PER_EPOCH
-)
+FORMAL_MICRO_BATCH_SERIES_PER_RANK = 1
+FORMAL_GRADIENT_ACCUMULATION_STEPS = 26
+FORMAL_MICRO_STEPS_PER_EPOCH = 5_700
+FORMAL_STEPS_PER_EPOCH = 220
+FORMAL_TOTAL_MICRO_STEPS = FORMAL_MICRO_STEPS_PER_EPOCH * FORMAL_EPOCHS
+FORMAL_TOTAL_STEPS = FORMAL_STEPS_PER_EPOCH * FORMAL_EPOCHS
 FORMAL_LR = 1e-4
-FORMAL_LR_SWITCH_EPOCH = 5
-FORMAL_EPOCH5_LR = 3e-5
 FORMAL_WEIGHT_DECAY = 1e-5
 FORMAL_ALPHA = 0.40
 FORMAL_MAX_GRAD_NORM = 1.0
 FORMAL_GRADIENT_SKIP_THRESHOLD = 100.0
-FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS = 512
+FORMAL_FINITE_SPIKE_ABORT_COUNT = 2
+FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS = 2
 FORMAL_GRADIENT_GUARD_MAX_RECORDED_EVENTS = 16
-FORMAL_GRADIENT_SKIP_WINDOW_SIZE = 500
-FORMAL_GRADIENT_SKIP_WINDOW_MIN_OBSERVATIONS = 100
+FORMAL_GRADIENT_SKIP_WINDOW_SIZE = 100
+FORMAL_GRADIENT_SKIP_WINDOW_MIN_OBSERVATIONS = 20
 FORMAL_MAX_WINDOW_GRADIENT_SKIP_RATE = 0.05
-FORMAL_GRADIENT_SKIP_EPOCH_MIN_OBSERVATIONS = 500
+FORMAL_GRADIENT_SKIP_EPOCH_MIN_OBSERVATIONS = 100
 FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE = 0.01
 FROZEN_LLM_DTYPE = torch.bfloat16
 
+FORMAL_ACCUMULATION_PLAN = AccumulationPlan(
+    world_size=FORMAL_WORLD_SIZE,
+    micro_batch_series_per_rank=FORMAL_MICRO_BATCH_SERIES_PER_RANK,
+    gradient_accumulation_steps=FORMAL_GRADIENT_ACCUMULATION_STEPS,
+    micro_steps_per_epoch=FORMAL_MICRO_STEPS_PER_EPOCH,
+)
+if FORMAL_ACCUMULATION_PLAN.optimizer_attempts_per_epoch != FORMAL_STEPS_PER_EPOCH:
+    raise RuntimeError("formal accumulation plan has the wrong optimizer-step count")
+
 
 def expected_global_step_for_epoch(epoch: int) -> int:
-    """Return a boundary step under the actual 5-to-4-to-5 GPU schedule."""
+    """Return optimizer-attempt windows consumed at an epoch boundary."""
     if not 0 <= epoch <= FORMAL_EPOCHS:
         raise ValueError(f"epoch must be in [0, {FORMAL_EPOCHS}]")
-    legacy_epochs = min(epoch, MIGRATION_COMPLETED_EPOCH)
-    four_gpu_epochs = max(
-        0,
-        min(epoch, FOUR_GPU_LAST_EPOCH) - FOUR_GPU_FIRST_EPOCH + 1,
-    )
-    resumed_epochs = max(0, epoch - RESUMED_FIVE_GPU_FIRST_EPOCH + 1)
-    return (
-        legacy_epochs * LEGACY_STEPS_PER_EPOCH
-        + four_gpu_epochs * FORMAL_STEPS_PER_EPOCH
-        + resumed_epochs * RESUMED_STEPS_PER_EPOCH
-    )
+    return expected_optimizer_attempt_step(epoch, FORMAL_ACCUMULATION_PLAN)
+
+
+def expected_micro_step_for_epoch(epoch: int) -> int:
+    if not 0 <= epoch <= FORMAL_EPOCHS:
+        raise ValueError(f"epoch must be in [0, {FORMAL_EPOCHS}]")
+    return expected_micro_step(epoch, FORMAL_ACCUMULATION_PLAN)
 
 
 def world_size_for_completed_epoch(epoch: int) -> int:
-    if epoch <= MIGRATION_COMPLETED_EPOCH:
-        return LEGACY_WORLD_SIZE
-    if epoch <= FOUR_GPU_LAST_EPOCH:
-        return FOUR_GPU_WORLD_SIZE
-    return RESUMED_WORLD_SIZE
+    if not 1 <= epoch <= FORMAL_EPOCHS:
+        raise ValueError(f"epoch must be in [1, {FORMAL_EPOCHS}]")
+    return FORMAL_WORLD_SIZE
 
 
 def steps_per_epoch_for_completed_epoch(epoch: int) -> int:
-    if epoch <= MIGRATION_COMPLETED_EPOCH:
-        return LEGACY_STEPS_PER_EPOCH
-    if epoch <= FOUR_GPU_LAST_EPOCH:
-        return FORMAL_STEPS_PER_EPOCH
-    return RESUMED_STEPS_PER_EPOCH
+    world_size_for_completed_epoch(epoch)
+    return FORMAL_STEPS_PER_EPOCH
+
+
+def micro_steps_per_epoch_for_completed_epoch(epoch: int) -> int:
+    world_size_for_completed_epoch(epoch)
+    return FORMAL_MICRO_STEPS_PER_EPOCH
 
 
 def planned_steps_for_completed_epoch(epoch: int) -> int:
-    if epoch <= MIGRATION_COMPLETED_EPOCH:
-        return FORMAL_EPOCHS * LEGACY_STEPS_PER_EPOCH
-    if epoch <= FOUR_GPU_LAST_EPOCH:
-        return (
-            MIGRATION_COMPLETED_EPOCH * LEGACY_STEPS_PER_EPOCH
-            + (FORMAL_EPOCHS - MIGRATION_COMPLETED_EPOCH) * FORMAL_STEPS_PER_EPOCH
-        )
+    world_size_for_completed_epoch(epoch)
     return FORMAL_TOTAL_STEPS
 
 
-def learning_rate_for_epoch(
-    epoch: int,
-    *,
-    initial_lr: float,
-    epoch5_lr: float,
-) -> float:
-    """Return the user-approved two-stage Phase-II learning rate."""
+def learning_rate_for_epoch(epoch: int, *, initial_lr: float) -> float:
+    """The confirmed author-compatible schedule is constant for all epochs."""
     if not 1 <= epoch <= FORMAL_EPOCHS:
         raise ValueError(f"epoch must be in [1, {FORMAL_EPOCHS}]")
-    if epoch < FORMAL_LR_SWITCH_EPOCH:
-        return float(initial_lr)
-    return float(epoch5_lr)
+    return float(initial_lr)
+
+
+def local_input_normalization_policy(mode: str, eps: float) -> dict:
+    if mode not in LOCAL_INPUT_NORM_MODES:
+        raise ValueError(f"unsupported local input normalization mode: {mode!r}")
+    if not math.isfinite(eps) or eps <= 0:
+        raise ValueError("local input RMSNorm eps must be finite and positive")
+    return {
+        "mode": mode,
+        "affine": False,
+        "eps": float(eps),
+        "axis": "per_local_timestep_last_dimension",
+        "compute_dtype": "torch.float32",
+        "placement": "immediately_before_local_word_proj",
+        "fixed_hint_affected": False,
+    }
 
 
 def formal_gradient_guard_policy() -> dict:
     """Return the immutable fail-fast policy recorded in formal checkpoints."""
     return {
+        "unit": "optimizer_attempt_after_accumulation",
         "window_size": FORMAL_GRADIENT_SKIP_WINDOW_SIZE,
-        "window_min_observations": (FORMAL_GRADIENT_SKIP_WINDOW_MIN_OBSERVATIONS),
+        "window_min_observations": FORMAL_GRADIENT_SKIP_WINDOW_MIN_OBSERVATIONS,
         "max_window_skip_rate": FORMAL_MAX_WINDOW_GRADIENT_SKIP_RATE,
-        "epoch_min_observations": (FORMAL_GRADIENT_SKIP_EPOCH_MIN_OBSERVATIONS),
+        "epoch_min_observations": FORMAL_GRADIENT_SKIP_EPOCH_MIN_OBSERVATIONS,
         "max_epoch_skip_rate": FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE,
         "max_consecutive_skips": FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS,
+        "finite_spike_abort_count": FORMAL_FINITE_SPIKE_ABORT_COUNT,
         "fail_on_nonfinite": True,
     }
 
@@ -185,9 +205,9 @@ def formal_gradient_guard_policy() -> dict:
 def new_formal_gradient_guard_tracker() -> GradientGuardFailFast:
     return GradientGuardFailFast(
         window_size=FORMAL_GRADIENT_SKIP_WINDOW_SIZE,
-        window_min_observations=(FORMAL_GRADIENT_SKIP_WINDOW_MIN_OBSERVATIONS),
+        window_min_observations=FORMAL_GRADIENT_SKIP_WINDOW_MIN_OBSERVATIONS,
         max_window_skip_rate=FORMAL_MAX_WINDOW_GRADIENT_SKIP_RATE,
-        epoch_min_observations=(FORMAL_GRADIENT_SKIP_EPOCH_MIN_OBSERVATIONS),
+        epoch_min_observations=FORMAL_GRADIENT_SKIP_EPOCH_MIN_OBSERVATIONS,
         max_epoch_skip_rate=FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE,
         max_consecutive_skips=FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS,
         fail_on_nonfinite=True,
@@ -195,7 +215,6 @@ def new_formal_gradient_guard_tracker() -> GradientGuardFailFast:
 
 
 def validate_formal_completed_epoch_guard(meta: Mapping, epoch: int) -> dict:
-    """Reject post-upgrade checkpoints that do not prove a safe epoch."""
     stability = meta.get("numerical_stability", {})
     if stability.get("fail_fast_policy") != formal_gradient_guard_policy():
         raise ValueError("checkpoint gradient-guard fail-fast policy changed")
@@ -204,7 +223,7 @@ def validate_formal_completed_epoch_guard(meta: Mapping, epoch: int) -> dict:
     return validate_completed_epoch_guard_audit(
         audit,
         expected_epoch=epoch,
-        expected_attempted_steps=steps_per_epoch_for_completed_epoch(epoch),
+        expected_attempted_steps=FORMAL_STEPS_PER_EPOCH,
         max_epoch_skip_rate=FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE,
     )
 
@@ -219,10 +238,12 @@ def _completed_epoch_guard_audit(
     audit.update(
         {
             "epoch": epoch,
+            "unit": "optimizer_attempt_after_accumulation",
             "fail_fast_triggered": bool(fail_fast_triggered),
             "checkpoint_eligible": (
                 not fail_fast_triggered
                 and audit["epoch_nonfinite_steps"] == 0
+                and audit["epoch_skipped_steps"] < FORMAL_FINITE_SPIKE_ABORT_COUNT
                 and audit["epoch_skip_rate"] <= FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE
             ),
         }
@@ -230,65 +251,113 @@ def _completed_epoch_guard_audit(
     return audit
 
 
+def _new_optimization_state(max_grad_norm: float) -> dict:
+    state = new_window_numerical_totals()
+    state.update(
+        {
+            "max_grad_norm": max_grad_norm,
+            "parameter_relative_change_by_step": {},
+            "gradient_guard_threshold": FORMAL_GRADIENT_SKIP_THRESHOLD,
+            "gradient_guard_skipped_steps": 0,
+            "gradient_guard_finite_spike_skipped_steps": 0,
+            "gradient_guard_nonfinite_skipped_steps": 0,
+            "gradient_guard_consecutive_skips": 0,
+            "gradient_guard_max_consecutive_skips": 0,
+            "gradient_guard_consecutive_skip_limit": (
+                FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS
+            ),
+            "gradient_guard_last_completed_epoch": None,
+            "gradient_guard_events": [],
+        }
+    )
+    return state
+
+
 def _guarded_optimization_summary(state: Mapping) -> dict:
-    result = _optimization_summary(state)
-    result["gradient_guard"] = {
-        "threshold": state["gradient_guard_threshold"],
-        "skipped_steps": state["gradient_guard_skipped_steps"],
-        "finite_spike_skipped_steps": state[
-            "gradient_guard_finite_spike_skipped_steps"
-        ],
-        "nonfinite_skipped_steps": state["gradient_guard_nonfinite_skipped_steps"],
-        "consecutive_skips": state["gradient_guard_consecutive_skips"],
-        "max_consecutive_skips": state["gradient_guard_max_consecutive_skips"],
-        "consecutive_skip_limit": state["gradient_guard_consecutive_skip_limit"],
-        "last_completed_epoch": state.get("gradient_guard_last_completed_epoch"),
-        "events": list(state["gradient_guard_events"]),
-    }
+    result = summarize_window_numerics(state)
+    result.update(
+        {
+            "max_grad_norm": state["max_grad_norm"],
+            "parameter_relative_change_by_step": dict(
+                state["parameter_relative_change_by_step"]
+            ),
+            "gradient_guard": {
+                "threshold": state["gradient_guard_threshold"],
+                "skipped_steps": state["gradient_guard_skipped_steps"],
+                "finite_spike_skipped_steps": state[
+                    "gradient_guard_finite_spike_skipped_steps"
+                ],
+                "nonfinite_skipped_steps": state[
+                    "gradient_guard_nonfinite_skipped_steps"
+                ],
+                "consecutive_skips": state["gradient_guard_consecutive_skips"],
+                "max_consecutive_skips": state["gradient_guard_max_consecutive_skips"],
+                "consecutive_skip_limit": state[
+                    "gradient_guard_consecutive_skip_limit"
+                ],
+                "finite_spike_abort_count": FORMAL_FINITE_SPIKE_ABORT_COUNT,
+                "last_completed_epoch": state.get(
+                    "gradient_guard_last_completed_epoch"
+                ),
+                "events": list(state["gradient_guard_events"]),
+            },
+        }
+    )
     return result
 
 
-def _restore_optimization_with_guard(
-    summary: Mapping,
-    *,
-    expected_max_grad_norm: float,
-    threshold: float,
-    consecutive_skip_limit: int,
-) -> dict:
-    state = _optimization_state_from_summary(
-        summary,
-        expected_max_grad_norm=expected_max_grad_norm,
+def _restore_optimization_state(summary: Mapping, max_grad_norm: float) -> dict:
+    state = _new_optimization_state(max_grad_norm)
+    direct = (
+        "optimizer_attempts",
+        "optimizer_steps_applied",
+        "micro_steps",
+        "full_accumulation_windows",
+        "partial_accumulation_windows",
+        "clipped_windows",
+        "skipped_windows",
+        "finite_spike_windows",
+        "nonfinite_windows",
     )
-    previous = summary.get("gradient_guard", {})
-    previous_threshold = previous.get("threshold")
-    if previous_threshold is not None and float(previous_threshold) != threshold:
-        raise ValueError("resume checkpoint gradient-guard threshold changed")
-    previous_limit = previous.get("consecutive_skip_limit")
-    if previous_limit is not None and int(previous_limit) != consecutive_skip_limit:
-        raise ValueError(
-            "resume checkpoint gradient-guard consecutive-skip limit changed"
-        )
-    state.update(
-        {
-            "gradient_guard_threshold": threshold,
-            "gradient_guard_skipped_steps": int(previous.get("skipped_steps", 0)),
-            "gradient_guard_finite_spike_skipped_steps": int(
-                previous.get("finite_spike_skipped_steps", 0)
-            ),
-            "gradient_guard_nonfinite_skipped_steps": int(
-                previous.get("nonfinite_skipped_steps", 0)
-            ),
-            "gradient_guard_consecutive_skips": 0,
-            "gradient_guard_max_consecutive_skips": int(
-                previous.get("max_consecutive_skips", 0)
-            ),
-            "gradient_guard_consecutive_skip_limit": consecutive_skip_limit,
-            "gradient_guard_last_completed_epoch": previous.get("last_completed_epoch"),
-            "gradient_guard_events": list(previous.get("events", []))[
-                :FORMAL_GRADIENT_GUARD_MAX_RECORDED_EVENTS
-            ],
-        }
+    for key in direct:
+        state[key] = int(summary[key])
+    count = int(summary["gradient_norm_count"])
+    state["gradient_norm_count"] = count
+    for prefix, summary_prefix in (
+        ("gradient_norm", "gradient_l2_norm"),
+        ("local_word_proj_gradient_norm", "local_word_proj_gradient_l2_norm"),
+    ):
+        mean = summary[f"{summary_prefix}_mean"]
+        state[f"{prefix}_sum"] = 0.0 if mean is None else float(mean) * count
+        state[f"{prefix}_max"] = float(summary[f"{summary_prefix}_max"] or 0.0)
+        state[f"{prefix}_last"] = float(summary[f"{summary_prefix}_last"] or 0.0)
+    clip_count = int(summary["clip_coefficient_count"])
+    state["clip_coefficient_count"] = clip_count
+    clip_mean = summary.get("clip_coefficient_mean")
+    state["clip_coefficient_sum"] = (
+        0.0 if clip_mean is None else float(clip_mean) * clip_count
     )
+    state["clip_coefficient_min"] = float(summary.get("clip_coefficient_min") or 1.0)
+    state["clip_coefficient_last"] = float(summary.get("clip_coefficient_last") or 1.0)
+    state["parameter_relative_change_by_step"] = dict(
+        summary.get("parameter_relative_change_by_step", {})
+    )
+    guard = summary.get("gradient_guard", {})
+    state["gradient_guard_skipped_steps"] = int(guard.get("skipped_steps", 0))
+    state["gradient_guard_finite_spike_skipped_steps"] = int(
+        guard.get("finite_spike_skipped_steps", 0)
+    )
+    state["gradient_guard_nonfinite_skipped_steps"] = int(
+        guard.get("nonfinite_skipped_steps", 0)
+    )
+    state["gradient_guard_consecutive_skips"] = int(guard.get("consecutive_skips", 0))
+    state["gradient_guard_max_consecutive_skips"] = int(
+        guard.get("max_consecutive_skips", 0)
+    )
+    state["gradient_guard_last_completed_epoch"] = guard.get("last_completed_epoch")
+    state["gradient_guard_events"] = list(guard.get("events", []))[
+        :FORMAL_GRADIENT_GUARD_MAX_RECORDED_EVENTS
+    ]
     return state
 
 
@@ -501,17 +570,25 @@ def _checkpoint_payload(
     optimizer,
     epoch: int,
     global_step: int,
+    micro_step: int,
+    optimizer_step: int,
     meta: dict,
     cumulative: Mapping[str, float],
-    successful_since_resume: Mapping[str, float],
+    successful: Mapping[str, float],
+    cumulative_local_scale: Mapping[str, float],
     last_completed_epoch_metrics: Mapping,
 ) -> dict:
     reference = fixed_hint_checkpoint_state(model.axis)
     if reference is None:
         raise RuntimeError("Treatment checkpoint cannot be saved without F0")
     return {
+        "schema_version": FORMAL_PROTOCOL_VERSION,
         "epoch": epoch,
+        # global_step is intentionally the deterministic optimizer-attempt
+        # window index. Unsafe windows remain attempts but never update state.
         "global_step": global_step,
+        "micro_step": micro_step,
+        "optimizer_step": optimizer_step,
         "model_state_dict": {
             "ts_pretrain_model": model.ts_pretrain_model.state_dict(),
             "moirai_trainable": model.axis.perceiver.state_dict(),
@@ -519,12 +596,44 @@ def _checkpoint_payload(
         },
         "optimizer_state_dict": optimizer.state_dict(),
         "reproduction_meta": meta,
-        # Retained for backward compatibility.  The formal metadata explicitly
-        # records that this legacy aggregate includes attempted guarded rows.
         "cumulative_training_metrics": dict(cumulative),
-        "successful_update_metrics_since_resume": dict(successful_since_resume),
+        "successful_training_metrics": dict(successful),
+        "cumulative_local_input_metrics": dict(cumulative_local_scale),
         "last_completed_epoch_training_metrics": dict(last_completed_epoch_metrics),
     }
+
+
+def validate_checkpoint_step_counters(payload: Mapping) -> dict:
+    """Cross-check persisted micro/attempt/update counters and guard totals."""
+    summary = payload.get("reproduction_meta", {}).get("optimization_diagnostics", {})
+    guard = summary.get("gradient_guard", {})
+    expected = {
+        "optimizer_attempts": int(payload.get("global_step", -1)),
+        "optimizer_steps_applied": int(payload.get("optimizer_step", -1)),
+        "micro_steps": int(payload.get("micro_step", -1)),
+        "skipped_windows": int(guard.get("skipped_steps", -1)),
+        "finite_spike_windows": int(guard.get("finite_spike_skipped_steps", -1)),
+        "nonfinite_windows": int(guard.get("nonfinite_skipped_steps", -1)),
+    }
+    for key, value in expected.items():
+        if int(summary.get(key, -2)) != value:
+            raise ValueError(f"checkpoint counter mismatch for {key}")
+    attempts = expected["optimizer_attempts"]
+    applied = expected["optimizer_steps_applied"]
+    skipped = expected["skipped_windows"]
+    if applied + skipped != attempts:
+        raise ValueError("applied plus skipped windows differs from attempts")
+    if int(summary.get("clip_coefficient_count", -1)) != applied:
+        raise ValueError("clip coefficient count differs from applied updates")
+    if (
+        int(summary.get("full_accumulation_windows", -1))
+        + int(summary.get("partial_accumulation_windows", -1))
+        != attempts
+    ):
+        raise ValueError("full plus partial accumulation windows differs from attempts")
+    if int(summary.get("gradient_norm_count", -1)) != attempts:
+        raise ValueError("checkpoint lacks a finite gradient norm for every attempt")
+    return expected
 
 
 def validate_resume_checkpoint(
@@ -533,45 +642,65 @@ def validate_resume_checkpoint(
     split_manifest_sha256: str,
     data_audit_sha256: str,
     phase1_sha256: str,
+    local_input_norm_mode: str,
+    local_input_rmsnorm_eps: float,
 ) -> dict:
     required = {
+        "schema_version",
         "epoch",
         "global_step",
+        "micro_step",
+        "optimizer_step",
         "model_state_dict",
         "optimizer_state_dict",
         "reproduction_meta",
         "cumulative_training_metrics",
+        "successful_training_metrics",
+        "cumulative_local_input_metrics",
+        "last_completed_epoch_training_metrics",
+        "rng_state_by_rank",
     }
     missing = sorted(required.difference(payload))
     if missing:
         raise ValueError(f"resume checkpoint is missing fields: {missing}")
+    if int(payload["schema_version"]) != FORMAL_PROTOCOL_VERSION:
+        raise ValueError("resume checkpoint predates the accumulation-v2 protocol")
     epoch = int(payload["epoch"])
-    step = int(payload["global_step"])
     if not 1 <= epoch < FORMAL_EPOCHS:
         raise ValueError("resume epoch must be a completed epoch in [1, 39]")
-    if step != expected_global_step_for_epoch(epoch):
-        raise ValueError("resume checkpoint is not at a complete epoch boundary")
+    if int(payload["global_step"]) != expected_global_step_for_epoch(epoch):
+        raise ValueError("resume optimizer-attempt step is not an epoch boundary")
+    if int(payload["micro_step"]) != expected_micro_step_for_epoch(epoch):
+        raise ValueError("resume micro-step is not an epoch boundary")
+
     meta = payload["reproduction_meta"]
-    expected_world = world_size_for_completed_epoch(epoch)
-    expected_steps_per_epoch = steps_per_epoch_for_completed_epoch(epoch)
-    expected_planned_steps = planned_steps_for_completed_epoch(epoch)
     expected = {
+        "schema_version": FORMAL_PROTOCOL_VERSION,
         "experiment": EXPERIMENT,
         "run_purpose": "formal",
         "objective": "treatment",
-        "world_size": expected_world,
+        "world_size": FORMAL_WORLD_SIZE,
         "epochs": FORMAL_EPOCHS,
-        "steps_per_rank_epoch": expected_steps_per_epoch,
-        "planned_steps": expected_planned_steps,
+        "micro_steps_per_rank_epoch": FORMAL_MICRO_STEPS_PER_EPOCH,
+        "optimizer_attempts_per_epoch": FORMAL_STEPS_PER_EPOCH,
+        "planned_steps": FORMAL_TOTAL_STEPS,
+        "planned_micro_steps": FORMAL_TOTAL_MICRO_STEPS,
         "seed": FORMAL_SEED,
         "segment_alpha": FORMAL_ALPHA,
         "lr": FORMAL_LR,
         "weight_decay": FORMAL_WEIGHT_DECAY,
         "max_grad_norm": FORMAL_MAX_GRAD_NORM,
+        "gradient_accumulation_steps": FORMAL_GRADIENT_ACCUMULATION_STEPS,
+        "global_batch_series": (FORMAL_ACCUMULATION_PLAN.full_global_batch_series),
         "prompt_protocol": SIMPLIFIED_FINAL_ANSWER_V1,
         "split_manifest_sha256": split_manifest_sha256,
         "data_audit_sha256": data_audit_sha256,
         "phase1_checkpoint_sha256": phase1_sha256,
+        "lr_schedule": {"epochs_1_40": FORMAL_LR},
+        "local_input_normalization": local_input_normalization_policy(
+            local_input_norm_mode,
+            local_input_rmsnorm_eps,
+        ),
     }
     for key, value in expected.items():
         if meta.get(key) != value:
@@ -581,30 +710,32 @@ def validate_resume_checkpoint(
             )
     if meta.get("source_dirty") is not False:
         raise ValueError("resume checkpoint was produced from a dirty source tree")
-    if epoch >= RESUMED_FIVE_GPU_FIRST_EPOCH:
-        stability = meta.get("numerical_stability", {})
-        if stability.get("gradient_skip_threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
-            raise ValueError("resume checkpoint gradient-guard threshold changed")
-        if stability.get("unsafe_updates_applied") is not False:
-            raise ValueError("resume checkpoint does not prove safe updates")
-        guard = meta.get("optimization_diagnostics", {}).get("gradient_guard", {})
-        if guard.get("threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
-            raise ValueError("resume checkpoint lacks gradient-guard audit")
-        if epoch >= FORMAL_LR_SWITCH_EPOCH:
-            validate_formal_completed_epoch_guard(meta, epoch)
-    if epoch >= FORMAL_LR_SWITCH_EPOCH:
-        expected_lr_schedule = {
-            "epochs_1_4": FORMAL_LR,
-            "epochs_5_40": FORMAL_EPOCH5_LR,
-        }
-        if meta.get("lr_schedule") != expected_lr_schedule:
-            raise ValueError("resume checkpoint has the wrong LR schedule")
-        if meta.get("epoch5_lr") != FORMAL_EPOCH5_LR:
-            raise ValueError("resume checkpoint epoch-5 LR changed")
+    if meta.get("gradient_accumulation", {}).get("plan") != (
+        FORMAL_ACCUMULATION_PLAN.to_dict()
+    ):
+        raise ValueError("resume checkpoint accumulation plan changed")
+    stability = meta.get("numerical_stability", {})
+    if stability.get("gradient_skip_threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
+        raise ValueError("resume checkpoint gradient-guard threshold changed")
+    if stability.get("unsafe_updates_applied") is not False:
+        raise ValueError("resume checkpoint does not prove fail-closed updates")
+    validate_formal_completed_epoch_guard(meta, epoch)
+    guard = meta["optimization_diagnostics"]["gradient_guard"]
+    validate_checkpoint_step_counters(payload)
+    expected_optimizer_steps = int(payload["global_step"]) - int(guard["skipped_steps"])
+    if int(payload["optimizer_step"]) != expected_optimizer_steps:
+        raise ValueError("resume optimizer-step count disagrees with skipped windows")
+    rank_rng = payload["rng_state_by_rank"]
+    if not isinstance(rank_rng, list) or len(rank_rng) != FORMAL_WORLD_SIZE:
+        raise ValueError("resume checkpoint lacks one RNG state per DDP rank")
     if "fixed_hint_reference" not in payload["model_state_dict"]:
         raise ValueError("resume Treatment checkpoint has no cached F0")
-    if set(METRIC_KEYS).difference(payload["cumulative_training_metrics"]):
-        raise ValueError("resume checkpoint lacks cumulative metrics")
+    for key in ("cumulative_training_metrics", "successful_training_metrics"):
+        if set(METRIC_KEYS).difference(payload[key]):
+            raise ValueError(f"resume checkpoint lacks {key}")
+    scale_keys = set(LOCAL_INPUT_SUM_METRIC_KEYS + LOCAL_INPUT_MAX_METRIC_KEYS)
+    if scale_keys.difference(payload["cumulative_local_input_metrics"]):
+        raise ValueError("resume checkpoint lacks local-input scale metrics")
     return dict(meta)
 
 
@@ -622,10 +753,24 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--epochs", type=int, default=FORMAL_EPOCHS)
     result.add_argument("--seed", type=int, default=FORMAL_SEED)
     result.add_argument("--lr", type=float, default=FORMAL_LR)
-    result.add_argument("--epoch5-lr", type=float, default=FORMAL_EPOCH5_LR)
     result.add_argument("--weight-decay", type=float, default=FORMAL_WEIGHT_DECAY)
     result.add_argument("--alpha", type=float, default=FORMAL_ALPHA)
     result.add_argument("--max-grad-norm", type=float, default=FORMAL_MAX_GRAD_NORM)
+    result.add_argument(
+        "--gradient-accumulation-steps",
+        type=int,
+        default=FORMAL_GRADIENT_ACCUMULATION_STEPS,
+    )
+    result.add_argument(
+        "--local-input-norm",
+        choices=sorted(LOCAL_INPUT_NORM_MODES),
+        default=LOCAL_INPUT_NORM_NONE,
+    )
+    result.add_argument(
+        "--local-input-rmsnorm-eps",
+        type=float,
+        default=DEFAULT_LOCAL_INPUT_RMSNORM_EPS,
+    )
     result.add_argument("--num-workers", type=int, default=2)
     result.add_argument("--loss-chunk-size", type=int, default=64)
     result.add_argument("--expected-excluded", type=int, default=13)
@@ -639,22 +784,39 @@ def parser() -> argparse.ArgumentParser:
         type=int,
         default=FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS,
     )
-    result.add_argument("--log-every", type=int, default=50)
+    result.add_argument("--log-every", type=int, default=10)
     result.add_argument("--resume-from")
-    result.add_argument("--max-steps", type=int)
+    result.add_argument(
+        "--max-steps",
+        type=int,
+        help="Smoke-only maximum optimizer-attempt windows, not microbatches.",
+    )
     return result
 
 
 def _validate_args(args, world: int) -> None:
+    if args.gradient_accumulation_steps <= 0:
+        raise ValueError("gradient accumulation steps must be positive")
+    local_input_normalization_policy(
+        args.local_input_norm,
+        args.local_input_rmsnorm_eps,
+    )
     locked = {
-        "world_size": (world, RESUMED_WORLD_SIZE),
+        "world_size": (world, FORMAL_WORLD_SIZE),
         "epochs": (args.epochs, FORMAL_EPOCHS),
         "seed": (args.seed, FORMAL_SEED),
         "lr": (args.lr, FORMAL_LR),
-        "epoch5_lr": (args.epoch5_lr, FORMAL_EPOCH5_LR),
         "weight_decay": (args.weight_decay, FORMAL_WEIGHT_DECAY),
         "alpha": (args.alpha, FORMAL_ALPHA),
         "max_grad_norm": (args.max_grad_norm, FORMAL_MAX_GRAD_NORM),
+        "gradient_accumulation_steps": (
+            args.gradient_accumulation_steps,
+            FORMAL_GRADIENT_ACCUMULATION_STEPS,
+        ),
+        "local_input_rmsnorm_eps": (
+            args.local_input_rmsnorm_eps,
+            DEFAULT_LOCAL_INPUT_RMSNORM_EPS,
+        ),
         "gradient_skip_threshold": (
             args.gradient_skip_threshold,
             FORMAL_GRADIENT_SKIP_THRESHOLD,
@@ -676,12 +838,143 @@ def _validate_args(args, world: int) -> None:
             )
         if args.max_steps is not None:
             raise ValueError("formal training forbids --max-steps")
-        if args.resume_from is None:
-            raise ValueError(
-                "formal 5-GPU recovery requires a complete-epoch --resume-from"
-            )
     elif args.max_steps is None or args.max_steps <= 0:
         raise ValueError("smoke training requires a positive --max-steps")
+
+
+def _phase2_summary(values: Mapping[str, float]) -> dict:
+    """Expose the paper wording while preserving the historical key."""
+    result = _summary(values)
+    result["evidence_nll"] = result["explanation_nll"]
+    return result
+
+
+def _empty_metric_totals(keys: Sequence[str]) -> dict[str, float]:
+    return {key: 0.0 for key in keys}
+
+
+def _empty_local_scale_totals() -> dict[str, float]:
+    return {
+        **_empty_metric_totals(LOCAL_INPUT_SUM_METRIC_KEYS),
+        **_empty_metric_totals(LOCAL_INPUT_MAX_METRIC_KEYS),
+    }
+
+
+def _add_local_scale_totals(
+    target: dict[str, float],
+    source: Mapping[str, float],
+) -> None:
+    for key in LOCAL_INPUT_SUM_METRIC_KEYS:
+        target[key] += float(source[key])
+    for key in LOCAL_INPUT_MAX_METRIC_KEYS:
+        target[key] = max(target[key], float(source[key]))
+
+
+def _single_window_numerics(
+    *,
+    window_size: int,
+    accumulation_steps: int,
+    gradient_norm: float,
+    local_word_proj_gradient_norm: float,
+    reason: str,
+    max_grad_norm: float,
+) -> dict[str, float]:
+    result = new_window_numerical_totals()
+    result["optimizer_attempts"] = 1
+    result["micro_steps"] = window_size
+    if window_size == accumulation_steps:
+        result["full_accumulation_windows"] = 1
+    else:
+        result["partial_accumulation_windows"] = 1
+    if math.isfinite(gradient_norm):
+        result["gradient_norm_count"] = 1
+        result["gradient_norm_sum"] = gradient_norm
+        result["gradient_norm_max"] = gradient_norm
+        result["gradient_norm_last"] = gradient_norm
+        result["local_word_proj_gradient_norm_sum"] = local_word_proj_gradient_norm
+        result["local_word_proj_gradient_norm_max"] = local_word_proj_gradient_norm
+        result["local_word_proj_gradient_norm_last"] = local_word_proj_gradient_norm
+    if reason == "safe":
+        coefficient = min(1.0, max_grad_norm / (gradient_norm + 1e-6))
+        result["optimizer_steps_applied"] = 1
+        result["clip_coefficient_count"] = 1
+        result["clip_coefficient_sum"] = coefficient
+        result["clip_coefficient_min"] = coefficient
+        result["clip_coefficient_last"] = coefficient
+        result["clipped_windows"] = int(gradient_norm > max_grad_norm)
+    else:
+        result["skipped_windows"] = 1
+        result["finite_spike_windows"] = int(reason == "finite_spike")
+        result["nonfinite_windows"] = int(reason == "nonfinite")
+    return result
+
+
+def _rank_rng_state(local_rank: int) -> dict:
+    return {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch_cpu": torch.get_rng_state(),
+        "torch_cuda": torch.cuda.get_rng_state(local_rank),
+    }
+
+
+def _restore_rank_rng_state(state: Mapping, local_rank: int) -> None:
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch_cpu"])
+    torch.cuda.set_rng_state(state["torch_cuda"], local_rank)
+
+
+def _global_window_valid_rows(window: Sequence[Mapping], device: int) -> float:
+    local_count = sum(
+        answer.strip() != ERROR_ANSWER
+        for batch in window
+        for answer in batch["answers"]
+    )
+    count = torch.tensor(float(local_count), device=device, dtype=torch.float64)
+    torch.distributed.all_reduce(count, op=torch.distributed.ReduceOp.SUM)
+    value = float(count.item())
+    if value <= 0:
+        raise RuntimeError("global accumulation window contains no usable QA rows")
+    return value
+
+
+def _all_reduce_window_outputs(
+    local_metrics: Mapping[str, torch.Tensor],
+) -> tuple[dict[str, float], dict[str, float]]:
+    metric_tensor = torch.stack(
+        [local_metrics[key].detach().to(torch.float64) for key in METRIC_KEYS]
+    )
+    torch.distributed.all_reduce(metric_tensor, op=torch.distributed.ReduceOp.SUM)
+    metric_values = dict(zip(METRIC_KEYS, metric_tensor.tolist()))
+    sums = torch.stack(
+        [
+            local_metrics[key].detach().to(torch.float64)
+            for key in LOCAL_INPUT_SUM_METRIC_KEYS
+        ]
+    )
+    torch.distributed.all_reduce(sums, op=torch.distributed.ReduceOp.SUM)
+    maxima = torch.stack(
+        [
+            local_metrics[key].detach().to(torch.float64)
+            for key in LOCAL_INPUT_MAX_METRIC_KEYS
+        ]
+    )
+    torch.distributed.all_reduce(maxima, op=torch.distributed.ReduceOp.MAX)
+    scale_values = dict(zip(LOCAL_INPUT_SUM_METRIC_KEYS, sums.tolist()))
+    scale_values.update(zip(LOCAL_INPUT_MAX_METRIC_KEYS, maxima.tolist()))
+    return metric_values, scale_values
+
+
+def _local_word_projection_gradient_norm(module) -> float:
+    parameters = [
+        parameter
+        for name, parameter in module.named_parameters()
+        if "local_word_proj" in name and parameter.requires_grad
+    ]
+    if not parameters:
+        raise RuntimeError("local_word_proj has no trainable parameters")
+    return float(_gradient_l2_norm(parameters).detach())
 
 
 def main() -> None:
@@ -693,10 +986,13 @@ def main() -> None:
     local_rank = int(os.environ["LOCAL_RANK"])
     _validate_args(args, world)
     torch.cuda.set_device(local_rank)
-    torch.distributed.init_process_group("nccl")
+    torch.distributed.init_process_group("nccl", timeout=timedelta(hours=6))
 
-    # Model/F0 initialization must be bit-identical on every rank.  Per-rank
-    # training RNG streams are installed only after DDP construction.
+    # Capture source identity before any output path can create untracked files.
+    source_dirty = bool(_git_value("status", "--porcelain"))
+    if args.run_purpose == "formal" and source_dirty:
+        raise RuntimeError("formal training requires a clean source worktree")
+
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -765,11 +1061,17 @@ def main() -> None:
             split_manifest_sha256=split_manifest_sha256,
             data_audit_sha256=data_audit_sha256,
             phase1_sha256=phase1_sha256,
+            local_input_norm_mode=args.local_input_norm,
+            local_input_rmsnorm_eps=args.local_input_rmsnorm_eps,
         )
         load_phase2_40epoch_checkpoint(base, args.resume_from)
         phase1_payload = {"epoch": None, "resume": True}
     else:
         phase1_payload = load_phase1_fresh_hint(base, args.phase1)
+        base.axis.perceiver.configure_local_input_normalization(
+            args.local_input_norm,
+            eps=args.local_input_rmsnorm_eps,
+        )
 
     trainable_before_f0 = freeze_for_phase2(base)
     install_fixed_hint_runtime(base.axis)
@@ -822,13 +1124,9 @@ def main() -> None:
         fixed_hint_meta["resume_hash_verified"] = True
 
     f0_hashes: list[str | None] = [None] * world
-    torch.distributed.all_gather_object(
-        f0_hashes,
-        _tensor_sha256(reference),
-    )
+    torch.distributed.all_gather_object(f0_hashes, _tensor_sha256(reference))
     if len(set(f0_hashes)) != 1:
         raise RuntimeError("step-zero cached F0 differs across DDP ranks")
-
     llm = base.axis.model
     llm.gradient_checkpointing_enable()
     llm.enable_input_require_grads()
@@ -865,26 +1163,37 @@ def main() -> None:
     )
     loader = DataLoader(
         dataset,
-        batch_size=1,
+        batch_size=FORMAL_MICRO_BATCH_SERIES_PER_RANK,
         sampler=sampler,
         num_workers=args.num_workers,
         pin_memory=True,
         persistent_workers=args.num_workers > 0,
         collate_fn=collate_fn,
     )
-    if args.run_purpose == "formal" and len(loader) != RESUMED_STEPS_PER_EPOCH:
+    active_plan = AccumulationPlan(
+        world_size=world,
+        micro_batch_series_per_rank=FORMAL_MICRO_BATCH_SERIES_PER_RANK,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        micro_steps_per_epoch=len(loader),
+    )
+    if args.run_purpose == "formal" and active_plan != FORMAL_ACCUMULATION_PLAN:
         raise RuntimeError(
-            f"formal training expected {RESUMED_STEPS_PER_EPOCH} batches per "
-            f"epoch, got {len(loader)}"
+            "formal DataLoader/accumulation plan differs from the frozen protocol"
         )
-    planned_steps = FORMAL_TOTAL_STEPS
-    source_dirty = bool(_git_value("status", "--porcelain"))
-    if args.run_purpose == "formal" and source_dirty:
-        raise RuntimeError("formal training requires a clean source worktree")
 
+    arm = (
+        "accumulation_only"
+        if args.local_input_norm == LOCAL_INPUT_NORM_NONE
+        else "accumulation_plus_rmsnorm"
+    )
+    local_norm_policy = local_input_normalization_policy(
+        args.local_input_norm,
+        args.local_input_rmsnorm_eps,
+    )
     meta = {
-        "schema_version": 1,
+        "schema_version": FORMAL_PROTOCOL_VERSION,
         "experiment": EXPERIMENT,
+        "experiment_arm": arm,
         "objective": "treatment",
         "source_branch": _git_value("branch", "--show-current"),
         "source_commit": _git_value("rev-parse", "HEAD"),
@@ -896,46 +1205,44 @@ def main() -> None:
         "phase1_checkpoint_epoch": phase1_payload.get("epoch"),
         "phase2_initialization": "fresh_seed72_before_ddp",
         "world_size": world,
-        "micro_batch_series_per_rank": 1,
-        "gradient_accumulation_steps": 1,
-        "global_batch_series": world,
+        "micro_batch_series_per_rank": FORMAL_MICRO_BATCH_SERIES_PER_RANK,
+        "gradient_accumulation_steps": args.gradient_accumulation_steps,
+        "global_batch_series": active_plan.full_global_batch_series,
+        "gradient_accumulation": {
+            "plan": active_plan.to_dict(),
+            "loss_reduction": "exact_global_usable_QA_row_mean",
+            "ddp_scaling": ("local_objective_sum_times_world_over_global_valid_rows"),
+            "no_sync": "all_nonfinal_microbatches_in_each_window",
+            "operation_order": [
+                "accumulate",
+                "global_mean",
+                "gradient_guard",
+                "clip",
+                "optimizer_step",
+            ],
+            "learning_rate_divided_by_accumulation": False,
+        },
         "author_deepspeed_reference": {
+            "world_size": 4,
             "gradient_accumulation_steps": 32,
+            "global_batch_series": 128,
             "gradient_clipping": 1.0,
             "configuration_file": "experiments/configs/deepspeed_config.json",
         },
-        "cumulative_training_metrics_semantics": "attempted batches",
-        "world_size_schedule": {
-            "epoch_1": LEGACY_WORLD_SIZE,
-            "epochs_2_3": FOUR_GPU_WORLD_SIZE,
-            "epochs_4_40": RESUMED_WORLD_SIZE,
-        },
-        "qa_rows_per_series": 2,
         "epochs": args.epochs,
-        "steps_per_rank_epoch": len(loader),
-        "planned_steps": planned_steps,
-        "optimizer_step_schedule": {
-            "epoch_1": LEGACY_STEPS_PER_EPOCH,
-            "epochs_2_3": FORMAL_STEPS_PER_EPOCH,
-            "epochs_4_40": RESUMED_STEPS_PER_EPOCH,
-            "total": FORMAL_TOTAL_STEPS,
-        },
-        "migration": {
-            "policy": "complete_epoch_boundary_only",
-            "completed_5gpu_epochs": MIGRATION_COMPLETED_EPOCH,
-            "completed_4gpu_epochs": FOUR_GPU_LAST_EPOCH - FOUR_GPU_FIRST_EPOCH + 1,
-            "resumed_5gpu_epochs": FORMAL_EPOCHS - RESUMED_FIVE_GPU_FIRST_EPOCH + 1,
-            "partial_epoch_2_steps_discarded": 1_050,
-            "reason": "user restored five-GPU training after epoch-3 boundary",
+        "micro_steps_per_rank_epoch": len(loader),
+        "optimizer_attempts_per_epoch": active_plan.optimizer_attempts_per_epoch,
+        "planned_steps": FORMAL_TOTAL_STEPS,
+        "planned_micro_steps": FORMAL_TOTAL_MICRO_STEPS,
+        "step_semantics": {
+            "global_step": "optimizer_attempt_window",
+            "micro_step": "per_rank_microbatch",
+            "optimizer_step": "successfully_applied_AdamW_update",
         },
         "checkpoint_schedule": "every_complete_epoch",
         "declared_candidate_epochs": list(range(1, args.epochs + 1)),
         "lr": args.lr,
-        "epoch5_lr": args.epoch5_lr,
-        "lr_schedule": {
-            "epochs_1_4": args.lr,
-            "epochs_5_40": args.epoch5_lr,
-        },
+        "lr_schedule": {"epochs_1_40": args.lr},
         "weight_decay": args.weight_decay,
         "optimizer": "torch.optim.AdamW",
         "optimizer_betas": list(optimizer.param_groups[0]["betas"]),
@@ -943,12 +1250,21 @@ def main() -> None:
         "max_grad_norm": args.max_grad_norm,
         "numerical_stability": {
             "perceiver_wide_operations": "FP32 under BF16 outer autocast",
-            "gradient_guard_scope": "synchronized across all DDP ranks",
+            "gradient_guard_scope": ("once_after_each_complete_accumulation_window"),
             "gradient_skip_threshold": args.gradient_skip_threshold,
             "max_consecutive_gradient_skips": (args.max_consecutive_gradient_skips),
             "fail_fast_policy": formal_gradient_guard_policy(),
             "unsafe_updates_applied": False,
+            "bf16_grad_scaler": False,
         },
+        "local_input_normalization": local_norm_policy,
+        "recorded_activation_metrics": [
+            "local_input_raw_rms",
+            "local_input_raw_abs_max",
+            "local_input_post_normalization_rms",
+            "local_input_post_normalization_abs_max",
+        ],
+        "qk_activation_metrics_recorded": False,
         "precision": "BF16 for all 40 epochs",
         "frozen_llm_storage_dtype": "torch.bfloat16",
         "autocast_dtype": "torch.bfloat16",
@@ -1010,133 +1326,151 @@ def main() -> None:
             "checkpoint_sha256": sha256_file(args.resume_from),
             "checkpoint_epoch": int(resume_payload["epoch"]),
             "checkpoint_global_step": int(resume_payload["global_step"]),
+            "checkpoint_micro_step": int(resume_payload["micro_step"]),
+            "checkpoint_optimizer_step": int(resume_payload["optimizer_step"]),
             "optimizer_state_restored": True,
-            "source_world_size": resume_meta["world_size"],
-            "active_world_size": world,
+            "rng_state_restored_by_rank": True,
             "cumulative_metrics_restored": True,
-            "mid_epoch_batches_skipped": 0,
+            "mid_epoch_microbatches_skipped": 0,
         }
     if rank == 0:
         _write_json_atomic(output / "run_manifest.json", meta)
         print(json.dumps(meta, ensure_ascii=False), flush=True)
 
     if resume_payload is None:
-        cumulative = {key: 0.0 for key in METRIC_KEYS}
-        optimization = {
-            "gradient_norm_count": 0,
-            "gradient_norm_sum": 0.0,
-            "gradient_norm_max": 0.0,
-            "gradient_norm_last": None,
-            "nonfinite_gradient_steps": 0,
-            "clipped_steps": 0,
-            "max_grad_norm": args.max_grad_norm,
-            "parameter_relative_change_by_step": {},
-            "gradient_guard_threshold": args.gradient_skip_threshold,
-            "gradient_guard_skipped_steps": 0,
-            "gradient_guard_finite_spike_skipped_steps": 0,
-            "gradient_guard_nonfinite_skipped_steps": 0,
-            "gradient_guard_consecutive_skips": 0,
-            "gradient_guard_max_consecutive_skips": 0,
-            "gradient_guard_consecutive_skip_limit": (
-                args.max_consecutive_gradient_skips
-            ),
-            "gradient_guard_last_completed_epoch": None,
-            "gradient_guard_events": [],
-        }
+        cumulative = _empty_metric_totals(METRIC_KEYS)
+        successful = _empty_metric_totals(METRIC_KEYS)
+        cumulative_local_scale = _empty_local_scale_totals()
+        optimization = _new_optimization_state(args.max_grad_norm)
         global_step = 0
+        micro_step = 0
+        optimizer_step = 0
         start_epoch = 1
+        random.seed(args.seed + rank)
+        np.random.seed(args.seed + rank)
+        torch.manual_seed(args.seed + rank)
+        torch.cuda.manual_seed_all(args.seed + rank)
     else:
         cumulative = {
             key: float(resume_payload["cumulative_training_metrics"][key])
             for key in METRIC_KEYS
         }
-        optimization = _restore_optimization_with_guard(
+        successful = {
+            key: float(resume_payload["successful_training_metrics"][key])
+            for key in METRIC_KEYS
+        }
+        cumulative_local_scale = {
+            key: float(resume_payload["cumulative_local_input_metrics"][key])
+            for key in LOCAL_INPUT_SUM_METRIC_KEYS + LOCAL_INPUT_MAX_METRIC_KEYS
+        }
+        optimization = _restore_optimization_state(
             resume_meta["optimization_diagnostics"],
-            expected_max_grad_norm=args.max_grad_norm,
-            threshold=args.gradient_skip_threshold,
-            consecutive_skip_limit=args.max_consecutive_gradient_skips,
+            args.max_grad_norm,
         )
         global_step = int(resume_payload["global_step"])
+        micro_step = int(resume_payload["micro_step"])
+        optimizer_step = int(resume_payload["optimizer_step"])
         start_epoch = int(resume_payload["epoch"]) + 1
+        rank_states = resume_payload.get("rng_state_by_rank")
+        if not isinstance(rank_states, list) or len(rank_states) != world:
+            raise ValueError("resume checkpoint lacks one RNG state per DDP rank")
+        _restore_rank_rng_state(rank_states[rank], local_rank)
 
-    successful_since_resume = {key: 0.0 for key in METRIC_KEYS}
-    meta["successful_update_metrics_since_resume_origin_step"] = global_step
-
-    # Independent rank RNG streams are appropriate after identical model/F0
-    # initialization has been verified.
-    random.seed(args.seed + rank)
-    np.random.seed(args.seed + rank)
-    torch.manual_seed(args.seed + rank)
-    torch.cuda.manual_seed_all(args.seed + rank)
-
-    process_start_step = global_step
+    process_start_global_step = global_step
+    process_start_micro_step = micro_step
     start_time = time.perf_counter()
     timed_start = None
     timed_step_origin = global_step
     stopped_early = False
     completed_epoch = start_epoch - 1
+
     for epoch in range(start_epoch, args.epochs + 1):
-        active_lr = learning_rate_for_epoch(
-            epoch,
-            initial_lr=args.lr,
-            epoch5_lr=args.epoch5_lr,
-        )
         for parameter_group in optimizer.param_groups:
-            parameter_group["lr"] = active_lr
+            parameter_group["lr"] = learning_rate_for_epoch(
+                epoch,
+                initial_lr=args.lr,
+            )
         sampler.set_epoch(epoch)
         ddp.train()
         ddp.module.base.ts_pretrain_model.eval()
         ddp.module.base.axis.model.train()
-        batches_completed = 0
         epoch_guard = new_formal_gradient_guard_tracker()
-        epoch_attempted_metrics = {key: 0.0 for key in METRIC_KEYS}
-        epoch_successful_metrics = {key: 0.0 for key in METRIC_KEYS}
-        for batch_index, batch in enumerate(loader, start=1):
+        epoch_attempted = _empty_metric_totals(METRIC_KEYS)
+        epoch_successful = _empty_metric_totals(METRIC_KEYS)
+        epoch_local_scale = _empty_local_scale_totals()
+        epoch_numerics = new_window_numerical_totals()
+        microbatches_completed = 0
+
+        for window_index, window in enumerate(
+            iter_accumulation_windows(loader, args.gradient_accumulation_steps),
+            start=1,
+        ):
             optimizer.zero_grad(set_to_none=True)
-            time_series = batch["padded_sequences"].to(
-                local_rank,
-                dtype=torch.float32,
-                non_blocking=True,
+            declared_global_rows = _global_window_valid_rows(window, local_rank)
+            loss_multiplier = ddp_window_loss_multiplier(
+                world_size=world,
+                global_valid_rows=declared_global_rows,
             )
-            attention_masks = batch["attention_masks"].to(
-                local_rank,
-                non_blocking=True,
-            )
-            valid_rows = [answer.strip() != ERROR_ANSWER for answer in batch["answers"]]
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                outputs = ddp(
-                    time_series,
-                    attention_masks,
-                    batch["questions"],
-                    batch["answers"],
-                    batch["start_indices"],
-                    batch["end_indices"],
-                    batch["question_types"],
-                    valid_rows,
+            local_outputs = {
+                key: torch.zeros((), device=local_rank, dtype=torch.float64)
+                for key in (
+                    METRIC_KEYS
+                    + LOCAL_INPUT_SUM_METRIC_KEYS
+                    + LOCAL_INPUT_MAX_METRIC_KEYS
                 )
-            packed = torch.stack(
-                [outputs[key].detach().to(torch.float64) for key in METRIC_KEYS]
+            }
+            for micro_index, batch in enumerate(window):
+                final_microbatch = micro_index == len(window) - 1
+                sync_context = nullcontext() if final_microbatch else ddp.no_sync()
+                time_series = batch["padded_sequences"].to(
+                    local_rank,
+                    dtype=torch.float32,
+                    non_blocking=True,
+                )
+                attention_masks = batch["attention_masks"].to(
+                    local_rank,
+                    non_blocking=True,
+                )
+                valid_rows = [
+                    answer.strip() != ERROR_ANSWER for answer in batch["answers"]
+                ]
+                with sync_context:
+                    with torch.autocast("cuda", dtype=torch.bfloat16):
+                        outputs = ddp(
+                            time_series,
+                            attention_masks,
+                            batch["questions"],
+                            batch["answers"],
+                            batch["start_indices"],
+                            batch["end_indices"],
+                            batch["question_types"],
+                            valid_rows,
+                        )
+                    (outputs["objective_sum"] * loss_multiplier).backward()
+                for key in METRIC_KEYS + LOCAL_INPUT_SUM_METRIC_KEYS:
+                    local_outputs[key] += outputs[key].detach().to(torch.float64)
+                for key in LOCAL_INPUT_MAX_METRIC_KEYS:
+                    local_outputs[key] = torch.maximum(
+                        local_outputs[key],
+                        outputs[key].detach().to(torch.float64),
+                    )
+
+            window_metrics, window_local_scale = _all_reduce_window_outputs(
+                local_outputs
             )
-            torch.distributed.all_reduce(
-                packed,
-                op=torch.distributed.ReduceOp.SUM,
+            validate_accumulated_objective_denominator(
+                declared_global_valid_rows=declared_global_rows,
+                observed_global_objective_count=window_metrics["objective_count"],
             )
-            denominator = packed[METRIC_KEYS.index("objective_count")]
-            if denominator.item() <= 0:
-                raise RuntimeError("global DDP batch contains no usable QA rows")
-            loss = outputs["objective_sum"] * world / denominator
-            loss.backward()
-            gradient_norm_tensor = _gradient_l2_norm(ddp.parameters())
-            gradient_norm = float(gradient_norm_tensor.detach())
+            gradient_norm = float(_gradient_l2_norm(ddp.parameters()).detach())
+            local_word_gradient_norm = _local_word_projection_gradient_norm(ddp.module)
             local_decision = decide_gradient_step(
                 gradient_norm,
                 threshold=args.gradient_skip_threshold,
             )
-            reason_code = {
-                "safe": 0,
-                "finite_spike": 1,
-                "nonfinite": 2,
-            }[local_decision.reason]
+            reason_code = {"safe": 0, "finite_spike": 1, "nonfinite": 2}[
+                local_decision.reason
+            ]
             synchronized_reason = torch.tensor(
                 reason_code,
                 device=local_rank,
@@ -1146,32 +1480,25 @@ def main() -> None:
                 synchronized_reason,
                 op=torch.distributed.ReduceOp.MAX,
             )
-            reason_code = int(synchronized_reason.item())
-            reason = {0: "safe", 1: "finite_spike", 2: "nonfinite"}[reason_code]
-            packed_values = packed.tolist()
-            step_metric_values = dict(zip(METRIC_KEYS, packed_values))
-            for key, value in step_metric_values.items():
-                epoch_attempted_metrics[key] += value
-
-            if math.isfinite(gradient_norm):
-                optimization["gradient_norm_count"] += 1
-                optimization["gradient_norm_sum"] += gradient_norm
-                optimization["gradient_norm_max"] = max(
-                    optimization["gradient_norm_max"],
-                    gradient_norm,
-                )
-                optimization["gradient_norm_last"] = gradient_norm
-                if gradient_norm > args.max_grad_norm:
-                    optimization["clipped_steps"] += 1
-            else:
-                optimization["nonfinite_gradient_steps"] += 1
-
-            guarded = reason_code != 0
+            reason = {0: "safe", 1: "finite_spike", 2: "nonfinite"}[
+                int(synchronized_reason.item())
+            ]
+            skipped = reason != "safe"
             fail_fast = epoch_guard.observe(
-                skipped=guarded,
+                skipped=skipped,
                 gradient_reason=reason,
             )
-            if guarded:
+            window_numerics = _single_window_numerics(
+                window_size=len(window),
+                accumulation_steps=args.gradient_accumulation_steps,
+                gradient_norm=gradient_norm,
+                local_word_proj_gradient_norm=local_word_gradient_norm,
+                reason=reason,
+                max_grad_norm=args.max_grad_norm,
+            )
+            add_numeric_totals(epoch_numerics, window_numerics)
+            add_numeric_totals(optimization, window_numerics)
+            if skipped:
                 optimization["gradient_guard_skipped_steps"] += 1
                 if reason == "nonfinite":
                     optimization["gradient_guard_nonfinite_skipped_steps"] += 1
@@ -1182,49 +1509,64 @@ def main() -> None:
                     optimization["gradient_guard_max_consecutive_skips"],
                     optimization["gradient_guard_consecutive_skips"],
                 )
+            else:
+                optimization["gradient_guard_consecutive_skips"] = 0
 
+            global_step += 1
+            micro_step += len(window)
+            microbatches_completed += len(window)
+            for key, value in window_metrics.items():
+                cumulative[key] += value
+                epoch_attempted[key] += value
+            _add_local_scale_totals(cumulative_local_scale, window_local_scale)
+            _add_local_scale_totals(epoch_local_scale, window_local_scale)
+            absolute_finite_spikes = int(optimization["finite_spike_windows"])
+            explicit_abort_reason = None
+            if reason == "nonfinite":
+                explicit_abort_reason = "nonfinite_gradient"
+            elif absolute_finite_spikes >= FORMAL_FINITE_SPIKE_ABORT_COUNT:
+                explicit_abort_reason = "second_finite_gradient_spike"
+            elif fail_fast.should_abort:
+                explicit_abort_reason = fail_fast.reason
+
+            if skipped:
                 has_record_slot = (
                     len(optimization["gradient_guard_events"])
                     < FORMAL_GRADIENT_GUARD_MAX_RECORDED_EVENTS
                 )
-                should_diagnose = rank == 0 and (
-                    has_record_slot or fail_fast.should_abort
-                )
                 diagnostics = (
-                    top_gradient_diagnostics(
-                        ddp.module.named_parameters(),
-                        limit=8,
-                    )
-                    if should_diagnose
+                    top_gradient_diagnostics(ddp.module.named_parameters(), limit=8)
+                    if rank == 0 and (has_record_slot or explicit_abort_reason)
                     else []
                 )
                 event = {
-                    "step": global_step + 1,
+                    "optimizer_attempt_step": global_step,
+                    "micro_step": micro_step,
                     "epoch": epoch,
-                    "step_in_epoch": (
-                        global_step + 1 - expected_global_step_for_epoch(epoch - 1)
-                    ),
+                    "window_in_epoch": window_index,
                     "reason": reason,
                     "gradient_norm": (
                         gradient_norm if math.isfinite(gradient_norm) else None
                     ),
+                    "local_word_proj_gradient_norm": (
+                        local_word_gradient_norm
+                        if math.isfinite(local_word_gradient_norm)
+                        else None
+                    ),
+                    "accumulated_microbatches": len(window),
+                    "declared_global_valid_rows": declared_global_rows,
                     "diagnostics": diagnostics,
                 }
                 if rank == 0 and has_record_slot:
                     optimization["gradient_guard_events"].append(event)
-                skipped = optimization["gradient_guard_skipped_steps"]
-                if rank == 0 and (skipped <= 10 or skipped % 50 == 0):
-                    print(
-                        json.dumps({"event": "gradient_guard_skip", **event}),
-                        flush=True,
-                    )
                 optimizer.zero_grad(set_to_none=True)
-                if fail_fast.should_abort:
+                if explicit_abort_reason:
                     failure = {
-                        "schema_version": 1,
+                        "schema_version": FORMAL_PROTOCOL_VERSION,
                         "event": "gradient_guard_fail_fast",
-                        "reason": fail_fast.reason,
-                        "attempted_global_step": global_step + 1,
+                        "reason": explicit_abort_reason,
+                        "optimizer_attempt_step": global_step,
+                        "micro_step": micro_step,
                         "optimizer_state_applied": False,
                         "checkpoint_written": False,
                         "gradient_event": event,
@@ -1233,11 +1575,9 @@ def main() -> None:
                             epoch=epoch,
                             fail_fast_triggered=True,
                         ),
-                        "attempted_step_metrics": _summary(step_metric_values),
-                        "epoch_attempted_metrics": _summary(epoch_attempted_metrics),
-                        "epoch_successful_update_metrics": _summary(
-                            epoch_successful_metrics
-                        ),
+                        "window_metrics": _phase2_summary(window_metrics),
+                        "epoch_attempted_metrics": _phase2_summary(epoch_attempted),
+                        "epoch_successful_metrics": _phase2_summary(epoch_successful),
                     }
                     if rank == 0:
                         _write_json_atomic(
@@ -1245,9 +1585,9 @@ def main() -> None:
                             failure,
                         )
                     raise FloatingPointError(
-                        f"gradient guard fail-fast ({fail_fast.reason}) at "
-                        f"attempted step {global_step + 1}; unsafe optimizer "
-                        "state was not applied and no checkpoint was written"
+                        f"gradient guard fail-fast ({explicit_abort_reason}) at "
+                        f"optimizer attempt {global_step}; no unsafe update or "
+                        "checkpoint was written"
                     )
             else:
                 torch.nn.utils.clip_grad_norm_(
@@ -1255,53 +1595,55 @@ def main() -> None:
                     max_norm=args.max_grad_norm,
                 )
                 optimizer.step()
-                optimization["gradient_guard_consecutive_skips"] = 0
-                for key, value in step_metric_values.items():
-                    successful_since_resume[key] += value
-                    epoch_successful_metrics[key] += value
-            global_step += 1
-            batches_completed = batch_index
-            for key, value in step_metric_values.items():
-                cumulative[key] += value
+                optimizer_step += 1
+                for key, value in window_metrics.items():
+                    successful[key] += value
+                    epoch_successful[key] += value
 
-            if global_step == process_start_step + 10:
+            if global_step == process_start_global_step + 10:
                 timed_start = time.perf_counter()
                 timed_step_origin = global_step
             if rank == 0 and global_step % args.log_every == 0:
                 elapsed = time.perf_counter() - (timed_start or start_time)
                 measured_steps = max(1, global_step - timed_step_origin)
                 rate = measured_steps / elapsed
-                remaining = max(0, planned_steps - global_step) / rate
+                remaining = max(0, FORMAL_TOTAL_STEPS - global_step) / rate
                 print(
                     json.dumps(
                         {
-                            "step": global_step,
+                            "optimizer_attempt_step": global_step,
+                            "optimizer_step": optimizer_step,
+                            "micro_step": micro_step,
                             "epoch": epoch,
-                            "learning_rate": active_lr,
-                            "step_in_epoch": global_step
-                            - expected_global_step_for_epoch(epoch - 1),
-                            "optimizer_step_applied": not guarded,
-                            "step_metrics": _summary(step_metric_values),
-                            "cumulative_metrics": _summary(cumulative),
-                            "cumulative_metrics_semantics": (
-                                "attempted batches; guarded batches are not "
-                                "successful optimizer updates"
+                            "window_in_epoch": window_index,
+                            "learning_rate": args.lr,
+                            "window_microbatches": len(window),
+                            "window_global_valid_rows": declared_global_rows,
+                            "optimizer_step_applied": not skipped,
+                            "window_metrics": _phase2_summary(window_metrics),
+                            "cumulative_metrics": _phase2_summary(cumulative),
+                            "successful_update_metrics": _phase2_summary(successful),
+                            "epoch_attempted_metrics": _phase2_summary(epoch_attempted),
+                            "epoch_successful_metrics": _phase2_summary(
+                                epoch_successful
                             ),
-                            "successful_update_metrics_since_resume": _summary(
-                                successful_since_resume
+                            "local_input_scale": local_scale_summary(
+                                cumulative_local_scale
                             ),
-                            "epoch_attempted_metrics": _summary(
-                                epoch_attempted_metrics
+                            "epoch_local_input_scale": local_scale_summary(
+                                epoch_local_scale
                             ),
-                            "epoch_successful_update_metrics": _summary(
-                                epoch_successful_metrics
-                            ),
-                            "epoch_gradient_guard": epoch_guard.snapshot(),
                             "gradient_l2_norm_before_clip": (
                                 gradient_norm if math.isfinite(gradient_norm) else None
                             ),
+                            "local_word_proj_gradient_l2_norm_before_clip": (
+                                local_word_gradient_norm
+                                if math.isfinite(local_word_gradient_norm)
+                                else None
+                            ),
+                            "epoch_numerics": summarize_window_numerics(epoch_numerics),
                             "optimization": _guarded_optimization_summary(optimization),
-                            "steps_per_second_per_rank": rate,
+                            "optimizer_attempts_per_second": rate,
                             "estimated_remaining_hours": remaining / 3600,
                         }
                     ),
@@ -1311,9 +1653,7 @@ def main() -> None:
                 stopped_early = True
                 break
 
-        epoch_is_complete = batches_completed == len(loader)
-        completed_guard_audit = None
-        last_completed_epoch_metrics = None
+        epoch_is_complete = microbatches_completed == len(loader)
         if epoch_is_complete:
             completed_guard_audit = _completed_epoch_guard_audit(
                 epoch_guard,
@@ -1324,7 +1664,7 @@ def main() -> None:
                 validate_completed_epoch_guard_audit(
                     completed_guard_audit,
                     expected_epoch=epoch,
-                    expected_attempted_steps=len(loader),
+                    expected_attempted_steps=(active_plan.optimizer_attempts_per_epoch),
                     max_epoch_skip_rate=FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE,
                 )
             except ValueError as error:
@@ -1332,9 +1672,10 @@ def main() -> None:
                     _write_json_atomic(
                         output / "gradient_guard_checkpoint_rejected.json",
                         {
-                            "schema_version": 1,
+                            "schema_version": FORMAL_PROTOCOL_VERSION,
                             "epoch": epoch,
-                            "global_step": global_step,
+                            "optimizer_attempt_step": global_step,
+                            "micro_step": micro_step,
                             "reason": str(error),
                             "checkpoint_written": False,
                             "guard_audit": completed_guard_audit,
@@ -1344,13 +1685,25 @@ def main() -> None:
                     "completed epoch failed gradient-guard checkpoint gate"
                 ) from error
             optimization["gradient_guard_last_completed_epoch"] = completed_guard_audit
-            last_completed_epoch_metrics = {
-                "attempted": dict(epoch_attempted_metrics),
-                "successful_updates": dict(epoch_successful_metrics),
-                "attempted_summary": _summary(epoch_attempted_metrics),
-                "successful_update_summary": _summary(epoch_successful_metrics),
-            }
             completed_epoch = epoch
+            last_completed_epoch_metrics = {
+                "attempted": dict(epoch_attempted),
+                "successful": dict(epoch_successful),
+                "attempted_summary": _phase2_summary(epoch_attempted),
+                "successful_summary": _phase2_summary(epoch_successful),
+                "local_input": dict(epoch_local_scale),
+                "local_input_summary": local_scale_summary(epoch_local_scale),
+                "numerics": summarize_window_numerics(epoch_numerics),
+            }
+        else:
+            completed_guard_audit = None
+            last_completed_epoch_metrics = None
+        rank_rng_states: list[dict | None] = [None] * world
+        if epoch_is_complete:
+            torch.distributed.all_gather_object(
+                rank_rng_states,
+                _rank_rng_state(local_rank),
+            )
         torch.distributed.barrier()
         if rank == 0 and epoch_is_complete:
             if initial_perceiver is not None:
@@ -1369,29 +1722,30 @@ def main() -> None:
                 optimization
             )
             checkpoint_path = output / f"epoch_{epoch:02d}.pth"
-            save_atomic(
-                _checkpoint_payload(
-                    model=ddp.module.base,
-                    optimizer=optimizer,
-                    epoch=epoch,
-                    global_step=global_step,
-                    meta=meta,
-                    cumulative=cumulative,
-                    successful_since_resume=successful_since_resume,
-                    last_completed_epoch_metrics=(last_completed_epoch_metrics),
-                ),
-                checkpoint_path,
+            payload = _checkpoint_payload(
+                model=ddp.module.base,
+                optimizer=optimizer,
+                epoch=epoch,
+                global_step=global_step,
+                micro_step=micro_step,
+                optimizer_step=optimizer_step,
+                meta=meta,
+                cumulative=cumulative,
+                successful=successful,
+                cumulative_local_scale=cumulative_local_scale,
+                last_completed_epoch_metrics=last_completed_epoch_metrics,
             )
+            payload["rng_state_by_rank"] = rank_rng_states
+            save_atomic(payload, checkpoint_path)
             _write_json_atomic(
                 output / "latest_complete_epoch.json",
                 {
+                    "schema_version": FORMAL_PROTOCOL_VERSION,
                     "epoch": epoch,
-                    "global_step": global_step,
+                    "optimizer_attempt_step": global_step,
+                    "optimizer_step": optimizer_step,
+                    "micro_step": micro_step,
                     "gradient_guard": completed_guard_audit,
-                    "successful_optimizer_updates": (
-                        completed_guard_audit["epoch_attempted_steps"]
-                        - completed_guard_audit["epoch_skipped_steps"]
-                    ),
                     "checkpoint_file": checkpoint_path.name,
                     "checkpoint_sha256": sha256_file(checkpoint_path),
                 },
@@ -1400,12 +1754,14 @@ def main() -> None:
             _write_json_atomic(
                 output / "incomplete_smoke_stop.json",
                 {
+                    "schema_version": FORMAL_PROTOCOL_VERSION,
                     "epoch_in_progress": epoch,
-                    "batches_completed": batches_completed,
-                    "batches_expected": len(loader),
-                    "global_step": global_step,
+                    "microbatches_completed": microbatches_completed,
+                    "microbatches_expected": len(loader),
+                    "optimizer_attempt_step": global_step,
+                    "micro_step": micro_step,
                     "checkpoint_written": False,
-                    "reason": ("max_steps reached before the complete epoch boundary"),
+                    "reason": ("max_steps reached before a complete epoch boundary"),
                 },
             )
         torch.distributed.barrier()
@@ -1416,23 +1772,37 @@ def main() -> None:
     if rank == 0:
         meta["optimization_diagnostics"] = _guarded_optimization_summary(optimization)
         final = {
-            "schema_version": 1,
+            "schema_version": FORMAL_PROTOCOL_VERSION,
             "experiment": EXPERIMENT,
+            "experiment_arm": arm,
             "objective": "treatment",
             "world_size": world,
             "completed_epochs": completed_epoch,
-            "steps": global_step,
-            "planned_steps": planned_steps,
+            "optimizer_attempt_step": global_step,
+            "optimizer_step": optimizer_step,
+            "micro_step": micro_step,
+            "planned_optimizer_attempts": FORMAL_TOTAL_STEPS,
+            "planned_micro_steps": FORMAL_TOTAL_MICRO_STEPS,
             "formal_complete": (
                 not stopped_early
                 and completed_epoch == args.epochs
                 and global_step == FORMAL_TOTAL_STEPS
+                and micro_step == FORMAL_TOTAL_MICRO_STEPS
             ),
             "wall_seconds_this_process": elapsed,
-            "steps_executed_this_process": global_step - process_start_step,
-            "steps_per_second_per_rank": ((global_step - process_start_step) / elapsed),
-            "metrics": _summary(cumulative),
-            "raw_metric_sums": cumulative,
+            "optimizer_attempts_this_process": (
+                global_step - process_start_global_step
+            ),
+            "micro_steps_this_process": micro_step - process_start_micro_step,
+            "optimizer_attempts_per_second": (
+                (global_step - process_start_global_step) / elapsed
+            ),
+            "attempted_metrics": _phase2_summary(cumulative),
+            "successful_update_metrics": _phase2_summary(successful),
+            "raw_attempted_metric_sums": cumulative,
+            "raw_successful_metric_sums": successful,
+            "local_input_metrics": local_scale_summary(cumulative_local_scale),
+            "raw_local_input_metrics": cumulative_local_scale,
             "optimization_diagnostics": _guarded_optimization_summary(optimization),
         }
         _write_json_atomic(output / "training_summary.json", final)

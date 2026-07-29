@@ -6,6 +6,44 @@ from typing import Tuple, List, Optional, Dict, Any, Union
 from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaConfig, LlamaModel, LlamaTokenizer
 from src.models.AXIS.Pretrain_ts_encoder import TimeSeriesPretrainModel
 
+
+LOCAL_INPUT_NORM_NONE = "none"
+LOCAL_INPUT_NORM_RMSNORM = "rmsnorm"
+LOCAL_INPUT_NORM_MODES = frozenset(
+    {LOCAL_INPUT_NORM_NONE, LOCAL_INPUT_NORM_RMSNORM}
+)
+DEFAULT_LOCAL_INPUT_RMSNORM_EPS = 1e-6
+
+
+class NonAffineRMSNorm(nn.Module):
+    """Parameter-free, FP32 RMS normalization for the Phase-I/II interface."""
+
+    def __init__(
+        self,
+        normalized_shape: int,
+        eps: float = DEFAULT_LOCAL_INPUT_RMSNORM_EPS,
+    ) -> None:
+        super().__init__()
+        if normalized_shape <= 0:
+            raise ValueError("RMSNorm normalized_shape must be positive")
+        if not math.isfinite(eps) or eps <= 0:
+            raise ValueError("RMSNorm eps must be finite and positive")
+        self.normalized_shape = int(normalized_shape)
+        self.eps = float(eps)
+
+    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        if inputs.size(-1) != self.normalized_shape:
+            raise ValueError(
+                "local input width differs from RMSNorm normalized_shape"
+            )
+        values = inputs.float()
+        inverse_rms = torch.rsqrt(
+            values.square().mean(dim=-1, keepdim=True) + self.eps
+        )
+        return values * inverse_rms
+
+
 class MultiheadAttention(nn.Module):
     """Standard Multi-head Attention module, non-causal by default.
     
@@ -118,6 +156,11 @@ class Perceiver(nn.Module):
         )
         
         # Local time series projection
+        self.local_input_norm = NonAffineRMSNorm(
+            d_proj,
+            DEFAULT_LOCAL_INPUT_RMSNORM_EPS,
+        )
+        self.local_input_norm_mode = LOCAL_INPUT_NORM_NONE
         self.local_word_proj = nn.Linear(d_proj, hidden_size)
         
         # Cross-attention for local embeddings
@@ -155,6 +198,32 @@ class Perceiver(nn.Module):
         # Initialize prompt embeddings
         nn.init.normal_(self.fix_prompt_embeddings, mean=0.0, std=0.02)
     
+    def configure_local_input_normalization(
+        self,
+        mode: str,
+        *,
+        eps: float = DEFAULT_LOCAL_INPUT_RMSNORM_EPS,
+    ) -> None:
+        """Configure the parameter-free Phase-I/II interface transform."""
+        if mode not in LOCAL_INPUT_NORM_MODES:
+            raise ValueError(
+                f"unsupported local input normalization mode: {mode!r}"
+            )
+        if not math.isfinite(eps) or eps <= 0:
+            raise ValueError("local input RMSNorm eps must be finite and positive")
+        self.local_input_norm_mode = mode
+        self.local_input_norm.eps = float(eps)
+
+    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
+    def normalize_local_inputs(self, inputs: torch.Tensor) -> torch.Tensor:
+        """Return FP32 local inputs under the configured ablation arm."""
+        values = inputs.float()
+        if self.local_input_norm_mode == LOCAL_INPUT_NORM_NONE:
+            return values
+        if self.local_input_norm_mode == LOCAL_INPUT_NORM_RMSNORM:
+            return self.local_input_norm(values)
+        raise RuntimeError("local input normalization mode changed unexpectedly")
+
     # This linear reduction spans the complete 151k-token vocabulary in the
     # formal model.  FP32 accumulation prevents a finite BF16 forward pass from
     # producing an overflowing backward gradient after prolonged training.
@@ -170,12 +239,14 @@ class Perceiver(nn.Module):
         """
         return self.mapping_layer(word_embeddings.permute(1, 0)).permute(1, 0).unsqueeze(0)
     
-    def process_local_embeddings(self, 
-                                local_embeddings: torch.Tensor,
-                                source_embeddings: torch.Tensor,
-                                start_idx: int,
-                                end_idx: int) -> torch.Tensor:
+    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
+    def process_local_embeddings(self,
+                                 local_embeddings: torch.Tensor,
+                                 source_embeddings: torch.Tensor,
+                                 start_idx: int,
+                                 end_idx: int) -> torch.Tensor:
         local_ts_embeddings = local_embeddings[start_idx:end_idx, :].unsqueeze(0)
+        local_ts_embeddings = self.normalize_local_inputs(local_ts_embeddings)
         local_ts_embeddings = self.local_word_proj(local_ts_embeddings)
         projected_local_embeddings = self.local_attention(
             local_ts_embeddings, 
@@ -660,4 +731,3 @@ class AXISCombinedModel(nn.Module):
             logits = self.ts_pretrain_model.anomaly_head(local_embeddings)
             anomaly_scores = [logits[i, start_indices[i]:end_indices[i], :] for i in range(len(start_indices))]
             return answer, anomaly_scores
-        

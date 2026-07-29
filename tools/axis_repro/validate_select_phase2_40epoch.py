@@ -22,33 +22,36 @@ from src.models.AXIS.AXIS_test import collate_fn
 from src.models.AXIS.dataset import AXISAnomalyQADataset
 
 from .loss_e2e import ERROR_ANSWER, normalize_question_type
-from .loss_e2e_40epoch_runtime import load_phase2_40epoch_checkpoint
-from .loss_e2e_runtime import ContinuationObjectiveModel
+from .loss_e2e_40epoch_runtime import (
+    Phase2TreatmentObjectiveModel,
+    load_phase2_40epoch_checkpoint,
+)
 from .model_utils import build_model, freeze_for_phase2, sha256_file
 from .prompt_boundary import SIMPLIFIED_FINAL_ANSWER_V1
 from .train_phase2_treatment_40epoch_ddp import (
     EXPERIMENT,
+    FORMAL_ACCUMULATION_PLAN,
     FORMAL_ALPHA,
     FORMAL_EPOCHS,
-    FORMAL_EPOCH5_LR,
-    FORMAL_LR_SWITCH_EPOCH,
+    FORMAL_GRADIENT_ACCUMULATION_STEPS,
     FORMAL_GRADIENT_SKIP_THRESHOLD,
     FORMAL_LR,
     FORMAL_MAX_GRAD_NORM,
+    FORMAL_MICRO_STEPS_PER_EPOCH,
+    FORMAL_PROTOCOL_VERSION,
     FORMAL_SEED,
     FORMAL_STEPS_PER_EPOCH,
+    FORMAL_TOTAL_MICRO_STEPS,
     FORMAL_TOTAL_STEPS,
     FORMAL_TRAIN_RATIO,
     FORMAL_TRAIN_SERIES,
     FORMAL_VALIDATION_SERIES,
     FORMAL_WEIGHT_DECAY,
-    LEGACY_STEPS_PER_EPOCH,
-    RESUMED_WORLD_SIZE,
+    FORMAL_WORLD_SIZE,
     expected_global_step_for_epoch,
-    planned_steps_for_completed_epoch,
-    steps_per_epoch_for_completed_epoch,
+    expected_micro_step_for_epoch,
     validate_formal_completed_epoch_guard,
-    world_size_for_completed_epoch,
+    validate_checkpoint_step_counters,
 )
 
 
@@ -190,31 +193,41 @@ def validate_checkpoint_identity(
     expected_epoch: int,
     split_manifest_sha256: str,
 ) -> dict:
+    if int(payload.get("schema_version", -1)) != FORMAL_PROTOCOL_VERSION:
+        raise ValueError("candidate predates the accumulation-v2 protocol")
     epoch = int(payload.get("epoch", -1))
     step = int(payload.get("global_step", -1))
+    micro_step = int(payload.get("micro_step", -1))
+    optimizer_step = int(payload.get("optimizer_step", -1))
     if epoch != expected_epoch:
         raise ValueError(
             f"checkpoint epoch {epoch} does not match candidate {expected_epoch}"
         )
     if step != expected_global_step_for_epoch(epoch):
-        raise ValueError("checkpoint step is not the complete epoch boundary")
+        raise ValueError("optimizer-attempt step is not the complete epoch boundary")
+    if micro_step != expected_micro_step_for_epoch(epoch):
+        raise ValueError("micro-step is not the complete epoch boundary")
+
     meta = payload.get("reproduction_meta", {})
-    expected_world = world_size_for_completed_epoch(epoch)
-    expected_steps_per_epoch = steps_per_epoch_for_completed_epoch(epoch)
-    expected_planned_steps = planned_steps_for_completed_epoch(epoch)
     expected = {
+        "schema_version": FORMAL_PROTOCOL_VERSION,
         "experiment": EXPERIMENT,
         "objective": "treatment",
         "run_purpose": "formal",
-        "world_size": expected_world,
+        "world_size": FORMAL_WORLD_SIZE,
         "epochs": FORMAL_EPOCHS,
-        "steps_per_rank_epoch": expected_steps_per_epoch,
-        "planned_steps": expected_planned_steps,
+        "micro_steps_per_rank_epoch": FORMAL_MICRO_STEPS_PER_EPOCH,
+        "optimizer_attempts_per_epoch": FORMAL_STEPS_PER_EPOCH,
+        "planned_steps": FORMAL_TOTAL_STEPS,
+        "planned_micro_steps": FORMAL_TOTAL_MICRO_STEPS,
         "seed": FORMAL_SEED,
         "segment_alpha": FORMAL_ALPHA,
         "lr": FORMAL_LR,
+        "lr_schedule": {"epochs_1_40": FORMAL_LR},
         "weight_decay": FORMAL_WEIGHT_DECAY,
         "max_grad_norm": FORMAL_MAX_GRAD_NORM,
+        "gradient_accumulation_steps": FORMAL_GRADIENT_ACCUMULATION_STEPS,
+        "global_batch_series": FORMAL_ACCUMULATION_PLAN.full_global_batch_series,
         "prompt_protocol": SIMPLIFIED_FINAL_ANSWER_V1,
         "split_manifest_sha256": split_manifest_sha256,
     }
@@ -226,58 +239,61 @@ def validate_checkpoint_identity(
             )
     if meta.get("source_dirty") is not False:
         raise ValueError("candidate checkpoint was produced from a dirty source tree")
-    if 2 <= epoch <= 3:
-        schedule = meta.get("optimizer_step_schedule", {})
-        if schedule.get("epoch_1") != LEGACY_STEPS_PER_EPOCH:
-            raise ValueError("4-GPU candidate lost the legacy epoch-1 schedule")
-        if schedule.get("epochs_2_40") != FORMAL_STEPS_PER_EPOCH:
-            raise ValueError("4-GPU candidate has the wrong active step schedule")
-        if schedule.get("total") != planned_steps_for_completed_epoch(epoch):
-            raise ValueError("4-GPU candidate has the wrong total step schedule")
-    elif epoch >= 4:
-        schedule = meta.get("optimizer_step_schedule", {})
-        expected_schedule = {
-            "epoch_1": LEGACY_STEPS_PER_EPOCH,
-            "epochs_2_3": FORMAL_STEPS_PER_EPOCH,
-            "epochs_4_40": steps_per_epoch_for_completed_epoch(epoch),
-            "total": FORMAL_TOTAL_STEPS,
-        }
-        if schedule != expected_schedule:
-            raise ValueError("5-GPU resumed candidate has the wrong step schedule")
-        stability = meta.get("numerical_stability", {})
-        if stability.get("gradient_skip_threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
-            raise ValueError("candidate gradient-guard threshold changed")
-        if stability.get("unsafe_updates_applied") is not False:
-            raise ValueError("candidate does not prove fail-closed optimizer updates")
-        guard = meta.get("optimization_diagnostics", {}).get("gradient_guard", {})
-        if guard.get("threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
-            raise ValueError("candidate lacks gradient-guard audit evidence")
-        if epoch >= FORMAL_LR_SWITCH_EPOCH:
-            validate_formal_completed_epoch_guard(meta, epoch)
-    if epoch >= FORMAL_LR_SWITCH_EPOCH:
-        expected_lr_schedule = {
-            "epochs_1_4": FORMAL_LR,
-            "epochs_5_40": FORMAL_EPOCH5_LR,
-        }
-        if meta.get("lr_schedule") != expected_lr_schedule:
-            raise ValueError("candidate has the wrong LR schedule")
-        if meta.get("epoch5_lr") != FORMAL_EPOCH5_LR:
-            raise ValueError("candidate epoch-5 LR changed")
+    if meta.get("gradient_accumulation", {}).get("plan") != (
+        FORMAL_ACCUMULATION_PLAN.to_dict()
+    ):
+        raise ValueError("candidate accumulation plan changed")
+
+    norm = meta.get("local_input_normalization", {})
+    if norm.get("mode") not in {"none", "rmsnorm"}:
+        raise ValueError("candidate has an unknown local-input normalization arm")
+    if norm.get("affine") is not False or float(norm.get("eps", -1)) != 1e-6:
+        raise ValueError("candidate RMSNorm policy differs from the confirmed protocol")
+    expected_arm = (
+        "accumulation_only" if norm["mode"] == "none" else "accumulation_plus_rmsnorm"
+    )
+    if meta.get("experiment_arm") != expected_arm:
+        raise ValueError("candidate arm label disagrees with normalization mode")
+
+    stability = meta.get("numerical_stability", {})
+    if stability.get("gradient_skip_threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
+        raise ValueError("candidate gradient-guard threshold changed")
+    if stability.get("unsafe_updates_applied") is not False:
+        raise ValueError("candidate does not prove fail-closed optimizer updates")
+    validate_formal_completed_epoch_guard(meta, epoch)
+    guard = meta["optimization_diagnostics"]["gradient_guard"]
+    validate_checkpoint_step_counters(payload)
+    if optimizer_step != step - int(guard["skipped_steps"]):
+        raise ValueError("optimizer-step count disagrees with guarded windows")
+
     state = payload.get("model_state_dict", {})
     if "fixed_hint_reference" not in state:
         raise ValueError("Treatment candidate has no cached F0")
+    rank_rng = payload.get("rng_state_by_rank")
+    if not isinstance(rank_rng, list) or len(rank_rng) != FORMAL_WORLD_SIZE:
+        raise ValueError("candidate lacks one RNG state per DDP rank")
+    required_metrics = {
+        "cumulative_training_metrics",
+        "successful_training_metrics",
+        "cumulative_local_input_metrics",
+        "last_completed_epoch_training_metrics",
+    }
+    if required_metrics.difference(payload):
+        raise ValueError("candidate lacks accumulation-v2 metric records")
     return {
         "epoch": epoch,
         "global_step": step,
+        "micro_step": micro_step,
+        "optimizer_step": optimizer_step,
+        "experiment_arm": expected_arm,
+        "local_input_normalization": dict(norm),
         "checkpoint_source_commit": meta.get("source_commit"),
         "phase1_checkpoint_sha256": meta.get("phase1_checkpoint_sha256"),
         "training_data_audit_sha256": meta.get("data_audit_sha256"),
         "fixed_hint_sha256": meta.get("fixed_hint", {}).get("sha256"),
         "prompt_protocol": meta.get("prompt_protocol"),
-        "gradient_guard": meta.get("optimization_diagnostics", {}).get(
-            "gradient_guard"
-        ),
-        "numerical_stability": meta.get("numerical_stability"),
+        "gradient_guard": guard,
+        "numerical_stability": stability,
     }
 
 
@@ -300,7 +316,7 @@ def main() -> None:
     rank = int(os.environ["RANK"])
     world = int(os.environ["WORLD_SIZE"])
     local_rank = int(os.environ["LOCAL_RANK"])
-    if world != RESUMED_WORLD_SIZE:
+    if world != FORMAL_WORLD_SIZE:
         raise ValueError("formal selection requires exactly five DDP ranks")
     torch.cuda.set_device(local_rank)
     torch.distributed.init_process_group(
@@ -367,9 +383,8 @@ def main() -> None:
     base.to(local_rank)
     base.axis.model.to(dtype=torch.bfloat16)
     base.eval()
-    evaluator = ContinuationObjectiveModel(
+    evaluator = Phase2TreatmentObjectiveModel(
         base,
-        objective_mode="control",
         segment_alpha=FORMAL_ALPHA,
         loss_chunk_size=args.loss_chunk_size,
     )
@@ -396,6 +411,8 @@ def main() -> None:
         identity_fields = {
             key: identity[key]
             for key in (
+                "experiment_arm",
+                "local_input_normalization",
                 "phase1_checkpoint_sha256",
                 "training_data_audit_sha256",
                 "fixed_hint_sha256",
@@ -409,7 +426,7 @@ def main() -> None:
 
         checkpoint_hash_box = [sha256_file(checkpoint_path) if rank == 0 else None]
         torch.distributed.broadcast_object_list(checkpoint_hash_box, src=0)
-        local_totals = torch.zeros(5, dtype=torch.float64, device=local_rank)
+        local_totals = torch.zeros(11, dtype=torch.float64, device=local_rank)
         for batch_index, batch in enumerate(loader, start=1):
             valid_rows = [answer.strip() != ERROR_ANSWER for answer in batch["answers"]]
             time_series = batch["padded_sequences"].to(
@@ -440,6 +457,12 @@ def main() -> None:
             local_totals[2] += metrics["valid_row_count"].double()
             local_totals[3] += len(valid_rows)
             local_totals[4] += len(valid_rows) - sum(valid_rows)
+            local_totals[5] += metrics["conclusion_mean_sum"].double()
+            local_totals[6] += metrics["conclusion_row_count"].double()
+            local_totals[7] += metrics["explanation_mean_sum"].double()
+            local_totals[8] += metrics["explanation_row_count"].double()
+            local_totals[9] += metrics["objective_sum"].double()
+            local_totals[10] += metrics["objective_count"].double()
             if rank == 0 and batch_index % args.log_every == 0:
                 print(
                     json.dumps(
@@ -455,11 +478,35 @@ def main() -> None:
             local_totals,
             op=torch.distributed.ReduceOp.SUM,
         )
-        token_sum, token_count, valid_rows, total_rows, excluded_rows = (
-            local_totals.tolist()
-        )
+        (
+            token_sum,
+            token_count,
+            valid_rows,
+            total_rows,
+            excluded_rows,
+            conclusion_sum,
+            conclusion_count,
+            evidence_sum,
+            evidence_count,
+            treatment_objective_sum,
+            treatment_objective_count,
+        ) = local_totals.tolist()
         if not math.isfinite(token_sum) or token_sum <= 0 or token_count <= 0:
             raise FloatingPointError("validation NLL is not finite and positive")
+        segment_values = (
+            conclusion_sum,
+            evidence_sum,
+            treatment_objective_sum,
+        )
+        segment_counts = (
+            conclusion_count,
+            evidence_count,
+            treatment_objective_count,
+        )
+        if any(not math.isfinite(value) for value in segment_values) or any(
+            count <= 0 for count in segment_counts
+        ):
+            raise FloatingPointError("validation segment NLL is invalid")
         observed = {
             "total_rows": int(total_rows),
             "valid_rows": int(valid_rows),
@@ -475,11 +522,15 @@ def main() -> None:
                 f"validation row audit mismatch: {observed} != {expected}"
             )
         summary = {
-            "schema_version": 1,
+            "schema_version": FORMAL_PROTOCOL_VERSION,
             "experiment": EXPERIMENT,
+            "experiment_arm": identity["experiment_arm"],
+            "local_input_normalization": identity["local_input_normalization"],
             "objective": "treatment",
             "candidate_epoch": expected_epoch,
             "candidate_global_step": identity["global_step"],
+            "candidate_micro_step": identity["micro_step"],
+            "candidate_optimizer_step": identity["optimizer_step"],
             "checkpoint_file": checkpoint_path.name,
             "checkpoint_sha256": checkpoint_hash_box[0],
             **identity_fields,
@@ -489,7 +540,16 @@ def main() -> None:
             "token_nll_sum": token_sum,
             "effective_answer_token_count": int(token_count),
             "global_token_nll": token_sum / token_count,
+            "conclusion_nll": conclusion_sum / conclusion_count,
+            "evidence_nll": evidence_sum / evidence_count,
+            "treatment_row_objective": (
+                treatment_objective_sum / treatment_objective_count
+            ),
+            "conclusion_row_count": int(conclusion_count),
+            "evidence_row_count": int(evidence_count),
+            "treatment_objective_row_count": int(treatment_objective_count),
             "validation_series": len(dataset),
+            "training_epoch_metrics": payload["last_completed_epoch_training_metrics"],
             **observed,
             "validation_seed": FORMAL_SEED,
             "train_ratio": FORMAL_TRAIN_RATIO,
