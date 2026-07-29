@@ -7,6 +7,7 @@ and trains for exactly 40 epochs. The recorded run uses a 5-to-4-to-5 rank
 schedule and resumes only at complete-epoch boundaries. Wide Perceiver math is
 kept in FP32 and a synchronized guard rejects unsafe optimizer updates.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,8 +46,10 @@ from .model_utils import (
     sha256_file,
 )
 from .numerical_stability import (
+    GradientGuardFailFast,
     decide_gradient_step,
     top_gradient_diagnostics,
+    validate_completed_epoch_guard_audit,
 )
 from .prompt_boundary import (
     SIMPLIFIED_FINAL_ANSWER_V1,
@@ -88,10 +91,8 @@ FORMAL_STEPS_PER_EPOCH = 7_125
 RESUMED_STEPS_PER_EPOCH = 5_700
 FORMAL_TOTAL_STEPS = (
     LEGACY_STEPS_PER_EPOCH
-    + (FOUR_GPU_LAST_EPOCH - FOUR_GPU_FIRST_EPOCH + 1)
-    * FORMAL_STEPS_PER_EPOCH
-    + (FORMAL_EPOCHS - RESUMED_FIVE_GPU_FIRST_EPOCH + 1)
-    * RESUMED_STEPS_PER_EPOCH
+    + (FOUR_GPU_LAST_EPOCH - FOUR_GPU_FIRST_EPOCH + 1) * FORMAL_STEPS_PER_EPOCH
+    + (FORMAL_EPOCHS - RESUMED_FIVE_GPU_FIRST_EPOCH + 1) * RESUMED_STEPS_PER_EPOCH
 )
 FORMAL_LR = 1e-4
 FORMAL_LR_SWITCH_EPOCH = 5
@@ -102,6 +103,11 @@ FORMAL_MAX_GRAD_NORM = 1.0
 FORMAL_GRADIENT_SKIP_THRESHOLD = 100.0
 FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS = 512
 FORMAL_GRADIENT_GUARD_MAX_RECORDED_EVENTS = 16
+FORMAL_GRADIENT_SKIP_WINDOW_SIZE = 500
+FORMAL_GRADIENT_SKIP_WINDOW_MIN_OBSERVATIONS = 100
+FORMAL_MAX_WINDOW_GRADIENT_SKIP_RATE = 0.05
+FORMAL_GRADIENT_SKIP_EPOCH_MIN_OBSERVATIONS = 500
+FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE = 0.01
 FROZEN_LLM_DTYPE = torch.bfloat16
 
 
@@ -144,8 +150,7 @@ def planned_steps_for_completed_epoch(epoch: int) -> int:
     if epoch <= FOUR_GPU_LAST_EPOCH:
         return (
             MIGRATION_COMPLETED_EPOCH * LEGACY_STEPS_PER_EPOCH
-            + (FORMAL_EPOCHS - MIGRATION_COMPLETED_EPOCH)
-            * FORMAL_STEPS_PER_EPOCH
+            + (FORMAL_EPOCHS - MIGRATION_COMPLETED_EPOCH) * FORMAL_STEPS_PER_EPOCH
         )
     return FORMAL_TOTAL_STEPS
 
@@ -164,6 +169,67 @@ def learning_rate_for_epoch(
     return float(epoch5_lr)
 
 
+def formal_gradient_guard_policy() -> dict:
+    """Return the immutable fail-fast policy recorded in formal checkpoints."""
+    return {
+        "window_size": FORMAL_GRADIENT_SKIP_WINDOW_SIZE,
+        "window_min_observations": (FORMAL_GRADIENT_SKIP_WINDOW_MIN_OBSERVATIONS),
+        "max_window_skip_rate": FORMAL_MAX_WINDOW_GRADIENT_SKIP_RATE,
+        "epoch_min_observations": (FORMAL_GRADIENT_SKIP_EPOCH_MIN_OBSERVATIONS),
+        "max_epoch_skip_rate": FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE,
+        "max_consecutive_skips": FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS,
+        "fail_on_nonfinite": True,
+    }
+
+
+def new_formal_gradient_guard_tracker() -> GradientGuardFailFast:
+    return GradientGuardFailFast(
+        window_size=FORMAL_GRADIENT_SKIP_WINDOW_SIZE,
+        window_min_observations=(FORMAL_GRADIENT_SKIP_WINDOW_MIN_OBSERVATIONS),
+        max_window_skip_rate=FORMAL_MAX_WINDOW_GRADIENT_SKIP_RATE,
+        epoch_min_observations=(FORMAL_GRADIENT_SKIP_EPOCH_MIN_OBSERVATIONS),
+        max_epoch_skip_rate=FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE,
+        max_consecutive_skips=FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS,
+        fail_on_nonfinite=True,
+    )
+
+
+def validate_formal_completed_epoch_guard(meta: Mapping, epoch: int) -> dict:
+    """Reject post-upgrade checkpoints that do not prove a safe epoch."""
+    stability = meta.get("numerical_stability", {})
+    if stability.get("fail_fast_policy") != formal_gradient_guard_policy():
+        raise ValueError("checkpoint gradient-guard fail-fast policy changed")
+    guard = meta.get("optimization_diagnostics", {}).get("gradient_guard", {})
+    audit = guard.get("last_completed_epoch", {})
+    return validate_completed_epoch_guard_audit(
+        audit,
+        expected_epoch=epoch,
+        expected_attempted_steps=steps_per_epoch_for_completed_epoch(epoch),
+        max_epoch_skip_rate=FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE,
+    )
+
+
+def _completed_epoch_guard_audit(
+    tracker: GradientGuardFailFast,
+    *,
+    epoch: int,
+    fail_fast_triggered: bool,
+) -> dict:
+    audit = tracker.snapshot()
+    audit.update(
+        {
+            "epoch": epoch,
+            "fail_fast_triggered": bool(fail_fast_triggered),
+            "checkpoint_eligible": (
+                not fail_fast_triggered
+                and audit["epoch_nonfinite_steps"] == 0
+                and audit["epoch_skip_rate"] <= FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE
+            ),
+        }
+    )
+    return audit
+
+
 def _guarded_optimization_summary(state: Mapping) -> dict:
     result = _optimization_summary(state)
     result["gradient_guard"] = {
@@ -172,12 +238,11 @@ def _guarded_optimization_summary(state: Mapping) -> dict:
         "finite_spike_skipped_steps": state[
             "gradient_guard_finite_spike_skipped_steps"
         ],
-        "nonfinite_skipped_steps": state[
-            "gradient_guard_nonfinite_skipped_steps"
-        ],
+        "nonfinite_skipped_steps": state["gradient_guard_nonfinite_skipped_steps"],
         "consecutive_skips": state["gradient_guard_consecutive_skips"],
         "max_consecutive_skips": state["gradient_guard_max_consecutive_skips"],
         "consecutive_skip_limit": state["gradient_guard_consecutive_skip_limit"],
+        "last_completed_epoch": state.get("gradient_guard_last_completed_epoch"),
         "events": list(state["gradient_guard_events"]),
     }
     return result
@@ -199,19 +264,14 @@ def _restore_optimization_with_guard(
     if previous_threshold is not None and float(previous_threshold) != threshold:
         raise ValueError("resume checkpoint gradient-guard threshold changed")
     previous_limit = previous.get("consecutive_skip_limit")
-    if (
-        previous_limit is not None
-        and int(previous_limit) != consecutive_skip_limit
-    ):
+    if previous_limit is not None and int(previous_limit) != consecutive_skip_limit:
         raise ValueError(
             "resume checkpoint gradient-guard consecutive-skip limit changed"
         )
     state.update(
         {
             "gradient_guard_threshold": threshold,
-            "gradient_guard_skipped_steps": int(
-                previous.get("skipped_steps", 0)
-            ),
+            "gradient_guard_skipped_steps": int(previous.get("skipped_steps", 0)),
             "gradient_guard_finite_spike_skipped_steps": int(
                 previous.get("finite_spike_skipped_steps", 0)
             ),
@@ -223,6 +283,7 @@ def _restore_optimization_with_guard(
                 previous.get("max_consecutive_skips", 0)
             ),
             "gradient_guard_consecutive_skip_limit": consecutive_skip_limit,
+            "gradient_guard_last_completed_epoch": previous.get("last_completed_epoch"),
             "gradient_guard_events": list(previous.get("events", []))[
                 :FORMAL_GRADIENT_GUARD_MAX_RECORDED_EVENTS
             ],
@@ -406,7 +467,9 @@ def build_prompt_boundary_audit(
     if over_limit:
         raise RuntimeError("untruncated prompt/answer exceeds model context")
     if leading_whitespace:
-        raise RuntimeError("gold answers with leading whitespace require a new protocol")
+        raise RuntimeError(
+            "gold answers with leading whitespace require a new protocol"
+        )
     if terminal_suffix_violations:
         raise RuntimeError("prompt does not end at the approved Answer: boundary")
     return {
@@ -440,6 +503,8 @@ def _checkpoint_payload(
     global_step: int,
     meta: dict,
     cumulative: Mapping[str, float],
+    successful_since_resume: Mapping[str, float],
+    last_completed_epoch_metrics: Mapping,
 ) -> dict:
     reference = fixed_hint_checkpoint_state(model.axis)
     if reference is None:
@@ -454,7 +519,11 @@ def _checkpoint_payload(
         },
         "optimizer_state_dict": optimizer.state_dict(),
         "reproduction_meta": meta,
+        # Retained for backward compatibility.  The formal metadata explicitly
+        # records that this legacy aggregate includes attempted guarded rows.
         "cumulative_training_metrics": dict(cumulative),
+        "successful_update_metrics_since_resume": dict(successful_since_resume),
+        "last_completed_epoch_training_metrics": dict(last_completed_epoch_metrics),
     }
 
 
@@ -514,17 +583,15 @@ def validate_resume_checkpoint(
         raise ValueError("resume checkpoint was produced from a dirty source tree")
     if epoch >= RESUMED_FIVE_GPU_FIRST_EPOCH:
         stability = meta.get("numerical_stability", {})
-        if stability.get(
-            "gradient_skip_threshold"
-        ) != FORMAL_GRADIENT_SKIP_THRESHOLD:
+        if stability.get("gradient_skip_threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
             raise ValueError("resume checkpoint gradient-guard threshold changed")
         if stability.get("unsafe_updates_applied") is not False:
             raise ValueError("resume checkpoint does not prove safe updates")
-        guard = meta.get("optimization_diagnostics", {}).get(
-            "gradient_guard", {}
-        )
+        guard = meta.get("optimization_diagnostics", {}).get("gradient_guard", {})
         if guard.get("threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
             raise ValueError("resume checkpoint lacks gradient-guard audit")
+        if epoch >= FORMAL_LR_SWITCH_EPOCH:
+            validate_formal_completed_epoch_guard(meta, epoch)
     if epoch >= FORMAL_LR_SWITCH_EPOCH:
         expected_lr_schedule = {
             "epochs_1_4": FORMAL_LR,
@@ -604,7 +671,9 @@ def _validate_args(args, world: int) -> None:
             if actual != expected
         ]
         if mismatches:
-            raise ValueError("formal 40-epoch protocol mismatch: " + "; ".join(mismatches))
+            raise ValueError(
+                "formal 40-epoch protocol mismatch: " + "; ".join(mismatches)
+            )
         if args.max_steps is not None:
             raise ValueError("formal training forbids --max-steps")
         if args.resume_from is None:
@@ -706,9 +775,7 @@ def main() -> None:
     install_fixed_hint_runtime(base.axis)
     base.axis.perceiver.fix_prompt_embeddings.requires_grad_(False)
     trainable = sum(
-        parameter.numel()
-        for parameter in base.parameters()
-        if parameter.requires_grad
+        parameter.numel() for parameter in base.parameters() if parameter.requires_grad
     )
     initially_trainable_names = {
         name
@@ -781,11 +848,7 @@ def main() -> None:
         broadcast_buffers=False,
     )
     optimizer = torch.optim.AdamW(
-        (
-            parameter
-            for parameter in ddp.parameters()
-            if parameter.requires_grad
-        ),
+        (parameter for parameter in ddp.parameters() if parameter.requires_grad),
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
@@ -809,10 +872,7 @@ def main() -> None:
         persistent_workers=args.num_workers > 0,
         collate_fn=collate_fn,
     )
-    if (
-        args.run_purpose == "formal"
-        and len(loader) != RESUMED_STEPS_PER_EPOCH
-    ):
+    if args.run_purpose == "formal" and len(loader) != RESUMED_STEPS_PER_EPOCH:
         raise RuntimeError(
             f"formal training expected {RESUMED_STEPS_PER_EPOCH} batches per "
             f"epoch, got {len(loader)}"
@@ -839,6 +899,12 @@ def main() -> None:
         "micro_batch_series_per_rank": 1,
         "gradient_accumulation_steps": 1,
         "global_batch_series": world,
+        "author_deepspeed_reference": {
+            "gradient_accumulation_steps": 32,
+            "gradient_clipping": 1.0,
+            "configuration_file": "experiments/configs/deepspeed_config.json",
+        },
+        "cumulative_training_metrics_semantics": "attempted batches",
         "world_size_schedule": {
             "epoch_1": LEGACY_WORLD_SIZE,
             "epochs_2_3": FOUR_GPU_WORLD_SIZE,
@@ -879,9 +945,8 @@ def main() -> None:
             "perceiver_wide_operations": "FP32 under BF16 outer autocast",
             "gradient_guard_scope": "synchronized across all DDP ranks",
             "gradient_skip_threshold": args.gradient_skip_threshold,
-            "max_consecutive_gradient_skips": (
-                args.max_consecutive_gradient_skips
-            ),
+            "max_consecutive_gradient_skips": (args.max_consecutive_gradient_skips),
+            "fail_fast_policy": formal_gradient_guard_policy(),
             "unsafe_updates_applied": False,
         },
         "precision": "BF16 for all 40 epochs",
@@ -975,6 +1040,7 @@ def main() -> None:
             "gradient_guard_consecutive_skip_limit": (
                 args.max_consecutive_gradient_skips
             ),
+            "gradient_guard_last_completed_epoch": None,
             "gradient_guard_events": [],
         }
         global_step = 0
@@ -992,6 +1058,9 @@ def main() -> None:
         )
         global_step = int(resume_payload["global_step"])
         start_epoch = int(resume_payload["epoch"]) + 1
+
+    successful_since_resume = {key: 0.0 for key in METRIC_KEYS}
+    meta["successful_update_metrics_since_resume_origin_step"] = global_step
 
     # Independent rank RNG streams are appropriate after identical model/F0
     # initialization has been verified.
@@ -1019,6 +1088,9 @@ def main() -> None:
         ddp.module.base.ts_pretrain_model.eval()
         ddp.module.base.axis.model.train()
         batches_completed = 0
+        epoch_guard = new_formal_gradient_guard_tracker()
+        epoch_attempted_metrics = {key: 0.0 for key in METRIC_KEYS}
+        epoch_successful_metrics = {key: 0.0 for key in METRIC_KEYS}
         for batch_index, batch in enumerate(loader, start=1):
             optimizer.zero_grad(set_to_none=True)
             time_series = batch["padded_sequences"].to(
@@ -1030,10 +1102,7 @@ def main() -> None:
                 local_rank,
                 non_blocking=True,
             )
-            valid_rows = [
-                answer.strip() != ERROR_ANSWER
-                for answer in batch["answers"]
-            ]
+            valid_rows = [answer.strip() != ERROR_ANSWER for answer in batch["answers"]]
             with torch.autocast("cuda", dtype=torch.bfloat16):
                 outputs = ddp(
                     time_series,
@@ -1046,10 +1115,7 @@ def main() -> None:
                     valid_rows,
                 )
             packed = torch.stack(
-                [
-                    outputs[key].detach().to(torch.float64)
-                    for key in METRIC_KEYS
-                ]
+                [outputs[key].detach().to(torch.float64) for key in METRIC_KEYS]
             )
             torch.distributed.all_reduce(
                 packed,
@@ -1081,9 +1147,11 @@ def main() -> None:
                 op=torch.distributed.ReduceOp.MAX,
             )
             reason_code = int(synchronized_reason.item())
-            reason = {0: "safe", 1: "finite_spike", 2: "nonfinite"}[
-                reason_code
-            ]
+            reason = {0: "safe", 1: "finite_spike", 2: "nonfinite"}[reason_code]
+            packed_values = packed.tolist()
+            step_metric_values = dict(zip(METRIC_KEYS, packed_values))
+            for key, value in step_metric_values.items():
+                epoch_attempted_metrics[key] += value
 
             if math.isfinite(gradient_norm):
                 optimization["gradient_norm_count"] += 1
@@ -1099,40 +1167,42 @@ def main() -> None:
                 optimization["nonfinite_gradient_steps"] += 1
 
             guarded = reason_code != 0
+            fail_fast = epoch_guard.observe(
+                skipped=guarded,
+                gradient_reason=reason,
+            )
             if guarded:
                 optimization["gradient_guard_skipped_steps"] += 1
                 if reason == "nonfinite":
                     optimization["gradient_guard_nonfinite_skipped_steps"] += 1
                 else:
-                    optimization[
-                        "gradient_guard_finite_spike_skipped_steps"
-                    ] += 1
+                    optimization["gradient_guard_finite_spike_skipped_steps"] += 1
                 optimization["gradient_guard_consecutive_skips"] += 1
                 optimization["gradient_guard_max_consecutive_skips"] = max(
                     optimization["gradient_guard_max_consecutive_skips"],
                     optimization["gradient_guard_consecutive_skips"],
                 )
 
-                should_record = (
-                    rank == 0
-                    and len(optimization["gradient_guard_events"])
+                has_record_slot = (
+                    len(optimization["gradient_guard_events"])
                     < FORMAL_GRADIENT_GUARD_MAX_RECORDED_EVENTS
+                )
+                should_diagnose = rank == 0 and (
+                    has_record_slot or fail_fast.should_abort
                 )
                 diagnostics = (
                     top_gradient_diagnostics(
                         ddp.module.named_parameters(),
                         limit=8,
                     )
-                    if should_record
+                    if should_diagnose
                     else []
                 )
                 event = {
                     "step": global_step + 1,
                     "epoch": epoch,
                     "step_in_epoch": (
-                        global_step
-                        + 1
-                        - expected_global_step_for_epoch(epoch - 1)
+                        global_step + 1 - expected_global_step_for_epoch(epoch - 1)
                     ),
                     "reason": reason,
                     "gradient_norm": (
@@ -1140,25 +1210,44 @@ def main() -> None:
                     ),
                     "diagnostics": diagnostics,
                 }
-                if should_record:
+                if rank == 0 and has_record_slot:
                     optimization["gradient_guard_events"].append(event)
                 skipped = optimization["gradient_guard_skipped_steps"]
                 if rank == 0 and (skipped <= 10 or skipped % 50 == 0):
                     print(
-                        json.dumps(
-                            {"event": "gradient_guard_skip", **event}
-                        ),
+                        json.dumps({"event": "gradient_guard_skip", **event}),
                         flush=True,
                     )
                 optimizer.zero_grad(set_to_none=True)
-                if (
-                    optimization["gradient_guard_consecutive_skips"]
-                    > args.max_consecutive_gradient_skips
-                ):
+                if fail_fast.should_abort:
+                    failure = {
+                        "schema_version": 1,
+                        "event": "gradient_guard_fail_fast",
+                        "reason": fail_fast.reason,
+                        "attempted_global_step": global_step + 1,
+                        "optimizer_state_applied": False,
+                        "checkpoint_written": False,
+                        "gradient_event": event,
+                        "guard_audit": _completed_epoch_guard_audit(
+                            epoch_guard,
+                            epoch=epoch,
+                            fail_fast_triggered=True,
+                        ),
+                        "attempted_step_metrics": _summary(step_metric_values),
+                        "epoch_attempted_metrics": _summary(epoch_attempted_metrics),
+                        "epoch_successful_update_metrics": _summary(
+                            epoch_successful_metrics
+                        ),
+                    }
+                    if rank == 0:
+                        _write_json_atomic(
+                            output / "gradient_guard_failure.json",
+                            failure,
+                        )
                     raise FloatingPointError(
-                        "gradient guard exceeded its consecutive-skip limit "
-                        f"at step {global_step + 1}; unsafe optimizer state "
-                        "was not applied"
+                        f"gradient guard fail-fast ({fail_fast.reason}) at "
+                        f"attempted step {global_step + 1}; unsafe optimizer "
+                        "state was not applied and no checkpoint was written"
                     )
             else:
                 torch.nn.utils.clip_grad_norm_(
@@ -1167,9 +1256,12 @@ def main() -> None:
                 )
                 optimizer.step()
                 optimization["gradient_guard_consecutive_skips"] = 0
+                for key, value in step_metric_values.items():
+                    successful_since_resume[key] += value
+                    epoch_successful_metrics[key] += value
             global_step += 1
             batches_completed = batch_index
-            for key, value in zip(METRIC_KEYS, packed.tolist()):
+            for key, value in step_metric_values.items():
                 cumulative[key] += value
 
             if global_step == process_start_step + 10:
@@ -1188,18 +1280,27 @@ def main() -> None:
                             "learning_rate": active_lr,
                             "step_in_epoch": global_step
                             - expected_global_step_for_epoch(epoch - 1),
-                            "step_metrics": _summary(
-                                dict(zip(METRIC_KEYS, packed.tolist()))
-                            ),
+                            "optimizer_step_applied": not guarded,
+                            "step_metrics": _summary(step_metric_values),
                             "cumulative_metrics": _summary(cumulative),
+                            "cumulative_metrics_semantics": (
+                                "attempted batches; guarded batches are not "
+                                "successful optimizer updates"
+                            ),
+                            "successful_update_metrics_since_resume": _summary(
+                                successful_since_resume
+                            ),
+                            "epoch_attempted_metrics": _summary(
+                                epoch_attempted_metrics
+                            ),
+                            "epoch_successful_update_metrics": _summary(
+                                epoch_successful_metrics
+                            ),
+                            "epoch_gradient_guard": epoch_guard.snapshot(),
                             "gradient_l2_norm_before_clip": (
-                                gradient_norm
-                                if math.isfinite(gradient_norm)
-                                else None
+                                gradient_norm if math.isfinite(gradient_norm) else None
                             ),
-                            "optimization": _guarded_optimization_summary(
-                                optimization
-                            ),
+                            "optimization": _guarded_optimization_summary(optimization),
                             "steps_per_second_per_rank": rate,
                             "estimated_remaining_hours": remaining / 3600,
                         }
@@ -1211,14 +1312,49 @@ def main() -> None:
                 break
 
         epoch_is_complete = batches_completed == len(loader)
+        completed_guard_audit = None
+        last_completed_epoch_metrics = None
         if epoch_is_complete:
+            completed_guard_audit = _completed_epoch_guard_audit(
+                epoch_guard,
+                epoch=epoch,
+                fail_fast_triggered=False,
+            )
+            try:
+                validate_completed_epoch_guard_audit(
+                    completed_guard_audit,
+                    expected_epoch=epoch,
+                    expected_attempted_steps=len(loader),
+                    max_epoch_skip_rate=FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE,
+                )
+            except ValueError as error:
+                if rank == 0:
+                    _write_json_atomic(
+                        output / "gradient_guard_checkpoint_rejected.json",
+                        {
+                            "schema_version": 1,
+                            "epoch": epoch,
+                            "global_step": global_step,
+                            "reason": str(error),
+                            "checkpoint_written": False,
+                            "guard_audit": completed_guard_audit,
+                        },
+                    )
+                raise FloatingPointError(
+                    "completed epoch failed gradient-guard checkpoint gate"
+                ) from error
+            optimization["gradient_guard_last_completed_epoch"] = completed_guard_audit
+            last_completed_epoch_metrics = {
+                "attempted": dict(epoch_attempted_metrics),
+                "successful_updates": dict(epoch_successful_metrics),
+                "attempted_summary": _summary(epoch_attempted_metrics),
+                "successful_update_summary": _summary(epoch_successful_metrics),
+            }
             completed_epoch = epoch
         torch.distributed.barrier()
         if rank == 0 and epoch_is_complete:
             if initial_perceiver is not None:
-                optimization["parameter_relative_change_by_step"][
-                    str(global_step)
-                ] = {
+                optimization["parameter_relative_change_by_step"][str(global_step)] = {
                     "all_perceiver_parameters": _relative_parameter_change(
                         ddp.module.base.axis.perceiver,
                         initial_perceiver,
@@ -1241,6 +1377,8 @@ def main() -> None:
                     global_step=global_step,
                     meta=meta,
                     cumulative=cumulative,
+                    successful_since_resume=successful_since_resume,
+                    last_completed_epoch_metrics=(last_completed_epoch_metrics),
                 ),
                 checkpoint_path,
             )
@@ -1249,6 +1387,11 @@ def main() -> None:
                 {
                     "epoch": epoch,
                     "global_step": global_step,
+                    "gradient_guard": completed_guard_audit,
+                    "successful_optimizer_updates": (
+                        completed_guard_audit["epoch_attempted_steps"]
+                        - completed_guard_audit["epoch_skipped_steps"]
+                    ),
                     "checkpoint_file": checkpoint_path.name,
                     "checkpoint_sha256": sha256_file(checkpoint_path),
                 },
@@ -1262,9 +1405,7 @@ def main() -> None:
                     "batches_expected": len(loader),
                     "global_step": global_step,
                     "checkpoint_written": False,
-                    "reason": (
-                        "max_steps reached before the complete epoch boundary"
-                    ),
+                    "reason": ("max_steps reached before the complete epoch boundary"),
                 },
             )
         torch.distributed.barrier()
@@ -1273,9 +1414,7 @@ def main() -> None:
 
     elapsed = time.perf_counter() - start_time
     if rank == 0:
-        meta["optimization_diagnostics"] = _guarded_optimization_summary(
-            optimization
-        )
+        meta["optimization_diagnostics"] = _guarded_optimization_summary(optimization)
         final = {
             "schema_version": 1,
             "experiment": EXPERIMENT,
@@ -1291,14 +1430,10 @@ def main() -> None:
             ),
             "wall_seconds_this_process": elapsed,
             "steps_executed_this_process": global_step - process_start_step,
-            "steps_per_second_per_rank": (
-                (global_step - process_start_step) / elapsed
-            ),
+            "steps_per_second_per_rank": ((global_step - process_start_step) / elapsed),
             "metrics": _summary(cumulative),
             "raw_metric_sums": cumulative,
-            "optimization_diagnostics": _guarded_optimization_summary(
-                optimization
-            ),
+            "optimization_diagnostics": _guarded_optimization_summary(optimization),
         }
         _write_json_atomic(output / "training_summary.json", final)
         print(json.dumps(final), flush=True)

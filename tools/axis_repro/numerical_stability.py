@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict, dataclass
 import math
-from typing import Iterable, Tuple
+from typing import Deque, Iterable, Mapping, Tuple
 
 import torch
 
@@ -20,6 +21,202 @@ class GradientGuardDecision:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class GradientGuardFailFastDecision:
+    """Decision made after one synchronized DDP guard observation."""
+
+    should_abort: bool
+    reason: str
+    audit: dict
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+class GradientGuardFailFast:
+    """Detect intermittent skip storms that a consecutive-only guard misses."""
+
+    _VALID_REASONS = frozenset({"safe", "finite_spike", "nonfinite"})
+
+    def __init__(
+        self,
+        *,
+        window_size: int,
+        window_min_observations: int,
+        max_window_skip_rate: float,
+        epoch_min_observations: int,
+        max_epoch_skip_rate: float,
+        max_consecutive_skips: int,
+        fail_on_nonfinite: bool = True,
+    ) -> None:
+        if window_size <= 0:
+            raise ValueError("gradient-guard window size must be positive")
+        if not 1 <= window_min_observations <= window_size:
+            raise ValueError(
+                "gradient-guard window minimum must be in [1, window_size]"
+            )
+        if not 0.0 <= max_window_skip_rate < 1.0:
+            raise ValueError(
+                "gradient-guard maximum window skip rate must be in [0, 1)"
+            )
+        if epoch_min_observations <= 0:
+            raise ValueError(
+                "gradient-guard epoch minimum observations must be positive"
+            )
+        if not 0.0 <= max_epoch_skip_rate < 1.0:
+            raise ValueError("gradient-guard maximum epoch skip rate must be in [0, 1)")
+        if max_consecutive_skips <= 0:
+            raise ValueError("gradient-guard consecutive-skip limit must be positive")
+        if not isinstance(fail_on_nonfinite, bool):
+            raise ValueError("gradient-guard fail_on_nonfinite must be boolean")
+
+        self.window_size = int(window_size)
+        self.window_min_observations = int(window_min_observations)
+        self.max_window_skip_rate = float(max_window_skip_rate)
+        self.epoch_min_observations = int(epoch_min_observations)
+        self.max_epoch_skip_rate = float(max_epoch_skip_rate)
+        self.max_consecutive_skips = int(max_consecutive_skips)
+        self.fail_on_nonfinite = fail_on_nonfinite
+        self._window: Deque[bool] = deque(maxlen=self.window_size)
+        self.epoch_attempted_steps = 0
+        self.epoch_skipped_steps = 0
+        self.epoch_nonfinite_steps = 0
+        self.consecutive_skips = 0
+        self.max_observed_consecutive_skips = 0
+
+    def snapshot(self) -> dict:
+        window_observations = len(self._window)
+        window_skipped_steps = sum(self._window)
+        return {
+            "window_size": self.window_size,
+            "window_min_observations": self.window_min_observations,
+            "max_window_skip_rate": self.max_window_skip_rate,
+            "epoch_min_observations": self.epoch_min_observations,
+            "max_epoch_skip_rate": self.max_epoch_skip_rate,
+            "max_consecutive_skips": self.max_consecutive_skips,
+            "fail_on_nonfinite": self.fail_on_nonfinite,
+            "window_observations": window_observations,
+            "window_skipped_steps": window_skipped_steps,
+            "window_skip_rate": (
+                0.0
+                if window_observations == 0
+                else window_skipped_steps / window_observations
+            ),
+            "epoch_attempted_steps": self.epoch_attempted_steps,
+            "epoch_skipped_steps": self.epoch_skipped_steps,
+            "epoch_nonfinite_steps": self.epoch_nonfinite_steps,
+            "epoch_skip_rate": (
+                0.0
+                if self.epoch_attempted_steps == 0
+                else self.epoch_skipped_steps / self.epoch_attempted_steps
+            ),
+            "consecutive_skips": self.consecutive_skips,
+            "max_observed_consecutive_skips": (self.max_observed_consecutive_skips),
+        }
+
+    def observe(
+        self,
+        *,
+        skipped: bool,
+        gradient_reason: str,
+    ) -> GradientGuardFailFastDecision:
+        if gradient_reason not in self._VALID_REASONS:
+            raise ValueError(f"unknown gradient-guard reason: {gradient_reason}")
+        expected_skipped = gradient_reason != "safe"
+        if bool(skipped) != expected_skipped:
+            raise ValueError(
+                "gradient-guard skipped flag disagrees with gradient reason"
+            )
+
+        skipped = bool(skipped)
+        self._window.append(skipped)
+        self.epoch_attempted_steps += 1
+        if skipped:
+            self.epoch_skipped_steps += 1
+            self.consecutive_skips += 1
+            self.max_observed_consecutive_skips = max(
+                self.max_observed_consecutive_skips,
+                self.consecutive_skips,
+            )
+        else:
+            self.consecutive_skips = 0
+        if gradient_reason == "nonfinite":
+            self.epoch_nonfinite_steps += 1
+
+        audit = self.snapshot()
+        reason = "safe"
+        if gradient_reason == "nonfinite" and self.fail_on_nonfinite:
+            reason = "nonfinite_gradient"
+        elif self.consecutive_skips >= self.max_consecutive_skips:
+            reason = "consecutive_gradient_skips"
+        elif (
+            skipped
+            and audit["window_observations"] >= self.window_min_observations
+            and audit["window_skip_rate"] > self.max_window_skip_rate
+        ):
+            reason = "window_gradient_skip_rate"
+        elif (
+            skipped
+            and self.epoch_attempted_steps >= self.epoch_min_observations
+            and audit["epoch_skip_rate"] > self.max_epoch_skip_rate
+        ):
+            reason = "epoch_gradient_skip_rate"
+        return GradientGuardFailFastDecision(
+            should_abort=reason != "safe",
+            reason=reason,
+            audit=audit,
+        )
+
+
+def validate_completed_epoch_guard_audit(
+    audit: Mapping,
+    *,
+    expected_epoch: int,
+    expected_attempted_steps: int,
+    max_epoch_skip_rate: float,
+) -> dict:
+    """Recompute checkpoint eligibility from a completed-epoch guard audit."""
+    required = {
+        "epoch",
+        "epoch_attempted_steps",
+        "epoch_skipped_steps",
+        "epoch_nonfinite_steps",
+        "epoch_skip_rate",
+        "fail_fast_triggered",
+        "checkpoint_eligible",
+    }
+    missing = sorted(required.difference(audit))
+    if missing:
+        raise ValueError(f"completed epoch lacks gradient-guard fields: {missing}")
+    if int(audit["epoch"]) != expected_epoch:
+        raise ValueError("completed-epoch gradient-guard epoch changed")
+    attempted = int(audit["epoch_attempted_steps"])
+    skipped = int(audit["epoch_skipped_steps"])
+    nonfinite = int(audit["epoch_nonfinite_steps"])
+    if attempted != expected_attempted_steps:
+        raise ValueError(
+            "completed-epoch gradient-guard attempt count is not the "
+            "complete epoch boundary"
+        )
+    if not 0 <= skipped <= attempted:
+        raise ValueError("completed-epoch gradient skip count is invalid")
+    if not 0 <= nonfinite <= skipped:
+        raise ValueError("completed-epoch nonfinite gradient count is invalid")
+    recomputed_rate = 0.0 if attempted == 0 else skipped / attempted
+    recorded_rate = float(audit["epoch_skip_rate"])
+    if not math.isclose(recorded_rate, recomputed_rate, abs_tol=1e-12):
+        raise ValueError("completed-epoch gradient skip rate is inconsistent")
+    if bool(audit["fail_fast_triggered"]):
+        raise ValueError("fail-fast-triggered epoch cannot be checkpointed")
+    if nonfinite:
+        raise ValueError("epoch with nonfinite gradients cannot be checkpointed")
+    if recomputed_rate > max_epoch_skip_rate:
+        raise ValueError("completed epoch exceeds gradient skip-rate limit")
+    if bool(audit["checkpoint_eligible"]) is not True:
+        raise ValueError("completed epoch is not checkpoint eligible")
+    return dict(audit)
 
 
 def decide_gradient_step(

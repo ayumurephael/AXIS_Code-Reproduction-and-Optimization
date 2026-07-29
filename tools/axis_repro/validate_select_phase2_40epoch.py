@@ -1,4 +1,5 @@
 """Validate all 40 formal checkpoints and select the unique minimum NLL."""
+
 from __future__ import annotations
 
 import argparse
@@ -46,14 +47,13 @@ from .train_phase2_treatment_40epoch_ddp import (
     expected_global_step_for_epoch,
     planned_steps_for_completed_epoch,
     steps_per_epoch_for_completed_epoch,
+    validate_formal_completed_epoch_guard,
     world_size_for_completed_epoch,
 )
 
 
 EXPECTED_VALIDATION_ROWS = 3_000
-SELECTION_METRIC = (
-    "effective-answer-token-weighted teacher-forced global token NLL"
-)
+SELECTION_METRIC = "effective-answer-token-weighted teacher-forced global token NLL"
 EFFECTIVE_TOKEN_DEFINITION = (
     "shifted labels != -100 on non-error rows under the boundary-correct "
     "global continuation objective, including terminal EOS"
@@ -249,11 +249,11 @@ def validate_checkpoint_identity(
             raise ValueError("candidate gradient-guard threshold changed")
         if stability.get("unsafe_updates_applied") is not False:
             raise ValueError("candidate does not prove fail-closed optimizer updates")
-        guard = meta.get("optimization_diagnostics", {}).get(
-            "gradient_guard", {}
-        )
+        guard = meta.get("optimization_diagnostics", {}).get("gradient_guard", {})
         if guard.get("threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
             raise ValueError("candidate lacks gradient-guard audit evidence")
+        if epoch >= FORMAL_LR_SWITCH_EPOCH:
+            validate_formal_completed_epoch_guard(meta, epoch)
     if epoch >= FORMAL_LR_SWITCH_EPOCH:
         expected_lr_schedule = {
             "epochs_1_4": FORMAL_LR,
@@ -345,9 +345,7 @@ def main() -> None:
     if rank == 0:
         _write_json_atomic(data_manifest_path, data_manifest)
     torch.distributed.barrier()
-    data_manifest_hash_box = [
-        sha256_file(data_manifest_path) if rank == 0 else None
-    ]
+    data_manifest_hash_box = [sha256_file(data_manifest_path) if rank == 0 else None]
     torch.distributed.broadcast_object_list(data_manifest_hash_box, src=0)
     validation_data_manifest_sha256 = data_manifest_hash_box[0]
 
@@ -409,16 +407,11 @@ def main() -> None:
         elif identity_fields != shared_identity:
             raise ValueError("candidate checkpoint identities differ across epochs")
 
-        checkpoint_hash_box = [
-            sha256_file(checkpoint_path) if rank == 0 else None
-        ]
+        checkpoint_hash_box = [sha256_file(checkpoint_path) if rank == 0 else None]
         torch.distributed.broadcast_object_list(checkpoint_hash_box, src=0)
         local_totals = torch.zeros(5, dtype=torch.float64, device=local_rank)
         for batch_index, batch in enumerate(loader, start=1):
-            valid_rows = [
-                answer.strip() != ERROR_ANSWER
-                for answer in batch["answers"]
-            ]
+            valid_rows = [answer.strip() != ERROR_ANSWER for answer in batch["answers"]]
             time_series = batch["padded_sequences"].to(
                 local_rank,
                 dtype=torch.float32,
@@ -501,9 +494,7 @@ def main() -> None:
             "validation_seed": FORMAL_SEED,
             "train_ratio": FORMAL_TRAIN_RATIO,
             "split_manifest_sha256": split_manifest_sha256,
-            "validation_data_manifest_sha256": (
-                validation_data_manifest_sha256
-            ),
+            "validation_data_manifest_sha256": (validation_data_manifest_sha256),
             "rank_partition": "series_index_mod_world_size",
             "world_size": world,
             "batch_size_per_rank_series": 1,
@@ -513,9 +504,7 @@ def main() -> None:
             "loss_chunk_size": args.loss_chunk_size,
             "wall_seconds": time.perf_counter() - started,
             "evaluator_source_commit": _git_value("rev-parse", "HEAD"),
-            "evaluator_source_dirty": bool(
-                _git_value("status", "--porcelain")
-            ),
+            "evaluator_source_dirty": bool(_git_value("status", "--porcelain")),
         }
         if rank == 0:
             _write_json_atomic(
@@ -527,10 +516,7 @@ def main() -> None:
         del payload
         torch.distributed.barrier()
 
-    token_counts = {
-        summary["effective_answer_token_count"]
-        for summary in summaries
-    }
+    token_counts = {summary["effective_answer_token_count"] for summary in summaries}
     if len(token_counts) != 1:
         raise RuntimeError("effective validation token denominator drifted")
     selected = min(
@@ -546,9 +532,7 @@ def main() -> None:
             "effective_token_definition": EFFECTIVE_TOKEN_DEFINITION,
             "metric_direction": "minimize",
             "tie_break": "lower epoch",
-            "declared_candidate_epochs": list(
-                range(1, FORMAL_EPOCHS + 1)
-            ),
+            "declared_candidate_epochs": list(range(1, FORMAL_EPOCHS + 1)),
             "validation_seed": FORMAL_SEED,
             "validation_series": FORMAL_VALIDATION_SERIES,
             "train_ratio": FORMAL_TRAIN_RATIO,

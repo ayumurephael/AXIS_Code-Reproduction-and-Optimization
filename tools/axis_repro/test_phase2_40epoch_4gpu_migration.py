@@ -14,6 +14,7 @@ from .train_phase2_treatment_40epoch_ddp import (
     FORMAL_LR_SWITCH_EPOCH,
     FORMAL_LR,
     FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS,
+    FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE,
     FORMAL_MAX_GRAD_NORM,
     FORMAL_SEED,
     FORMAL_STEPS_PER_EPOCH,
@@ -26,6 +27,7 @@ from .train_phase2_treatment_40epoch_ddp import (
     RESUMED_WORLD_SIZE,
     _validate_args,
     expected_global_step_for_epoch,
+    formal_gradient_guard_policy,
     learning_rate_for_epoch,
     planned_steps_for_completed_epoch,
     steps_per_epoch_for_completed_epoch,
@@ -90,9 +92,7 @@ def _meta(epoch: int) -> dict:
             "perceiver_wide_operations": "FP32 under BF16 outer autocast",
             "gradient_guard_scope": "synchronized across all DDP ranks",
             "gradient_skip_threshold": FORMAL_GRADIENT_SKIP_THRESHOLD,
-            "max_consecutive_gradient_skips": (
-                FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS
-            ),
+            "max_consecutive_gradient_skips": (FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS),
             "unsafe_updates_applied": False,
         }
         meta["optimization_diagnostics"]["gradient_guard"] = {
@@ -105,6 +105,22 @@ def _meta(epoch: int) -> dict:
             "consecutive_skip_limit": FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS,
             "events": [],
         }
+        if epoch >= FORMAL_LR_SWITCH_EPOCH:
+            meta["numerical_stability"][
+                "fail_fast_policy"
+            ] = formal_gradient_guard_policy()
+            attempted = steps_per_epoch_for_completed_epoch(epoch)
+            meta["optimization_diagnostics"]["gradient_guard"][
+                "last_completed_epoch"
+            ] = {
+                "epoch": epoch,
+                "epoch_attempted_steps": attempted,
+                "epoch_skipped_steps": 0,
+                "epoch_nonfinite_steps": 0,
+                "epoch_skip_rate": 0.0,
+                "fail_fast_triggered": False,
+                "checkpoint_eligible": True,
+            }
     if epoch >= FORMAL_LR_SWITCH_EPOCH:
         meta["epoch5_lr"] = FORMAL_EPOCH5_LR
         meta["lr_schedule"] = {
@@ -182,12 +198,19 @@ class FourGpuMigrationTests(unittest.TestCase):
         )
         self.assertEqual(result["world_size"], 5)
 
+    def test_epoch_five_checkpoint_with_safe_guard_audit_is_valid(self):
+        result = validate_resume_checkpoint(
+            _payload(5),
+            split_manifest_sha256=SPLIT_HASH,
+            data_audit_sha256=DATA_AUDIT_HASH,
+            phase1_sha256=PHASE1_HASH,
+        )
+        self.assertEqual(result["world_size"], 5)
+
     def test_resumed_checkpoint_without_guard_audit_is_rejected(self):
         payload = _payload(4)
         del payload["reproduction_meta"]["numerical_stability"]
-        del payload["reproduction_meta"]["optimization_diagnostics"][
-            "gradient_guard"
-        ]
+        del payload["reproduction_meta"]["optimization_diagnostics"]["gradient_guard"]
         with self.assertRaisesRegex(ValueError, "gradient-guard"):
             validate_resume_checkpoint(
                 payload,
@@ -212,6 +235,58 @@ class FourGpuMigrationTests(unittest.TestCase):
         payload = _payload(2)
         payload["global_step"] = 2 * FORMAL_STEPS_PER_EPOCH
         with self.assertRaisesRegex(ValueError, "complete epoch boundary"):
+            validate_resume_checkpoint(
+                payload,
+                split_manifest_sha256=SPLIT_HASH,
+                data_audit_sha256=DATA_AUDIT_HASH,
+                phase1_sha256=PHASE1_HASH,
+            )
+
+    def test_failed_epoch_five_is_rejected_for_resume(self):
+        payload = _payload(5)
+        guard = payload["reproduction_meta"]["optimization_diagnostics"][
+            "gradient_guard"
+        ]["last_completed_epoch"]
+        guard.update(
+            {
+                "epoch_skipped_steps": 395,
+                "epoch_skip_rate": 395 / 5_700,
+                "checkpoint_eligible": False,
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "skip-rate"):
+            validate_resume_checkpoint(
+                payload,
+                split_manifest_sha256=SPLIT_HASH,
+                data_audit_sha256=DATA_AUDIT_HASH,
+                phase1_sha256=PHASE1_HASH,
+            )
+
+    def test_failed_epoch_five_is_rejected_for_selection(self):
+        payload = _payload(5)
+        guard = payload["reproduction_meta"]["optimization_diagnostics"][
+            "gradient_guard"
+        ]["last_completed_epoch"]
+        guard.update(
+            {
+                "epoch_skipped_steps": 395,
+                "epoch_skip_rate": 395 / 5_700,
+                "checkpoint_eligible": False,
+            }
+        )
+        with self.assertRaisesRegex(ValueError, "skip-rate"):
+            validate_checkpoint_identity(
+                payload,
+                expected_epoch=5,
+                split_manifest_sha256=SPLIT_HASH,
+            )
+
+    def test_epoch_five_guard_policy_change_is_rejected(self):
+        payload = _payload(5)
+        payload["reproduction_meta"]["numerical_stability"]["fail_fast_policy"][
+            "max_epoch_skip_rate"
+        ] = (FORMAL_MAX_EPOCH_GRADIENT_SKIP_RATE * 2)
+        with self.assertRaisesRegex(ValueError, "fail-fast policy"):
             validate_resume_checkpoint(
                 payload,
                 split_manifest_sha256=SPLIT_HASH,
@@ -254,9 +329,7 @@ class FourGpuMigrationTests(unittest.TestCase):
             alpha=FORMAL_ALPHA,
             max_grad_norm=FORMAL_MAX_GRAD_NORM,
             gradient_skip_threshold=FORMAL_GRADIENT_SKIP_THRESHOLD,
-            max_consecutive_gradient_skips=(
-                FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS
-            ),
+            max_consecutive_gradient_skips=(FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS),
             max_steps=None,
             resume_from="epoch_03.pth",
         )
