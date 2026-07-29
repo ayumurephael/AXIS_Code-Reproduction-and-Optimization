@@ -94,6 +94,8 @@ FORMAL_TOTAL_STEPS = (
     * RESUMED_STEPS_PER_EPOCH
 )
 FORMAL_LR = 1e-4
+FORMAL_LR_SWITCH_EPOCH = 5
+FORMAL_EPOCH5_LR = 3e-5
 FORMAL_WEIGHT_DECAY = 1e-5
 FORMAL_ALPHA = 0.40
 FORMAL_MAX_GRAD_NORM = 1.0
@@ -146,6 +148,20 @@ def planned_steps_for_completed_epoch(epoch: int) -> int:
             * FORMAL_STEPS_PER_EPOCH
         )
     return FORMAL_TOTAL_STEPS
+
+
+def learning_rate_for_epoch(
+    epoch: int,
+    *,
+    initial_lr: float,
+    epoch5_lr: float,
+) -> float:
+    """Return the user-approved two-stage Phase-II learning rate."""
+    if not 1 <= epoch <= FORMAL_EPOCHS:
+        raise ValueError(f"epoch must be in [1, {FORMAL_EPOCHS}]")
+    if epoch < FORMAL_LR_SWITCH_EPOCH:
+        return float(initial_lr)
+    return float(epoch5_lr)
 
 
 def _guarded_optimization_summary(state: Mapping) -> dict:
@@ -509,6 +525,15 @@ def validate_resume_checkpoint(
         )
         if guard.get("threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
             raise ValueError("resume checkpoint lacks gradient-guard audit")
+    if epoch >= FORMAL_LR_SWITCH_EPOCH:
+        expected_lr_schedule = {
+            "epochs_1_4": FORMAL_LR,
+            "epochs_5_40": FORMAL_EPOCH5_LR,
+        }
+        if meta.get("lr_schedule") != expected_lr_schedule:
+            raise ValueError("resume checkpoint has the wrong LR schedule")
+        if meta.get("epoch5_lr") != FORMAL_EPOCH5_LR:
+            raise ValueError("resume checkpoint epoch-5 LR changed")
     if "fixed_hint_reference" not in payload["model_state_dict"]:
         raise ValueError("resume Treatment checkpoint has no cached F0")
     if set(METRIC_KEYS).difference(payload["cumulative_training_metrics"]):
@@ -530,6 +555,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--epochs", type=int, default=FORMAL_EPOCHS)
     result.add_argument("--seed", type=int, default=FORMAL_SEED)
     result.add_argument("--lr", type=float, default=FORMAL_LR)
+    result.add_argument("--epoch5-lr", type=float, default=FORMAL_EPOCH5_LR)
     result.add_argument("--weight-decay", type=float, default=FORMAL_WEIGHT_DECAY)
     result.add_argument("--alpha", type=float, default=FORMAL_ALPHA)
     result.add_argument("--max-grad-norm", type=float, default=FORMAL_MAX_GRAD_NORM)
@@ -558,6 +584,7 @@ def _validate_args(args, world: int) -> None:
         "epochs": (args.epochs, FORMAL_EPOCHS),
         "seed": (args.seed, FORMAL_SEED),
         "lr": (args.lr, FORMAL_LR),
+        "epoch5_lr": (args.epoch5_lr, FORMAL_EPOCH5_LR),
         "weight_decay": (args.weight_decay, FORMAL_WEIGHT_DECAY),
         "alpha": (args.alpha, FORMAL_ALPHA),
         "max_grad_norm": (args.max_grad_norm, FORMAL_MAX_GRAD_NORM),
@@ -838,7 +865,11 @@ def main() -> None:
         "checkpoint_schedule": "every_complete_epoch",
         "declared_candidate_epochs": list(range(1, args.epochs + 1)),
         "lr": args.lr,
-        "lr_schedule": "constant",
+        "epoch5_lr": args.epoch5_lr,
+        "lr_schedule": {
+            "epochs_1_4": args.lr,
+            "epochs_5_40": args.epoch5_lr,
+        },
         "weight_decay": args.weight_decay,
         "optimizer": "torch.optim.AdamW",
         "optimizer_betas": list(optimizer.param_groups[0]["betas"]),
@@ -976,6 +1007,13 @@ def main() -> None:
     stopped_early = False
     completed_epoch = start_epoch - 1
     for epoch in range(start_epoch, args.epochs + 1):
+        active_lr = learning_rate_for_epoch(
+            epoch,
+            initial_lr=args.lr,
+            epoch5_lr=args.epoch5_lr,
+        )
+        for parameter_group in optimizer.param_groups:
+            parameter_group["lr"] = active_lr
         sampler.set_epoch(epoch)
         ddp.train()
         ddp.module.base.ts_pretrain_model.eval()
@@ -1147,6 +1185,7 @@ def main() -> None:
                         {
                             "step": global_step,
                             "epoch": epoch,
+                            "learning_rate": active_lr,
                             "step_in_epoch": global_step
                             - expected_global_step_for_epoch(epoch - 1),
                             "step_metrics": _summary(

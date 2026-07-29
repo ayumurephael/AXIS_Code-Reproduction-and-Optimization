@@ -10,6 +10,8 @@ from .train_phase2_treatment_40epoch_ddp import (
     FORMAL_ALPHA,
     FORMAL_EPOCHS,
     FORMAL_GRADIENT_SKIP_THRESHOLD,
+    FORMAL_EPOCH5_LR,
+    FORMAL_LR_SWITCH_EPOCH,
     FORMAL_LR,
     FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS,
     FORMAL_MAX_GRAD_NORM,
@@ -24,6 +26,7 @@ from .train_phase2_treatment_40epoch_ddp import (
     RESUMED_WORLD_SIZE,
     _validate_args,
     expected_global_step_for_epoch,
+    learning_rate_for_epoch,
     planned_steps_for_completed_epoch,
     steps_per_epoch_for_completed_epoch,
     validate_resume_checkpoint,
@@ -102,6 +105,12 @@ def _meta(epoch: int) -> dict:
             "consecutive_skip_limit": FORMAL_MAX_CONSECUTIVE_GRADIENT_SKIPS,
             "events": [],
         }
+    if epoch >= FORMAL_LR_SWITCH_EPOCH:
+        meta["epoch5_lr"] = FORMAL_EPOCH5_LR
+        meta["lr_schedule"] = {
+            "epochs_1_4": FORMAL_LR,
+            "epochs_5_40": FORMAL_EPOCH5_LR,
+        }
     return meta
 
 
@@ -125,6 +134,26 @@ class FourGpuMigrationTests(unittest.TestCase):
         self.assertEqual(expected_global_step_for_epoch(4), 25_650)
         self.assertEqual(expected_global_step_for_epoch(40), 230_850)
         self.assertEqual(FORMAL_TOTAL_STEPS, 230_850)
+
+    def test_two_stage_learning_rate_schedule(self):
+        for epoch in range(1, FORMAL_LR_SWITCH_EPOCH):
+            with self.subTest(epoch=epoch):
+                self.assertEqual(
+                    learning_rate_for_epoch(
+                        epoch,
+                        initial_lr=FORMAL_LR,
+                        epoch5_lr=FORMAL_EPOCH5_LR,
+                    ),
+                    FORMAL_LR,
+                )
+        self.assertEqual(
+            learning_rate_for_epoch(
+                5,
+                initial_lr=FORMAL_LR,
+                epoch5_lr=FORMAL_EPOCH5_LR,
+            ),
+            FORMAL_EPOCH5_LR,
+        )
 
     def test_epoch_one_legacy_checkpoint_is_valid_resume(self):
         result = validate_resume_checkpoint(
@@ -160,6 +189,18 @@ class FourGpuMigrationTests(unittest.TestCase):
             "gradient_guard"
         ]
         with self.assertRaisesRegex(ValueError, "gradient-guard"):
+            validate_resume_checkpoint(
+                payload,
+                split_manifest_sha256=SPLIT_HASH,
+                data_audit_sha256=DATA_AUDIT_HASH,
+                phase1_sha256=PHASE1_HASH,
+            )
+
+    def test_epoch_five_without_lr_schedule_is_rejected(self):
+        payload = _payload(5)
+        del payload["reproduction_meta"]["epoch5_lr"]
+        del payload["reproduction_meta"]["lr_schedule"]
+        with self.assertRaisesRegex(ValueError, "LR schedule"):
             validate_resume_checkpoint(
                 payload,
                 split_manifest_sha256=SPLIT_HASH,
@@ -208,6 +249,7 @@ class FourGpuMigrationTests(unittest.TestCase):
             epochs=FORMAL_EPOCHS,
             seed=FORMAL_SEED,
             lr=FORMAL_LR,
+            epoch5_lr=FORMAL_EPOCH5_LR,
             weight_decay=FORMAL_WEIGHT_DECAY,
             alpha=FORMAL_ALPHA,
             max_grad_norm=FORMAL_MAX_GRAD_NORM,

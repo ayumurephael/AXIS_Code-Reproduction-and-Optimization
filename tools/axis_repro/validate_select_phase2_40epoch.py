@@ -29,6 +29,8 @@ from .train_phase2_treatment_40epoch_ddp import (
     EXPERIMENT,
     FORMAL_ALPHA,
     FORMAL_EPOCHS,
+    FORMAL_EPOCH5_LR,
+    FORMAL_LR_SWITCH_EPOCH,
     FORMAL_GRADIENT_SKIP_THRESHOLD,
     FORMAL_LR,
     FORMAL_MAX_GRAD_NORM,
@@ -252,6 +254,15 @@ def validate_checkpoint_identity(
         )
         if guard.get("threshold") != FORMAL_GRADIENT_SKIP_THRESHOLD:
             raise ValueError("candidate lacks gradient-guard audit evidence")
+    if epoch >= FORMAL_LR_SWITCH_EPOCH:
+        expected_lr_schedule = {
+            "epochs_1_4": FORMAL_LR,
+            "epochs_5_40": FORMAL_EPOCH5_LR,
+        }
+        if meta.get("lr_schedule") != expected_lr_schedule:
+            raise ValueError("candidate has the wrong LR schedule")
+        if meta.get("epoch5_lr") != FORMAL_EPOCH5_LR:
+            raise ValueError("candidate epoch-5 LR changed")
     state = payload.get("model_state_dict", {})
     if "fixed_hint_reference" not in state:
         raise ValueError("Treatment candidate has no cached F0")
