@@ -166,6 +166,7 @@ def environment_manifest(config: MultiAxisConfig, rank: int, world_size: int, mo
         "world_size": world_size,
         "gpu_names": [torch.cuda.get_device_name(index) for index in range(world_size)],
         "config": config.to_dict(),
+        "pretrained_source": getattr(model, "pretrained_source", config.llm.model_name),
         "actual_effective_batch_size": config.training.micro_batch_size * config.training.accumulation_steps * world_size,
         "timercd_sha256": model.timercd.checkpoint_sha256,
         "trainable_parameter_count": sum(p.numel() for p in model.parameters() if p.requires_grad),

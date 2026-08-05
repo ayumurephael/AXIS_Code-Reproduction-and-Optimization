@@ -39,7 +39,7 @@ python -m pip install --upgrade "transformers>=4.57,<5" "openai>=1.99" "google-g
 python -m pip install --no-build-isolation --no-deps "flash-attn==2.7.4.post1"
 ```
 
-Before any formal work, verify `torch.cuda.device_count() == 5`, that all devices are H100, BF16 is supported, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. Export `PYTHONPATH` to the repository root and put Hugging Face caches on a filesystem with enough space.
+Before any formal work, verify `torch.cuda.device_count() == 5`, that all devices are H100, BF16 is supported, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. Export `PYTHONPATH` to the repository root and put Hugging Face caches on a filesystem with enough space. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in the configuration and checkpoint metadata.
 
 ## Build immutable manifests
 

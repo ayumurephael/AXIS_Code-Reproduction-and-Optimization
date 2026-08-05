@@ -153,7 +153,20 @@ def main():
     checkpoint = model.load_hint_checkpoint(args.hint_checkpoint, strict=True)
     model.eval()
     if rank == 0:
-        (output_dir / "inference_manifest.json").write_text(json.dumps({"created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "model": config.llm.model_name, "hint_checkpoint": str(Path(args.hint_checkpoint).resolve()), "hint_checkpoint_epoch": checkpoint.get("epoch"), "timercd_sha256": model.timercd.checkpoint_sha256, "world_size": world, "datasets": args.datasets, "generation": config.generation.__dict__}, indent=2), encoding="utf-8")
+        manifest = {
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "model": config.llm.model_name,
+            "pretrained_source": getattr(model, "pretrained_source", config.llm.model_name),
+            "hint_checkpoint": str(Path(args.hint_checkpoint).resolve()),
+            "hint_checkpoint_epoch": checkpoint.get("epoch"),
+            "timercd_sha256": model.timercd.checkpoint_sha256,
+            "world_size": world,
+            "datasets": args.datasets,
+            "generation": config.generation.__dict__,
+        }
+        (output_dir / "inference_manifest.json").write_text(
+            json.dumps(manifest, indent=2), encoding="utf-8"
+        )
     for dataset_name in args.datasets:
         run_dataset(model, dataset_name, Path(args.manifest_dir), Path(args.data_root), output_dir, rank, world, device)
     if rank == 0:

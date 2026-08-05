@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -197,8 +198,11 @@ class MultiAxisForConditionalGeneration(nn.Module):
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
         dtype = getattr(torch, config.llm.torch_dtype)
+        source = os.environ.get("MULTI_AXIS_MODEL_PATH") or config.llm.model_name
+        if source != config.llm.model_name and not Path(source).is_dir():
+            raise FileNotFoundError(f"MULTI_AXIS_MODEL_PATH is not a directory: {source}")
         tokenizer = AutoTokenizer.from_pretrained(
-            config.llm.model_name,
+            source,
             token=token,
             trust_remote_code=config.llm.trust_remote_code,
             use_fast=True,
@@ -213,14 +217,16 @@ class MultiAxisForConditionalGeneration(nn.Module):
         if device is not None:
             kwargs["device_map"] = {"": str(device)}
         try:
-            llm = AutoModelForCausalLM.from_pretrained(config.llm.model_name, **kwargs)
+            llm = AutoModelForCausalLM.from_pretrained(source, **kwargs)
         except ValueError:
             # Qwen3.5 releases may register through the unified image-text auto class
             # even when used text-only. DeepSeek uses the causal-LM path above.
             from transformers import AutoModelForImageTextToText
 
-            llm = AutoModelForImageTextToText.from_pretrained(config.llm.model_name, **kwargs)
-        return cls(llm=llm, tokenizer=tokenizer, config=config)
+            llm = AutoModelForImageTextToText.from_pretrained(source, **kwargs)
+        instance = cls(llm=llm, tokenizer=tokenizer, config=config)
+        instance.pretrained_source = str(source)
+        return instance
 
     def _hidden_size(self) -> int:
         if hasattr(self.llm.config, "hidden_size"):
