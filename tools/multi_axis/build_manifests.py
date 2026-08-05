@@ -89,6 +89,15 @@ def teacher_rows(paths: Sequence[Path]):
     return rows
 
 
+def normalized_question(row: Dict[str, Any]) -> str:
+    value = row.get("question")
+    if value is None:
+        windows = row.get("windows") or []
+        if windows and isinstance(windows[0], dict):
+            value = windows[0].get("question")
+    return "" if value is None else str(value).strip().lower()
+
+
 def match_teachers(question_rows, teachers):
     by_question = collections.defaultdict(collections.deque)
     for index, item in enumerate(teachers):
@@ -112,6 +121,55 @@ def match_teachers(question_rows, teachers):
     return matches, used
 
 
+def load_training_recovery(data_root: Path, hash_inputs: bool):
+    recovery_root = data_root / "derived" / "training_recovery"
+    questions_path = recovery_root / "recovered_questions.jsonl"
+    manifest_path = recovery_root / "recovery_manifest.json"
+    if not questions_path.is_file() or not manifest_path.is_file():
+        raise FileNotFoundError(
+            "The audited training recovery bundle is required: "
+            f"{questions_path} and {manifest_path}"
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("format") != "multi-axis-training-recovery-v1":
+        raise RuntimeError("Unsupported training recovery manifest format")
+    expected = manifest.get("recovered_output", {})
+    if questions_path.stat().st_size != int(expected.get("size", -1)):
+        raise RuntimeError("Recovered question file size does not match its audit manifest")
+    recovery_sha256 = sha256_file(questions_path)
+    if recovery_sha256 != expected.get("sha256"):
+        raise RuntimeError("Recovered question file SHA-256 does not match its audit manifest")
+
+    lookup = {}
+    for line, offset, length, row in iter_jsonl(questions_path):
+        metadata = row.get("_multi_axis_recovery") or {}
+        key = (str(metadata.get("source_shard", "")), int(metadata.get("source_index", -1)))
+        if not key[0] or key[1] < 0 or key in lookup:
+            raise RuntimeError(f"Invalid or duplicate recovered training key: {key}")
+        lookup[key] = {
+            "path": questions_path,
+            "line": line,
+            "offset": offset,
+            "length": length,
+            "row": row,
+        }
+    if len(lookup) != int(manifest.get("recovered_question_rows", -1)):
+        raise RuntimeError("Recovered question row count does not match its audit manifest")
+    source_files = [
+        {
+            "path": questions_path.relative_to(data_root).as_posix(),
+            "size": questions_path.stat().st_size,
+            "sha256": recovery_sha256 if hash_inputs else None,
+        },
+        {
+            "path": manifest_path.relative_to(data_root).as_posix(),
+            "size": manifest_path.stat().st_size,
+            "sha256": sha256_file(manifest_path) if hash_inputs else None,
+        },
+    ]
+    return lookup, manifest, source_files
+
+
 def train_record(data_root: Path, question_item, teacher_item) -> Dict[str, Any]:
     row = question_item["row"]
     return {
@@ -133,17 +191,34 @@ def train_record(data_root: Path, question_item, teacher_item) -> Dict[str, Any]
 def build_train(data_root: Path, output_dir: Path, seed: int, validation_fraction: float, hash_inputs: bool):
     question_root = data_root / "question" / "question_train"
     teacher_root = data_root / "teacheranswer" / "teacher_train"
-    question_files = sorted(question_root.glob("*/questions_1000.jsonl"))
-    if not question_files:
-        raise FileNotFoundError(f"No training questions beneath {question_root}")
+    teacher_summary_path = teacher_root / "summary.json"
+    if not teacher_summary_path.is_file():
+        raise FileNotFoundError(f"Missing authoritative teacher summary: {teacher_summary_path}")
+    teacher_summary = json.loads(teacher_summary_path.read_text(encoding="utf-8"))
+    entries = teacher_summary.get("entries") or []
+    if len(entries) != 62:
+        raise RuntimeError(f"Expected 62 authoritative teacher shards, got {len(entries)}")
+    recovery, recovery_manifest, recovery_source_files = load_training_recovery(data_root, hash_inputs)
+
     records = []
     empty_answers = 0
-    unmatched_questions = 0
-    unused_teachers = 0
+    direct_matches = 0
+    recovered_matches = 0
+    unused_questions = 0
+    question_pool_rows = 0
     paired_before_empty = 0
-    source_files = []
-    for question_path in question_files:
-        teacher_path = teacher_root / question_path.parent.name / "teacher_gpt55.answers.jsonl"
+    source_files = list(recovery_source_files)
+    used_recovery = set()
+    for entry in entries:
+        shard = str(entry["name"])
+        expected_rows = int(entry["line_count"])
+        question_candidates = sorted((question_root / shard).glob("questions_*.jsonl"))
+        if len(question_candidates) != 1:
+            raise RuntimeError(
+                f"Expected exactly one questions_*.jsonl for {shard}, got {len(question_candidates)}"
+            )
+        question_path = question_candidates[0]
+        teacher_path = teacher_root / shard / "teacher_gpt55.answers.jsonl"
         if not teacher_path.exists():
             raise FileNotFoundError(f"Missing aligned teacher shard: {teacher_path}")
         questions = [
@@ -151,24 +226,76 @@ def build_train(data_root: Path, output_dir: Path, seed: int, validation_fractio
             for line, offset, length, row in iter_jsonl(question_path)
         ]
         teachers = teacher_rows([teacher_path])
-        matches, used = match_teachers(questions, teachers)
-        paired_before_empty += len(matches)
-        unmatched_questions += len(questions) - len(matches)
-        unused_teachers += len(teachers) - len(used)
-        for question_item, teacher_item in matches:
+        if len(teachers) != expected_rows:
+            raise RuntimeError(
+                f"Teacher count for {shard} does not match summary: {len(teachers)} != {expected_rows}"
+            )
+        by_question = collections.defaultdict(collections.deque)
+        for index, item in enumerate(questions):
+            by_question[normalized_question(item["row"])].append(index)
+        used_questions = set()
+        for teacher_index, teacher_item in enumerate(teachers):
+            key = normalized_question(teacher_item["row"])
+            queue = by_question[key]
+            if key and queue:
+                question_index = queue.popleft()
+                used_questions.add(question_index)
+                question_item = questions[question_index]
+                direct_matches += 1
+            else:
+                recovery_key = (shard, teacher_index)
+                question_item = recovery.get(recovery_key)
+                if question_item is None:
+                    raise RuntimeError(
+                        f"No text-aligned or audited recovery question for {shard} teacher index {teacher_index}"
+                    )
+                if normalized_question(question_item["row"]) != key:
+                    raise RuntimeError(f"Recovered question text mismatch for {recovery_key}")
+                used_recovery.add(recovery_key)
+                recovered_matches += 1
+            paired_before_empty += 1
             record = train_record(data_root, question_item, teacher_item)
             if not record["teacher_answer"]:
                 empty_answers += 1
                 continue
             records.append(record)
+        question_pool_rows += len(questions)
+        unused_questions += len(questions) - len(used_questions)
         for path in (question_path, teacher_path):
-            source_files.append({"path": path.relative_to(data_root).as_posix(), "size": path.stat().st_size, "sha256": sha256_file(path) if hash_inputs else None})
+            source_files.append(
+                {
+                    "path": path.relative_to(data_root).as_posix(),
+                    "size": path.stat().st_size,
+                    "sha256": sha256_file(path) if hash_inputs else None,
+                }
+            )
+
+    teacher_summary_sha256 = sha256_file(teacher_summary_path)
+    expected_summary = recovery_manifest.get("teacher_summary", {})
+    if (
+        teacher_summary_path.stat().st_size != int(expected_summary.get("size", -1))
+        or teacher_summary_sha256 != expected_summary.get("sha256")
+    ):
+        raise RuntimeError("Authoritative teacher summary does not match the recovery audit manifest")
+    source_files.append(
+        {
+            "path": teacher_summary_path.relative_to(data_root).as_posix(),
+            "size": teacher_summary_path.stat().st_size,
+            "sha256": teacher_summary_sha256 if hash_inputs else None,
+        }
+    )
     if paired_before_empty != 67820:
         raise RuntimeError(f"Expected 67820 aligned training rows, got {paired_before_empty}")
     if empty_answers != 17:
         raise RuntimeError(f"Expected exactly 17 empty teacher answers, got {empty_answers}")
-    if unmatched_questions:
-        raise RuntimeError(f"Found {unmatched_questions} questions without a teacher match")
+    if direct_matches != 67773 or recovered_matches != 47:
+        raise RuntimeError(
+            f"Expected 67773 direct and 47 recovered pairs, got {direct_matches} and {recovered_matches}"
+        )
+    if used_recovery != set(recovery):
+        raise RuntimeError(f"Unused recovery records: {sorted(set(recovery) - used_recovery)}")
+    if len(records) != 67803:
+        raise RuntimeError(f"Expected 67803 retained training rows, got {len(records)}")
 
     groups = sorted({record["base_sample_id"] for record in records})
     shuffled = list(groups)
@@ -184,23 +311,30 @@ def build_train(data_root: Path, output_dir: Path, seed: int, validation_fractio
     write_manifest(validation, output_dir / "validation.jsonl")
     summary = {
         "protocol": "grouped-base_sample_id-90-10",
+        "alignment_protocol": "authoritative-teacher-summary/text-one-to-one/same-index-audited-recovery-v1",
         "seed": seed,
         "validation_fraction": validation_fraction,
-        "question_shards": len(question_files),
+        "question_shards": len(entries),
+        "question_pool_rows": question_pool_rows,
         "paired_before_empty_filter": paired_before_empty,
+        "direct_question_matches": direct_matches,
+        "recovered_question_matches": recovered_matches,
         "empty_teacher_answers_filtered": empty_answers,
-        "unused_teacher_rows": unused_teachers,
+        "unused_question_rows": unused_questions,
+        "unused_teacher_rows": 0,
         "train_examples": len(train),
         "validation_examples": len(validation),
         "train_groups": len(train_groups),
         "validation_groups": len(val_groups),
         "group_overlap": 0,
         "question_type_counts": dict(collections.Counter(record["question_group"] for record in records)),
+        "recovery_audit": recovery_manifest,
         "source_files": source_files,
     }
-    (output_dir / "train_split_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output_dir / "train_split_summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return summary
-
 
 def expand_patterns(data_root: Path, patterns: Sequence[str]) -> List[Path]:
     paths = []

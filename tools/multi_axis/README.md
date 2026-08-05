@@ -10,6 +10,7 @@ This directory contains the full multivariate AXIS Phase-II pipeline specified i
 - Full Phase D architecture: Step-Local, anomaly evidence, Joint-Local, 30 Fixed hints, 1,024 vocabulary prototypes.
 - All ordinary cross-attention uses the CUDA FlashAttention backend; CPU exists only as a unit-test fallback.
 - Teacher supervision is answer-only NLL. The 17 empty teacher answers are filtered.
+- Training alignment follows the authoritative 62-shard teacher summary: 67,773 rows are matched one-to-one by normalized question text within each shard, and the remaining 47 are supplied by a SHA-256-audited same-index recovery bundle derived from the raw teacher records.
 - Split is by `base_sample_id`, 90/10, seed 42, with zero group overlap.
 - Exactly 40 epochs, no early stopping; select the lowest validation answer-token NLL after all epochs.
 - Formal inference covers 478new, SMD, SWaT, LEMMA-RCA, and VTA.
@@ -52,7 +53,7 @@ python tools/multi_axis/build_manifests.py \
   --validation-fraction 0.10
 ```
 
-This must report 67,820 aligned rows, 17 filtered empty answers, 67,803 retained rows, and zero train/validation group overlap. Evaluation counts must be 478, 200, 184, 12, and 200 with the registered per-type counts. Input SHA-256 hashes are retained unless `--skip-input-hashes` is explicitly used; the formal run must not use that flag.
+This must report 62 authoritative shards, 67,773 direct text matches, 47 audited recovery matches, 67,820 aligned rows, 17 filtered empty answers, 67,803 retained rows, and zero train/validation group overlap. The summary also records the 76,998-row question pool, unused question count, all consumed recovery keys, raw-source provenance hashes, and every materialized input hash. Evaluation counts must be 478, 200, 184, 12, and 200 with the registered per-type counts. Input SHA-256 hashes are retained unless `--skip-input-hashes` is explicitly used; the formal run must not use that flag.
 
 ## Train exactly 40 epochs
 

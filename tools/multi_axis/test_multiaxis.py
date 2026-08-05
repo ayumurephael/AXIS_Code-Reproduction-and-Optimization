@@ -13,6 +13,7 @@ from src.models.MultiAXIS.attention import FlashCrossAttention
 from src.models.MultiAXIS.data import normalize_and_serialize
 from src.models.MultiAXIS.model import MultiAxisHintTuner, rms_unit
 from src.models.MultiAXIS.prompting import HINT_TOKENS, MultiAxisPromptBuilder
+from tools.multi_axis.build_manifests import load_training_recovery, normalized_question, sha256_file
 from tools.multi_axis.geval_runner import bounded_distribution
 from tools.multi_axis.label_metrics import canonical_label, open_parseable, parse_prediction
 
@@ -193,3 +194,35 @@ def test_prompt_can_remove_joint_placeholder_for_ablation():
     assert tokenized.step_positions[0].numel() == 4
     assert tokenized.joint_positions[0].numel() == 0
     assert tokenized.fixed_positions[0].numel() == 3
+
+def test_audited_training_recovery_bundle(tmp_path):
+    recovery_root = tmp_path / "derived" / "training_recovery"
+    recovery_root.mkdir(parents=True)
+    questions_path = recovery_root / "recovered_questions.jsonl"
+    row = {
+        "question": "  Which Channel? ",
+        "_multi_axis_recovery": {"source_shard": "shard-a", "source_index": 7},
+    }
+    questions_path.write_text(
+        json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+    manifest = {
+        "format": "multi-axis-training-recovery-v1",
+        "recovered_question_rows": 1,
+        "recovered_output": {
+            "size": questions_path.stat().st_size,
+            "sha256": sha256_file(questions_path),
+        },
+    }
+    manifest_path = recovery_root / "recovery_manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    lookup, loaded_manifest, source_files = load_training_recovery(tmp_path, hash_inputs=True)
+    assert normalized_question(row) == "which channel?"
+    assert set(lookup) == {("shard-a", 7)}
+    assert loaded_manifest == manifest
+    assert all(item["sha256"] for item in source_files)
+
+    questions_path.write_text(questions_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="size"):
+        load_training_recovery(tmp_path, hash_inputs=True)

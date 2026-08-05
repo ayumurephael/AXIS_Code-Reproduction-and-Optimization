@@ -42,6 +42,7 @@ def main():
     check("empty_teacher_filter", split["empty_teacher_answers_filtered"] == 17, split["empty_teacher_answers_filtered"])
     check("group_split", split["seed"] == 42 and split["validation_fraction"] == 0.10 and split["group_overlap"] == 0, {key: split[key] for key in ("seed", "validation_fraction", "group_overlap")})
     check("aligned_training_rows", split["paired_before_empty_filter"] == 67820 and split["train_examples"] + split["validation_examples"] == 67803, {"paired": split["paired_before_empty_filter"], "retained": split["train_examples"] + split["validation_examples"]})
+    check("audited_training_alignment", split.get("alignment_protocol") == "authoritative-teacher-summary/text-one-to-one/same-index-audited-recovery-v1" and split.get("question_shards") == 62 and split.get("direct_question_matches") == 67773 and split.get("recovered_question_matches") == 47 and split.get("unused_teacher_rows") == 0, {key: split.get(key) for key in ("alignment_protocol", "question_shards", "direct_question_matches", "recovered_question_matches", "unused_teacher_rows")})
     complete = Path(args.run_dir) / "TRAINING_COMPLETE"
     training_payload = json.loads(complete.read_text(encoding="utf-8")) if complete.exists() else {}
     check("training_complete", training_payload.get("epochs") == 40, training_payload)
