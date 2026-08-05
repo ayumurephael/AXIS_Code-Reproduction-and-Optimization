@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .attention import FlashCrossAttention
 from .config import MultiAxisConfig
@@ -17,6 +18,37 @@ from .timercd import FrozenTimeRCD
 def rms_unit(value: torch.Tensor, epsilon: float = 1e-6) -> torch.Tensor:
     mean_square = value.float().square().mean(dim=-1, keepdim=True)
     return (value * torch.rsqrt(mean_square + epsilon)).to(value.dtype)
+
+
+@dataclass
+class AnswerOnlyCausalLMOutput:
+    loss: torch.Tensor
+    supervised_token_count: int
+
+
+def answer_only_causal_nll(
+    hidden_states: torch.Tensor,
+    labels: torch.Tensor,
+    output_embeddings: nn.Module,
+) -> AnswerOnlyCausalLMOutput:
+    """Exact causal-LM NLL without materializing prompt-position vocabulary logits."""
+    if hidden_states.ndim != 3 or labels.ndim != 2:
+        raise ValueError("hidden_states and labels must have shapes [B, L, D] and [B, L]")
+    if hidden_states.shape[:2] != labels.shape:
+        raise ValueError("hidden_states and labels must share batch/sequence dimensions")
+    shifted_labels = labels[:, 1:].contiguous()
+    supervised = shifted_labels.ne(-100)
+    supervised_token_count = int(supervised.sum().item())
+    if supervised_token_count == 0:
+        raise ValueError("Answer-only supervision contains no causal target tokens")
+    selected_hidden = hidden_states[:, :-1, :][supervised]
+    selected_labels = shifted_labels[supervised]
+    answer_logits = output_embeddings(selected_hidden)
+    loss = F.cross_entropy(answer_logits.float(), selected_labels, reduction="mean")
+    return AnswerOnlyCausalLMOutput(
+        loss=loss,
+        supervised_token_count=supervised_token_count,
+    )
 
 
 class MultiAxisHintTuner(nn.Module):
@@ -267,12 +299,32 @@ class MultiAxisForConditionalGeneration(nn.Module):
             except TypeError:
                 self.llm.gradient_checkpointing_enable()
 
+    def _set_llm_runtime_mode(self, training: bool) -> None:
+        if training and self.config.llm.gradient_checkpointing:
+            # Transformers activates decoder checkpointing only in train mode.
+            # Parameters stay frozen and dropout stays disabled for determinism.
+            self.llm.train(True)
+            for module in self.llm.modules():
+                if isinstance(module, nn.Dropout):
+                    module.eval()
+        else:
+            self.llm.eval()
+
     def train(self, mode: bool = True):
         super().train(mode)
-        self.llm.eval()
+        self._set_llm_runtime_mode(mode)
         self.timercd.eval()
         self.hint_tuner.train(mode)
         return self
+
+    def _llm_backbone(self) -> nn.Module:
+        backbone = getattr(self.llm, "model", None)
+        if backbone is None:
+            prefix = getattr(self.llm, "base_model_prefix", "")
+            backbone = getattr(self.llm, prefix, None) if prefix else None
+        if backbone is None or backbone is self.llm:
+            raise AttributeError("Could not locate the causal LLM backbone for sparse answer NLL")
+        return backbone
 
     def trainable_parameter_names(self) -> List[str]:
         return [name for name, parameter in self.named_parameters() if parameter.requires_grad]
@@ -376,11 +428,18 @@ class MultiAxisForConditionalGeneration(nn.Module):
         _, attention_mask, labels, embeddings = self._inject_hints(
             tokenized, step, joint, fixed, device
         )
-        return self.llm(
+        if labels is None:
+            raise ValueError("Training forward requires answer labels")
+        backbone_outputs = self._llm_backbone()(
             inputs_embeds=embeddings,
             attention_mask=attention_mask,
-            labels=labels,
             use_cache=False,
+            return_dict=True,
+        )
+        return answer_only_causal_nll(
+            backbone_outputs.last_hidden_state,
+            labels,
+            self.llm.get_output_embeddings(),
         )
 
     @torch.no_grad()

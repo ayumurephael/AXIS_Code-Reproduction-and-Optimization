@@ -17,7 +17,12 @@ from src.models.MultiAXIS.data import (
     teacher_answer,
     teacher_model_answer,
 )
-from src.models.MultiAXIS.model import MultiAxisHintTuner, rms_unit
+from src.models.MultiAXIS.model import (
+    MultiAxisForConditionalGeneration,
+    MultiAxisHintTuner,
+    answer_only_causal_nll,
+    rms_unit,
+)
 from src.models.MultiAXIS.prompting import HINT_TOKENS, MultiAxisPromptBuilder
 from tools.multi_axis.build_manifests import (
     align_eval_rows,
@@ -202,6 +207,42 @@ def test_rms_unit_uses_requested_epsilon():
     value = torch.tensor([[3.0, 4.0]])
     expected = value / torch.sqrt(torch.tensor((9.0 + 16.0) / 2.0 + 1e-6))
     assert torch.allclose(rms_unit(value, 1e-6), expected)
+
+
+def test_sparse_answer_nll_matches_dense_causal_loss_and_gradient():
+    torch.manual_seed(7)
+    output_embeddings = torch.nn.Linear(7, 11, bias=False)
+    output_embeddings.requires_grad_(False)
+    dense_hidden = torch.randn(2, 5, 7, requires_grad=True)
+    sparse_hidden = dense_hidden.detach().clone().requires_grad_(True)
+    labels = torch.tensor(
+        [[-100, 2, 3, -100, 5], [-100, -100, 4, 1, -100]],
+        dtype=torch.long,
+    )
+    dense_logits = output_embeddings(dense_hidden)
+    dense_loss = torch.nn.functional.cross_entropy(
+        dense_logits[:, :-1, :].float().reshape(-1, 11),
+        labels[:, 1:].reshape(-1),
+        ignore_index=-100,
+    )
+    sparse = answer_only_causal_nll(sparse_hidden, labels, output_embeddings)
+    assert sparse.supervised_token_count == 5
+    assert torch.allclose(sparse.loss, dense_loss, atol=1e-7, rtol=1e-6)
+    dense_loss.backward()
+    sparse.loss.backward()
+    assert torch.allclose(sparse_hidden.grad, dense_hidden.grad, atol=1e-7, rtol=1e-6)
+
+
+def test_frozen_llm_train_mode_enables_checkpointing_but_not_dropout():
+    dummy = SimpleNamespace(
+        config=SimpleNamespace(llm=SimpleNamespace(gradient_checkpointing=True)),
+        llm=torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Dropout(0.5)),
+    )
+    MultiAxisForConditionalGeneration._set_llm_runtime_mode(dummy, True)
+    assert dummy.llm.training and dummy.llm[0].training
+    assert not dummy.llm[1].training
+    MultiAxisForConditionalGeneration._set_llm_runtime_mode(dummy, False)
+    assert not dummy.llm.training and not dummy.llm[0].training
 
 
 def test_label_parsing_contract():

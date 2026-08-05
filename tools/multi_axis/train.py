@@ -168,6 +168,8 @@ def environment_manifest(config: MultiAxisConfig, rank: int, world_size: int, mo
         "config": config.to_dict(),
         "pretrained_source": getattr(model, "pretrained_source", config.llm.model_name),
         "actual_effective_batch_size": config.training.micro_batch_size * config.training.accumulation_steps * world_size,
+        "answer_loss_implementation": "causal_answer_positions_sparse_logits",
+        "llm_gradient_checkpointing": config.llm.gradient_checkpointing,
         "timercd_sha256": model.timercd.checkpoint_sha256,
         "trainable_parameter_count": sum(p.numel() for p in model.parameters() if p.requires_grad),
         "trainable_parameter_names": model.trainable_parameter_names(),
@@ -198,6 +200,10 @@ def validate(model, loader: DataLoader, device: torch.device):
             encoded = compute_timercd_cached(model, inputs, cache, batch["base_sample_ids"][0])
             outputs = model(**inputs, prototype_override=prototype, timercd_override=encoded)
             tokens = answer_token_count(model, batch["answers"])
+            if outputs.supervised_token_count != tokens:
+                raise RuntimeError(
+                    "Sparse answer target count differs from tokenizer audit count"
+                )
             local_nll += outputs.loss.double() * tokens
             local_tokens += tokens
             local_examples += len(batch["answers"])
@@ -335,6 +341,10 @@ def main():
                     raise FloatingPointError(f"Non-finite training loss at epoch={epoch}, step={global_step}")
                 scaled_loss.backward()
                 tokens = answer_token_count(model, batch["answers"])
+                if outputs.supervised_token_count != tokens:
+                    raise RuntimeError(
+                        "Sparse answer target count differs from tokenizer audit count"
+                    )
                 epoch_loss_sum += outputs.loss.detach().item() * tokens
                 epoch_tokens += tokens
                 epoch_examples += len(batch["answers"])
@@ -349,7 +359,21 @@ def main():
             global_step += 1
             remaining -= group_size
             if rank == 0 and global_step % 20 == 0:
-                append_jsonl(output_dir / "train_steps.jsonl", {"time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "epoch": epoch, "global_step": global_step, "loss_mean_microbatch": group_loss / group_size, "learning_rate": scheduler.get_last_lr()[0], "gradient_norm": float(gradient_norm)})
+                append_jsonl(
+                    output_dir / "train_steps.jsonl",
+                    {
+                        "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "epoch": epoch,
+                        "global_step": global_step,
+                        "loss_mean_microbatch": group_loss / group_size,
+                        "learning_rate": scheduler.get_last_lr()[0],
+                        "gradient_norm": float(gradient_norm),
+                        "max_memory_allocated_mib": torch.cuda.max_memory_allocated(device)
+                        / (1024**2),
+                        "max_memory_reserved_mib": torch.cuda.max_memory_reserved(device)
+                        / (1024**2),
+                    },
+                )
 
         train_totals = torch.tensor([epoch_loss_sum, epoch_tokens, epoch_examples], device=device, dtype=torch.float64)
         dist.all_reduce(train_totals, op=dist.ReduceOp.SUM)
