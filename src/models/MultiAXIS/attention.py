@@ -23,6 +23,26 @@ def _flash_only_context(require_flash: bool):
         )
 
 
+def _flash_fixed_cross_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+) -> torch.Tensor:
+    """Run dense non-causal cross-attention with the FlashAttention-2 package."""
+    try:
+        from flash_attn import flash_attn_func
+    except (ImportError, OSError) as exc:
+        raise RuntimeError("CUDA cross-attention requires the flash-attn package") from exc
+    output = flash_attn_func(
+        q.transpose(1, 2).contiguous(),
+        k.transpose(1, 2).contiguous(),
+        v.transpose(1, 2).contiguous(),
+        dropout_p=0.0,
+        causal=False,
+    )
+    return output.transpose(1, 2)
+
+
 def _flash_varlen_cross_attention(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -117,22 +137,18 @@ class FlashCrossAttention(nn.Module):
             if not has_padding:
                 key_padding_mask = None
 
-        if has_padding and q.is_cuda and self.require_flash:
-            output = _flash_varlen_cross_attention(q, k, v, key_padding_mask)
+        if q.is_cuda and self.require_flash:
+            output = (
+                _flash_varlen_cross_attention(q, k, v, key_padding_mask)
+                if has_padding
+                else _flash_fixed_cross_attention(q, k, v)
+            )
         else:
             if key_padding_mask is not None:
                 attention_mask = key_padding_mask[:, None, None, :]
-            try:
-                with _flash_only_context(self.require_flash):
-                    output = F.scaled_dot_product_attention(
-                        q, k, v, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-                    )
-            except RuntimeError as exc:
-                if q.is_cuda and self.require_flash:
-                    raise RuntimeError(
-                        "FlashAttention-2 was required but no CUDA flash kernel accepted "
-                        "this cross-attention operation."
-                    ) from exc
-                raise
+            with _flash_only_context(self.require_flash):
+                output = F.scaled_dot_product_attention(
+                    q, k, v, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+                )
         output = output.transpose(1, 2).contiguous().view(batch, q_len, self.embed_dim)
         return self.out_proj(output)
