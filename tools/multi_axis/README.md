@@ -19,6 +19,8 @@ This directory contains the full multivariate AXIS Phase-II pipeline specified i
 
 The checked-in formal configuration records the actual world size and effective batch size. Do not change accumulation or world size after launch; a resumed run must use the same configuration.
 
+The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. The five-process run uses micro-batch 1 and six-step accumulation for effective batch size 30.
+
 ## Components
 
 - `src/models/MultiAXIS/`: configuration, prompt construction, frozen TimeRCD wrapper, Flash cross-attention, Hint Tuner, and dual-LLM model wrapper.

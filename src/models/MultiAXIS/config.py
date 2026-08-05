@@ -26,7 +26,7 @@ class TimeRCDConfig:
 @dataclass
 class HintConfig:
     num_prototypes: int = 1024
-    prototype_heads: int = 8
+    prototype_heads: int = 16
     fixed_tokens: int = 30
     joint_heads: int = 4
     representation_epsilon: float = 1e-6

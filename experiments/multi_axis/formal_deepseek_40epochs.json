@@ -12,7 +12,7 @@
   },
   "hints": {
     "num_prototypes": 1024,
-    "prototype_heads": 8,
+    "prototype_heads": 16,
     "fixed_tokens": 30,
     "joint_heads": 4,
     "representation_epsilon": 1e-6,

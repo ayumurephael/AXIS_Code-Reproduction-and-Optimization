@@ -95,6 +95,12 @@ class FlashCrossAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         self.require_flash = require_flash
+        if require_flash and self.head_dim > 256:
+            raise ValueError(
+                "FlashAttention-2 requires head_dim <= 256; "
+                f"received embed_dim={embed_dim}, num_heads={num_heads}, "
+                f"head_dim={self.head_dim}"
+            )
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=False)
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=False)
         self.v_proj = nn.Linear(embed_dim, embed_dim, bias=False)

@@ -110,6 +110,16 @@ def test_flash_cross_attention_cpu_reference_path_and_mask():
     assert query.grad is not None and memory.grad is not None
 
 
+def test_flash_cross_attention_rejects_unsupported_head_dimension():
+    with pytest.raises(ValueError, match=r"head_dim=512"):
+        FlashCrossAttention(embed_dim=512, num_heads=1, require_flash=True)
+
+
+def test_flash_cross_attention_allows_head_dimension_256():
+    layer = FlashCrossAttention(embed_dim=512, num_heads=2, require_flash=True)
+    assert layer.head_dim == 256
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA-only FlashAttention regression")
 def test_flash_cross_attention_cuda_varlen_mask():
     pytest.importorskip("flash_attn")

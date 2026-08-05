@@ -8,5 +8,8 @@
     "attention_implementation": "flash_attention_2",
     "gradient_checkpointing": true,
     "use_cache_during_training": false
+  },
+  "hints": {
+    "prototype_heads": 16
   }
 }
