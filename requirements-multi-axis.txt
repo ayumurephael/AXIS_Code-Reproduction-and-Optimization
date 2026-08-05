@@ -1,0 +1,6 @@
+-r requirements.txt
+transformers>=4.57.0
+flash-attn>=2.7.4
+openai>=1.99.0
+google-genai>=1.30.0
+httpx>=0.28.0

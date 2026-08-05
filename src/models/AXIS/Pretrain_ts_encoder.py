@@ -69,9 +69,9 @@ class TimeSeriesPretrainModel(nn.Module):
             nn.Linear(config.ts_config.d_proj // 2, 2)  # (B, seq_len, num_features, 2) for binary classification
         )
         
-    def forward(self, time_series: torch.Tensor, mask: Optional[torch.Tensor] = None):
+    def forward(self, time_series: torch.Tensor, mask: Optional[torch.Tensor] = None, channel_mask: Optional[torch.Tensor] = None):
         """Forward pass through the encoder."""
-        local_embeddings = self.ts_encoder(time_series, mask)
+        local_embeddings = self.ts_encoder(time_series, mask, channel_mask=channel_mask)
         return local_embeddings
 
     def masked_reconstruction_loss(self, 

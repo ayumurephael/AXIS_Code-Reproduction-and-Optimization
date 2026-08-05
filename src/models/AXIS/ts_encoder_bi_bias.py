@@ -71,17 +71,20 @@ class MultiheadAttentionWithRoPE(nn.Module):
         if num_features > 1:
             self.binary_attention_bias = BinaryAttentionBias(num_heads)
 
-    def apply_rope(self, x, freqs):
+    def apply_rope(self, x, freqs, num_features=None):
         """Apply Rotary Positional Encoding to the input tensor."""
         B, seq_len, embed_dim = x.shape
-        num_patches = seq_len // self.num_features
-        assert seq_len % self.num_features == 0, "Sequence length must be divisible by num_features"
+        runtime_features = self.num_features if num_features is None else int(num_features)
+        if runtime_features <= 0:
+            raise ValueError("num_features must be positive")
+        num_patches = seq_len // runtime_features
+        assert seq_len % runtime_features == 0, "Sequence length must be divisible by num_features"
         assert embed_dim == self.embed_dim, "Embedding dimension mismatch"
         assert freqs.shape == (num_patches, embed_dim // 2), "freqs shape mismatch"
-        x = x.reshape(B * self.num_features, num_patches, embed_dim)
+        x = x.reshape(B * runtime_features, num_patches, embed_dim)
 
         # Reshape for rotation: split embed_dim into pairs
-        x_ = x.view(B * self.num_features, num_patches, embed_dim // 2, 2)
+        x_ = x.view(B * runtime_features, num_patches, embed_dim // 2, 2)
         cos = freqs.cos().unsqueeze(0)  # (1, seq_len, embed_dim // 2, 1)
         sin = freqs.sin().unsqueeze(0)  # (1, seq_len, embed_dim // 2, 1)
 
@@ -95,7 +98,8 @@ class MultiheadAttentionWithRoPE(nn.Module):
         )
         return x_rot.view(B, seq_len, embed_dim)
 
-    def forward(self, query, key, value, freqs, query_id=None, kv_id=None, attn_mask=None):
+    def forward(self, query, key, value, freqs, query_id=None, kv_id=None,
+                attn_mask=None, num_features=None):
         """
         Forward pass for multi-head attention with RoPE.
 
@@ -120,8 +124,8 @@ class MultiheadAttentionWithRoPE(nn.Module):
         V = self.v_proj(value)
 
         # Apply RoPE to Q and K
-        Q_rot = self.apply_rope(Q, freqs)
-        K_rot = self.apply_rope(K, freqs)
+        Q_rot = self.apply_rope(Q, freqs, num_features=num_features)
+        K_rot = self.apply_rope(K, freqs, num_features=num_features)
 
         # Reshape for multi-head attention
         Q_rot = Q_rot.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)  # (B, nh, T, hs)
@@ -136,6 +140,11 @@ class MultiheadAttentionWithRoPE(nn.Module):
 
         if query_id is not None and kv_id is not None:
             # Add binary attention bias
+            if not hasattr(self, "binary_attention_bias"):
+                raise RuntimeError(
+                    "The encoder was constructed without the TimeRCD binary variate "
+                    "attention-bias parameters and cannot process multivariate input."
+                )
             attn_bias = self.binary_attention_bias(query_id, kv_id)  # (B, num_heads, q_len, kv_len)
             scores = torch.matmul(Q_rot, K_rot.transpose(-2, -1)) / math.sqrt(self.head_dim)  # (B, num_heads, q_len, kv_len)
             scores += attn_bias
@@ -187,10 +196,14 @@ class TransformerEncoderLayerWithRoPE(nn.Module):
         self.dropout2 = nn.Dropout(dropout)
         self.activation = F.relu if activation == "relu" else F.gelu
 
-    def forward(self, src, freqs, src_id=None, attn_mask=None):
+    def forward(self, src, freqs, src_id=None, attn_mask=None, num_features=None):
         residual = src
         src = self.input_norm(src)
-        src = self.self_attn(src, src, src, freqs, src_id, src_id, attn_mask=attn_mask)
+        src = self.self_attn(
+            src, src, src, freqs, src_id, src_id,
+            attn_mask=attn_mask,
+            num_features=num_features,
+        )
         src = src + residual
         residual = src
         src = self.output_norm(src)
@@ -213,10 +226,16 @@ class CustomTransformerEncoder(nn.Module):
             ) for _ in range(num_layers)
         ])
         
-    def forward(self, src, freqs, src_id=None, attn_mask=None):
+    def forward(self, src, freqs, src_id=None, attn_mask=None, num_features=None):
         output = src
         for layer in self.layers:
-            output = layer(output, freqs, src_id, attn_mask=attn_mask)
+            output = layer(
+                output,
+                freqs,
+                src_id,
+                attn_mask=attn_mask,
+                num_features=num_features,
+            )
         return output
 
 class TimeSeriesEncoder(nn.Module):
@@ -298,16 +317,23 @@ class TimeSeriesEncoder(nn.Module):
             elif 'bias' in name:
                 nn.init.constant_(param, 0.0)
 
-    def forward(self, time_series, mask):
+    def forward(self, time_series, mask, channel_mask=None):
         """Forward pass to generate local embeddings."""
         if time_series.dim() == 2:
             time_series = time_series.unsqueeze(-1)
         device = time_series.device
         B, seq_len, num_features = time_series.size()
-        assert num_features == self.num_features, f"Number of features mismatch with data: {num_features} vs param: {self.num_features}"
         assert mask.size() == (B, seq_len), f"Mask shape mismatch: {mask.size()} vs {(B, seq_len)}"
 
         # Pad sequence to be divisible by patch_size
+        if channel_mask is None:
+            channel_mask = torch.ones(B, num_features, dtype=torch.bool, device=device)
+        if channel_mask.size() != (B, num_features):
+            raise ValueError(
+                f"Channel mask shape mismatch: {tuple(channel_mask.size())} vs {(B, num_features)}"
+            )
+        channel_mask = channel_mask.bool()
+        valid_time_mask = mask.bool()
         padded_length = math.ceil(seq_len / self.patch_size) * self.patch_size
         if padded_length > seq_len:
             pad_amount = padded_length - seq_len
@@ -329,7 +355,10 @@ class TimeSeriesEncoder(nn.Module):
         # Create patch-level mask
         mask = mask.view(B, num_patches, self.patch_size)
         patch_mask = mask.sum(dim=-1) > 0  # (B, num_patches)
-        full_mask = patch_mask.unsqueeze(1).expand(-1, num_features, -1)  # (B, num_features, num_patches)
+        full_mask = (
+            patch_mask.unsqueeze(1).expand(-1, num_features, -1)
+            & channel_mask.unsqueeze(-1)
+        )  # (B, num_features, num_patches)
         full_mask = full_mask.reshape(B, num_features * num_patches)  # (B, L)
 
         # Generate RoPE frequencies if applicable
@@ -344,13 +373,15 @@ class TimeSeriesEncoder(nn.Module):
                 embedded_patches,
                 freqs=freqs,
                 src_id=feature_id,
-                attn_mask=full_mask
+                attn_mask=full_mask,
+                num_features=num_features,
             )
         else:
             output = self.transformer_encoder(
                 embedded_patches,
                 freqs=freqs,
-                attn_mask=full_mask
+                attn_mask=full_mask,
+                num_features=num_features,
             )
 
         # Extract and project local embeddings
@@ -360,4 +391,8 @@ class TimeSeriesEncoder(nn.Module):
         local_embeddings = local_embeddings.permute(0, 2, 3, 1, 4)  # (B, num_patches, patch_size, num_features, d_proj)
         local_embeddings = local_embeddings.view(B, -1, num_features, self.d_proj)[:, :seq_len, :, :]  # (B, seq_len, num_features, d_proj)
 
+        local_embeddings = local_embeddings * (
+            valid_time_mask[:, :, None, None].to(local_embeddings.dtype)
+            * channel_mask[:, None, :, None].to(local_embeddings.dtype)
+        )
         return local_embeddings
