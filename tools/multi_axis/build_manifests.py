@@ -14,26 +14,31 @@ from src.models.MultiAXIS.data import question_type_group, teacher_answer, teach
 EVAL_SPECS = {
     "478new": {
         "questions": ["question/question_eval_bias_neutralized_20260710b/*/questions_1000.jsonl"],
+        "alignment": "question_text",
         "teachers": ["teacheranswer/teacher_eval_bias_neutralized_20260710b/*/teacher_gpt55.answers.jsonl"],
         "expected": 478,
     },
     "SMD": {
         "questions": ["question/question_smd_axis_v1_no_root_200_gpt54_bias_neutralized_20260713c/questions_200.jsonl"],
+        "alignment": "index",
         "teachers": ["teacheranswer/teacher_smd_axis_v1_no_root_200_gpt54_bias_neutralized_20260713a/teacher_gpt54.answers.jsonl"],
         "expected": 200,
     },
     "SWaT": {
         "questions": ["question/question_swat_axis_v1_eval92_regular_184_gpt54_bias_neutralized_20260712c/questions_184.jsonl"],
+        "alignment": "index",
         "teachers": ["teacheranswer/teacher_swat_axis_v1_eval92_regular_184_gpt54_20260712a/teacher_gpt54.answers.jsonl"],
         "expected": 184,
     },
     "LEMMA-RCA": {
         "questions": ["question/question_lemma_rca_cloud_curated_onset_v1_no_root_12_gpt54_bias_neutralized_openfirst_20260713b/questions_12.jsonl"],
+        "alignment": "index",
         "teachers": ["teacheranswer/teacher_lemma_rca_cloud_curated_onset_v1_no_root_12_gpt54_bias_neutralized_openfirst_20260713a/teacher_gpt54.answers.jsonl"],
         "expected": 12,
     },
     "VTA": {
         "questions": ["question/question_vta_articulary_axis_v1_no_root_200_gpt54_llm2_bias_neutralized_openfirst_20260713b/questions_200.jsonl"],
+        "alignment": "index",
         "teachers": ["teacheranswer/teacher_vta_articulary_axis_v1_no_root_200_gpt54_llm2_bias_neutralized_openfirst_20260713a/teacher_gpt54.answers.jsonl"],
         "expected": 200,
     },
@@ -101,13 +106,13 @@ def normalized_question(row: Dict[str, Any]) -> str:
 def match_teachers(question_rows, teachers):
     by_question = collections.defaultdict(collections.deque)
     for index, item in enumerate(teachers):
-        by_question[str(item["row"].get("question", ""))].append(index)
+        by_question[normalized_question(item["row"])].append(index)
     used = set()
     matches = []
     for position, question_item in enumerate(question_rows):
-        question = str(question_item["row"].get("question", ""))
+        question = normalized_question(question_item["row"])
         chosen = None
-        if position < len(teachers) and position not in used and str(teachers[position]["row"].get("question", "")) == question:
+        if position < len(teachers) and position not in used and normalized_question(teachers[position]["row"]) == question:
             chosen = position
         else:
             queue = by_question[question]
@@ -119,6 +124,39 @@ def match_teachers(question_rows, teachers):
             used.add(chosen)
             matches.append((question_item, teachers[chosen]))
     return matches, used
+
+
+def normalized_reference_answer(value: Any) -> str:
+    return "" if value is None else " ".join(str(value).strip().lower().split())
+
+
+def question_reference_answer(row: Dict[str, Any]) -> str:
+    windows = row.get("windows") or []
+    if windows and isinstance(windows[0], dict):
+        value = windows[0].get("answer")
+        if value is not None:
+            return normalized_reference_answer(value)
+    target = row.get("target_output") or {}
+    return normalized_reference_answer(target.get("final_answer") or target.get("question_answer"))
+
+
+def teacher_reference_answer(row: Dict[str, Any]) -> str:
+    return normalized_reference_answer(row.get("windows_0_answer"))
+
+
+def align_eval_rows(dataset: str, spec: Dict[str, Any], questions, teachers):
+    strategy = spec.get("alignment")
+    if strategy == "index":
+        if len(questions) != spec["expected"] or len(teachers) != spec["expected"]:
+            raise RuntimeError(
+                f"{dataset}: index alignment requires {spec['expected']} questions and teachers, "
+                f"got {len(questions)} and {len(teachers)}"
+            )
+        return list(zip(questions, teachers)), set(range(len(teachers))), strategy
+    if strategy == "question_text":
+        matches, used = match_teachers(questions, teachers)
+        return matches, used, strategy
+    raise ValueError(f"{dataset}: unknown evaluation alignment strategy {strategy!r}")
 
 
 def load_training_recovery(data_root: Path, hash_inputs: bool):
@@ -204,6 +242,7 @@ def build_train(data_root: Path, output_dir: Path, seed: int, validation_fractio
     empty_answers = 0
     direct_matches = 0
     recovered_matches = 0
+    structured_reference_matches = 0
     unused_questions = 0
     question_pool_rows = 0
     paired_before_empty = 0
@@ -253,6 +292,13 @@ def build_train(data_root: Path, output_dir: Path, seed: int, validation_fractio
                     raise RuntimeError(f"Recovered question text mismatch for {recovery_key}")
                 used_recovery.add(recovery_key)
                 recovered_matches += 1
+            question_reference = question_reference_answer(question_item["row"])
+            teacher_reference = teacher_reference_answer(teacher_item["row"])
+            if not question_reference or not teacher_reference or question_reference != teacher_reference:
+                raise RuntimeError(
+                    f"Training structured reference mismatch for {shard} teacher index {teacher_index}"
+                )
+            structured_reference_matches += 1
             paired_before_empty += 1
             record = train_record(
                 data_root,
@@ -289,6 +335,8 @@ def build_train(data_root: Path, output_dir: Path, seed: int, validation_fractio
             "sha256": teacher_summary_sha256 if hash_inputs else None,
         }
     )
+    if structured_reference_matches != 67820:
+        raise RuntimeError(f"Expected 67820 structured reference matches, got {structured_reference_matches}")
     if paired_before_empty != 67820:
         raise RuntimeError(f"Expected 67820 aligned training rows, got {paired_before_empty}")
     if empty_answers != 17:
@@ -317,6 +365,7 @@ def build_train(data_root: Path, output_dir: Path, seed: int, validation_fractio
     summary = {
         "protocol": "grouped-base_sample_id-90-10",
         "alignment_protocol": "authoritative-teacher-summary/text-one-to-one/same-index-audited-recovery-v1",
+        "teacher_target_field": "model_answer",
         "seed": seed,
         "validation_fraction": validation_fraction,
         "question_shards": len(entries),
@@ -324,6 +373,7 @@ def build_train(data_root: Path, output_dir: Path, seed: int, validation_fractio
         "paired_before_empty_filter": paired_before_empty,
         "direct_question_matches": direct_matches,
         "recovered_question_matches": recovered_matches,
+        "structured_reference_matches": structured_reference_matches,
         "empty_teacher_answers_filtered": empty_answers,
         "unused_question_rows": unused_questions,
         "unused_teacher_rows": 0,
@@ -357,9 +407,18 @@ def build_eval(data_root: Path, output_dir: Path, hash_inputs: bool):
         for path in question_paths:
             questions.extend({"path": path, "line": line, "offset": offset, "length": length, "row": row} for line, offset, length, row in iter_jsonl(path))
         teachers = teacher_rows(teacher_paths)
-        matches, used = match_teachers(questions, teachers)
+        matches, used, alignment_strategy = align_eval_rows(dataset, spec, questions, teachers)
         records = []
+        reference_answer_matches = 0
         for question_item, teacher_item in matches:
+            question_reference = question_reference_answer(question_item["row"])
+            teacher_reference = teacher_reference_answer(teacher_item["row"])
+            if not question_reference or not teacher_reference or question_reference != teacher_reference:
+                raise RuntimeError(
+                    f"{dataset}: structured reference mismatch at question line "
+                    f"{question_item['line']} and teacher line {teacher_item['line']}"
+                )
+            reference_answer_matches += 1
             answer = teacher_answer(teacher_item["row"])
             if not answer:
                 continue
@@ -383,6 +442,8 @@ def build_eval(data_root: Path, output_dir: Path, hash_inputs: bool):
             "examples": len(records),
             "question_pool": len(questions),
             "teacher_rows": len(teachers),
+            "alignment_strategy": alignment_strategy,
+            "structured_reference_matches": reference_answer_matches,
             "matched_teacher_rows": len(used),
             "question_type_counts": dict(collections.Counter(record["question_group"] for record in records)),
             "source_files": source_files,

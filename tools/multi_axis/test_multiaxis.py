@@ -17,7 +17,14 @@ from src.models.MultiAXIS.data import (
 )
 from src.models.MultiAXIS.model import MultiAxisHintTuner, rms_unit
 from src.models.MultiAXIS.prompting import HINT_TOKENS, MultiAxisPromptBuilder
-from tools.multi_axis.build_manifests import load_training_recovery, normalized_question, sha256_file
+from tools.multi_axis.build_manifests import (
+    align_eval_rows,
+    load_training_recovery,
+    normalized_question,
+    question_reference_answer,
+    sha256_file,
+    teacher_reference_answer,
+)
 from tools.multi_axis.geval_runner import bounded_distribution
 from tools.multi_axis.label_metrics import canonical_label, open_parseable, parse_prediction
 
@@ -204,6 +211,26 @@ def test_prompt_can_remove_joint_placeholder_for_ablation():
     assert tokenized.step_positions[0].numel() == 4
     assert tokenized.joint_positions[0].numel() == 0
     assert tokenized.fixed_positions[0].numel() == 3
+
+def test_eval_index_alignment_handles_bias_neutralized_question_rewrite():
+    question_item = {"row": {"question": "Neutral rewrite", "windows": [{"answer": "Yes"}]}}
+    teacher_item = {"row": {"question": "Older wording", "windows_0_answer": " yes "}}
+    matches, used, strategy = align_eval_rows(
+        "SMD", {"alignment": "index", "expected": 1}, [question_item], [teacher_item]
+    )
+    assert matches == [(question_item, teacher_item)]
+    assert used == {0} and strategy == "index"
+    assert question_reference_answer(question_item["row"]) == "yes"
+    assert teacher_reference_answer(teacher_item["row"]) == "yes"
+
+    text_matches, _, _ = align_eval_rows(
+        "478new",
+        {"alignment": "question_text", "expected": 1},
+        [question_item],
+        [teacher_item],
+    )
+    assert text_matches == []
+
 
 def test_audited_training_recovery_bundle(tmp_path):
     recovery_root = tmp_path / "derived" / "training_recovery"

@@ -64,7 +64,7 @@ python tools/multi_axis/build_manifests.py \
   --validation-fraction 0.10
 ```
 
-This must report 62 authoritative shards, 67,773 direct text matches, 47 audited recovery matches, 67,820 aligned rows, 17 filtered empty answers, 67,803 retained rows, and zero train/validation group overlap. The summary also records the 76,998-row question pool, unused question count, all consumed recovery keys, raw-source provenance hashes, and every materialized input hash. Evaluation counts must be 478, 200, 184, 12, and 200 with the registered per-type counts. Input SHA-256 hashes are retained unless `--skip-input-hashes` is explicitly used; the formal run must not use that flag.
+This must report 62 authoritative shards, 67,773 direct text matches, 47 audited recovery matches, 67,820 aligned rows with 67,820 structured-reference matches, 17 filtered empty answers, 67,803 retained rows, and zero train/validation group overlap. The summary also records the 76,998-row question pool, unused question count, all consumed recovery keys, raw-source provenance hashes, and every materialized input hash. Evaluation counts must be 478, 200, 184, 12, and 200 with the registered per-type counts. The partially covered 478new pool is aligned by normalized question text; the four fully covered real-world sets follow the collaborator scorer's index fallback across bias-neutralized question revisions. Every resulting pair must also match on the structured `windows_0_answer` reference. Input SHA-256 hashes are retained unless `--skip-input-hashes` is explicitly used; the formal run must not use that flag.
 
 ## Train exactly 40 epochs
 
