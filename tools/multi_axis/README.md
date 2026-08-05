@@ -12,21 +12,21 @@ This directory contains the full multivariate AXIS Phase-II pipeline specified i
 - Teacher supervision is answer-only NLL over the natural-language `model_answer` field only. The 17 empty `model_answer` rows are filtered; short-label fields are never used as a training fallback.
 - Training alignment follows the authoritative 62-shard teacher summary: 67,773 rows are matched one-to-one by normalized question text within each shard, and the remaining 47 are supplied by a SHA-256-audited same-index recovery bundle derived from the raw teacher records.
 - Split is by `base_sample_id`, 90/10, seed 42, with zero group overlap.
-- Exactly 40 epochs, no early stopping; select the lowest validation answer-token NLL after all epochs.
+- Current four-GPU formal experiment: exactly 20 epochs, no early stopping. The preserved five-GPU profile remains exactly 40 epochs. In both cases, select the lowest validation answer-token NLL only after all configured epochs.
 - Formal inference covers 478new, SMD, SWaT, LEMMA-RCA, and VTA.
 - MC and TF use final-label exact match; OE uses parseability. Results are emitted overall, by question type, and by dataset.
 - Five Judges score every test set. GPT-5.4 is the only Judge used for baseline deltas; the other four are used for cross-Judge robustness.
 
 The checked-in formal configuration records the actual world size and effective batch size. Do not change accumulation or world size after launch; a resumed run must use the same configuration.
 
-The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. Two fail-closed distributed profiles are registered: the preserved five-process profile uses micro-batch 1 and six-step accumulation for effective batch size 30; the four-process profile uses micro-batch 1 and eight-step accumulation for effective batch size 32.
+The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. The preserved five-process/40-epoch profile uses micro-batch 1 and six-step accumulation for effective batch size 30. The four-process/20-epoch profile keeps effective batch size 32 and supports the registered benchmark candidates micro-batch/accumulation 1/8, 2/4, and 4/2. Formal launch uses the fastest candidate that fits all four selected GPUs. Model construction audits the resolved LLM backend, every identified LLM attention module, both FlashAttention kernel imports, and all Hint Tuner cross-attention modules; any eager fallback terminates the run.
 
 ## Components
 
 - `src/models/MultiAXIS/`: configuration, prompt construction, frozen TimeRCD wrapper, Flash cross-attention, Hint Tuner, and dual-LLM model wrapper.
 - `tools/multi_axis/build_training_recovery.py`: reproducibly derives the 47-row, SHA-256-audited recovery bundle from the registered raw teacher records.
 - `tools/multi_axis/build_manifests.py`: deterministic pairing, filtering, grouped split, source hashes, random-access indices, and the five evaluation manifests.
-- `tools/multi_axis/train.py`: registered four- or five-process manual data parallelism, frozen-encoder group cache, exact answer NLL, 40 epoch checkpoints, and crash resume.
+- tools/multi_axis/train.py: registered four- or five-process manual data parallelism, bounded batch-aware frozen-encoder cache, exact answer NLL, configured-epoch checkpoints, throughput/memory benchmark mode, FlashAttention runtime audit, and crash resume.
 - `tools/multi_axis/infer.py`: configured four- or five-GPU, group-preserving, crash-resumable generation and deterministic merge.
 - `tools/multi_axis/label_metrics.py`: exact MC/TF label metrics and OE parse rate.
 - `tools/multi_axis/geval_runner.py`: crash-resilient five-Judge scoring with provider-specific probability handling.
@@ -68,7 +68,7 @@ python tools/multi_axis/build_manifests.py \
 
 This must report 62 authoritative shards, 67,773 direct text matches, 47 audited recovery matches, 67,820 aligned rows with 67,820 structured-reference matches, 17 filtered empty answers, 67,803 retained rows, and zero train/validation group overlap. The summary also records the 76,998-row question pool, unused question count, all consumed recovery keys, raw-source provenance hashes, and every materialized input hash. Evaluation counts must be 478, 200, 184, 12, and 200 with the registered per-type counts. The partially covered 478new pool is aligned by normalized question text; the four fully covered real-world sets follow the collaborator scorer's index fallback across bias-neutralized question revisions. Every resulting pair must also match on the structured `windows_0_answer` reference. Input SHA-256 hashes are retained unless `--skip-input-hashes` is explicitly used; the formal run must not use that flag.
 
-## Train exactly 40 epochs
+## Benchmark and run the registered formal epoch count
 
 Release only the experiment's own verified reservation processes immediately before launch. Never terminate another user's process.
 
@@ -76,7 +76,7 @@ Four-GPU profile (effective batch 32):
 
 ```bash
 torchrun --standalone --nproc_per_node=4 tools/multi_axis/train.py \
-  --config experiments/multi_axis/formal_deepseek_40epochs_4gpu.json \
+  --config experiments/multi_axis/formal_deepseek_20epochs_4gpu.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
@@ -94,7 +94,7 @@ torchrun --standalone --nproc_per_node=5 tools/multi_axis/train.py \
   --output-dir /path/to/run/training
 ```
 
-To resume after an interruption, provide `--resume /path/to/run/training/last_train_state.pt`. A valid completion has `TRAINING_COMPLETE`, 40 records in `epochs.jsonl`, 40 hint checkpoints, and `best_checkpoint.json` pointing to the minimum validation answer NLL.
+To compare registered four-GPU candidates, add --benchmark-optimizer-steps N and use a distinct output directory for each configuration. Benchmark mode writes benchmark_summary.json and exits without validation or formal checkpoints. To resume a formal run after an interruption, provide --resume /path/to/run/training/last_train_state.pt. A valid completion has TRAINING_COMPLETE, one epochs.jsonl record and one hint checkpoint per configured epoch (20 for the current four-GPU experiment; 40 for the preserved five-GPU profile), and best_checkpoint.json pointing to the minimum validation answer NLL.
 
 ## Four- or five-GPU inference
 
@@ -102,7 +102,7 @@ Read the selected checkpoint filename from `best_checkpoint.json`; do not select
 
 ```bash
 torchrun --standalone --nproc_per_node=4 tools/multi_axis/infer.py \
-  --config experiments/multi_axis/formal_deepseek_40epochs_4gpu.json \
+  --config experiments/multi_axis/formal_deepseek_20epochs_4gpu.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
@@ -152,7 +152,7 @@ python tools/multi_axis/aggregate_geval.py \
   --output-dir /path/to/run/aggregate
 
 python tools/multi_axis/audit_experiment.py \
-  --config experiments/multi_axis/formal_deepseek_40epochs.json \
+  --config experiments/multi_axis/formal_deepseek_20epochs_4gpu.json \
   --manifest-dir /path/to/run/manifests \
   --run-dir /path/to/run/training \
   --predictions-dir /path/to/run/predictions \

@@ -33,7 +33,12 @@ from tools.multi_axis.build_manifests import (
     teacher_reference_answer,
 )
 from tools.multi_axis.geval_runner import bounded_distribution
-from tools.multi_axis.label_metrics import canonical_label, open_parseable, parse_prediction
+from tools.multi_axis.label_metrics import (
+    canonical_label,
+    open_parseable,
+    parse_prediction,
+)
+from tools.multi_axis.train import compute_timercd_cached
 
 
 class FakeTokenizer:
@@ -65,14 +70,18 @@ class FakeTokenizer:
 def test_prompt_placeholder_counts_and_order():
     tokenizer = FakeTokenizer()
     tokenizer.add_special_tokens({"additional_special_tokens": list(HINT_TOKENS)})
-    builder = MultiAxisPromptBuilder(tokenizer, fixed_tokens=30, max_context_tokens=32768)
+    builder = MultiAxisPromptBuilder(
+        tokenizer, fixed_tokens=30, max_context_tokens=32768
+    )
     values = [[-12, -8, 15], [3, 4, 29]]
     text = builder.build_text("Which channel changes?", 10, 13, values)
     assert text.index("### Question") < text.index("### Task-prior hints")
     assert text.index("### Task-prior hints") < text.index("### Channel-aligned")
     assert text.index("### Channel-aligned") < text.index("### Joint-Local")
     assert "-12 <STEP_HINT> -8 <STEP_HINT> 15 <STEP_HINT>" in text
-    tokenized = builder.tokenize(["Which channel changes?"], [(10, 13)], [values], ["Answer: A"])
+    tokenized = builder.tokenize(
+        ["Which channel changes?"], [(10, 13)], [values], ["Answer: A"]
+    )
     assert tokenized.step_positions[0].numel() == 6
     assert tokenized.joint_positions[0].numel() == 1
     assert tokenized.fixed_positions[0].numel() == 30
@@ -87,15 +96,32 @@ def test_formal_teacher_target_does_not_fall_back_to_short_label():
 
 
 @pytest.mark.parametrize(
-    ("world_size", "accumulation_steps", "effective_batch_size"),
-    [(5, 6, 30), (4, 8, 32)],
+    (
+        "world_size",
+        "micro_batch_size",
+        "accumulation_steps",
+        "epochs",
+        "effective_batch_size",
+    ),
+    [
+        (5, 1, 6, 40, 30),
+        (4, 1, 8, 20, 32),
+        (4, 2, 4, 20, 32),
+        (4, 4, 2, 20, 32),
+    ],
 )
 def test_supported_formal_distributed_profiles(
-    world_size, accumulation_steps, effective_batch_size
+    world_size,
+    micro_batch_size,
+    accumulation_steps,
+    epochs,
+    effective_batch_size,
 ):
     config = TrainingConfig(
         expected_world_size=world_size,
+        micro_batch_size=micro_batch_size,
         accumulation_steps=accumulation_steps,
+        epochs=epochs,
     )
     config.validate()
     assert config.effective_batch_size == effective_batch_size
@@ -103,7 +129,12 @@ def test_supported_formal_distributed_profiles(
 
 def test_unsupported_formal_distributed_profile_fails_closed():
     with pytest.raises(ValueError, match="Unsupported formal distributed profile"):
-        TrainingConfig(expected_world_size=4, accumulation_steps=6).validate()
+        TrainingConfig(
+            expected_world_size=4,
+            micro_batch_size=2,
+            accumulation_steps=8,
+            epochs=20,
+        ).validate()
 
 
 def test_checked_in_four_and_five_gpu_configs():
@@ -112,23 +143,108 @@ def test_checked_in_four_and_five_gpu_configs():
         root / "experiments/multi_axis/formal_deepseek_40epochs.json"
     )
     four_gpu = MultiAxisConfig.load_json(
-        root / "experiments/multi_axis/formal_deepseek_40epochs_4gpu.json"
+        root / "experiments/multi_axis/formal_deepseek_20epochs_4gpu.json"
+    )
+    four_gpu_micro4 = MultiAxisConfig.load_json(
+        root / "experiments/multi_axis/benchmark_deepseek_20epochs_4gpu_micro4.json"
     )
     assert (
+        five_gpu.training.epochs,
         five_gpu.training.expected_world_size,
+        five_gpu.training.micro_batch_size,
         five_gpu.training.accumulation_steps,
         five_gpu.training.effective_batch_size,
-    ) == (5, 6, 30)
+    ) == (40, 5, 1, 6, 30)
     assert (
+        four_gpu.training.epochs,
         four_gpu.training.expected_world_size,
+        four_gpu.training.micro_batch_size,
         four_gpu.training.accumulation_steps,
         four_gpu.training.effective_batch_size,
-    ) == (4, 8, 32)
+    ) == (20, 4, 2, 4, 32)
+    assert (
+        four_gpu_micro4.training.epochs,
+        four_gpu_micro4.training.expected_world_size,
+        four_gpu_micro4.training.micro_batch_size,
+        four_gpu_micro4.training.accumulation_steps,
+        four_gpu_micro4.training.effective_batch_size,
+    ) == (20, 4, 4, 2, 32)
+
+
+def test_batch_timercd_cache_reuses_base_series_and_preserves_padding():
+    class FakeTimeRCD:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, series, time_mask, channel_mask):
+            self.calls += 1
+            local = series.unsqueeze(-1).repeat(1, 1, 1, 3)
+            logits = torch.stack((-series, series), dim=-1)
+            return local, logits
+
+    fake_timercd = FakeTimeRCD()
+    model = SimpleNamespace(timercd=fake_timercd)
+    first_inputs = {
+        "normalized_series": torch.tensor(
+            [
+                [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+                [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+            ]
+        ),
+        "time_mask": torch.ones(2, 3, dtype=torch.bool),
+        "channel_mask": torch.ones(2, 2, dtype=torch.bool),
+    }
+    cache = {}
+    first_local, first_logits = compute_timercd_cached(
+        model, first_inputs, cache, ["base-a", "base-a"], [3, 3], [2, 2]
+    )
+    assert fake_timercd.calls == 1
+    assert first_local.shape == (2, 3, 2, 3)
+    assert first_logits.shape == (2, 3, 2, 2)
+    assert torch.equal(first_local[0], first_local[1])
+
+    second_inputs = {
+        "normalized_series": torch.tensor(
+            [
+                [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+                [[7.0, 0.0], [8.0, 0.0], [0.0, 0.0]],
+            ]
+        ),
+        "time_mask": torch.tensor([[1, 1, 1], [1, 1, 0]], dtype=torch.bool),
+        "channel_mask": torch.tensor([[1, 1], [1, 0]], dtype=torch.bool),
+    }
+    second_local, second_logits = compute_timercd_cached(
+        model, second_inputs, cache, ["base-a", "base-b"], [3, 2], [2, 1]
+    )
+    assert fake_timercd.calls == 2
+    assert torch.equal(second_local[0], first_local[0])
+    assert torch.count_nonzero(second_local[1, 2:]) == 0
+    assert torch.count_nonzero(second_local[1, :, 1:]) == 0
+    assert torch.count_nonzero(second_logits[1, 2:]) == 0
+
+
+def test_attention_backend_audit_rejects_eager_resolution():
+    dummy = SimpleNamespace(
+        config=SimpleNamespace(
+            llm=SimpleNamespace(attention_implementation="flash_attention_2"),
+            hints=SimpleNamespace(require_flash_attention=True),
+        ),
+        llm=SimpleNamespace(
+            config=SimpleNamespace(
+                _attn_implementation="eager",
+                _attn_implementation_internal="eager",
+            )
+        ),
+    )
+    with pytest.raises(RuntimeError, match="did not resolve to flash_attention_2"):
+        MultiAxisForConditionalGeneration.attention_backend_audit(dummy)
 
 
 def test_channelwise_normalization_and_serialization():
     values = np.asarray([[1.0, 10.0], [2.0, 10.0], [3.0, 10.0]], dtype=np.float32)
-    normalized, window = normalize_and_serialize(values, (0, 3), epsilon=1e-5, scale=100)
+    normalized, window = normalize_and_serialize(
+        values, (0, 3), epsilon=1e-5, scale=100
+    )
     assert normalized.shape == values.shape
     assert abs(float(normalized[:, 0].mean())) < 1e-6
     assert window[1] == [0, 0, 0]
@@ -136,7 +252,16 @@ def test_channelwise_normalization_and_serialization():
 
 
 def test_dynamic_timercd_encoder_accepts_runtime_channel_count():
-    encoder = TimeSeriesEncoder(d_model=16, d_proj=4, patch_size=4, num_layers=1, num_heads=4, d_ff_dropout=0.0, num_features=20, activation="gelu")
+    encoder = TimeSeriesEncoder(
+        d_model=16,
+        d_proj=4,
+        patch_size=4,
+        num_layers=1,
+        num_heads=4,
+        d_ff_dropout=0.0,
+        num_features=20,
+        activation="gelu",
+    )
     series = torch.randn(2, 7, 3)
     time_mask = torch.tensor([[1] * 7, [1] * 5 + [0] * 2], dtype=torch.bool)
     channel_mask = torch.tensor([[1, 1, 1], [1, 1, 0]], dtype=torch.bool)
@@ -167,12 +292,22 @@ def test_flash_cross_attention_allows_head_dimension_256():
     assert layer.head_dim == 256
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA-only FlashAttention regression")
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA-only FlashAttention regression"
+)
 def test_flash_cross_attention_cuda_varlen_mask():
     pytest.importorskip("flash_attn")
-    layer = FlashCrossAttention(embed_dim=256, num_heads=4, require_flash=True).cuda().to(torch.bfloat16)
-    query = torch.randn(2, 1, 256, device="cuda", dtype=torch.bfloat16, requires_grad=True)
-    memory = torch.randn(2, 40, 256, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+    layer = (
+        FlashCrossAttention(embed_dim=256, num_heads=4, require_flash=True)
+        .cuda()
+        .to(torch.bfloat16)
+    )
+    query = torch.randn(
+        2, 1, 256, device="cuda", dtype=torch.bfloat16, requires_grad=True
+    )
+    memory = torch.randn(
+        2, 40, 256, device="cuda", dtype=torch.bfloat16, requires_grad=True
+    )
     dense_output = layer(query, memory, memory)
     mask = torch.ones(2, 40, device="cuda", dtype=torch.bool)
     mask[1, 31:] = False
@@ -184,8 +319,17 @@ def test_flash_cross_attention_cuda_varlen_mask():
 
 
 def test_hint_tuner_shapes_and_zero_initialized_anomaly_gate():
-    config = SimpleNamespace(num_prototypes=7, prototype_heads=4, fixed_tokens=5, joint_heads=2, representation_epsilon=1e-6, require_flash_attention=True)
-    tuner = MultiAxisHintTuner(vocab_size=13, llm_hidden_size=16, d_proj=8, config=config)
+    config = SimpleNamespace(
+        num_prototypes=7,
+        prototype_heads=4,
+        fixed_tokens=5,
+        joint_heads=2,
+        representation_epsilon=1e-6,
+        require_flash_attention=True,
+    )
+    tuner = MultiAxisHintTuner(
+        vocab_size=13, llm_hidden_size=16, d_proj=8, config=config
+    )
     local = torch.randn(2, 5, 3, 8)
     logits_a = torch.randn(2, 5, 3, 2)
     logits_b = logits_a * 10
@@ -254,8 +398,14 @@ def test_label_parsing_contract():
 
 
 def test_bounded_logprob_distribution():
-    entry = {"top_logprobs": [{"token": str(score), "logprob": -abs(score - 4.0)} for score in range(1, 6)]}
-    result = bounded_distribution(entry, {str(i): i for i in range(1, 6)}, requested_topk=5, bound=1e-6)
+    entry = {
+        "top_logprobs": [
+            {"token": str(score), "logprob": -abs(score - 4.0)} for score in range(1, 6)
+        ]
+    }
+    result = bounded_distribution(
+        entry, {str(i): i for i in range(1, 6)}, requested_topk=5, bound=1e-6
+    )
     assert result is not None
     score, probabilities, metadata = result
     assert 1 <= score <= 5
@@ -278,7 +428,9 @@ def test_phase_a_disables_anomaly_and_joint_paths():
     )
     assert not tuner.anomaly_direction.requires_grad
     assert not tuner.joint_query.requires_grad
-    assert all(not parameter.requires_grad for parameter in tuner.joint_pool.parameters())
+    assert all(
+        not parameter.requires_grad for parameter in tuner.joint_pool.parameters()
+    )
 
     local = torch.randn(1, 4, 2, 8)
     words = torch.randn(13, 16)
@@ -306,8 +458,11 @@ def test_prompt_can_remove_joint_placeholder_for_ablation():
     assert tokenized.joint_positions[0].numel() == 0
     assert tokenized.fixed_positions[0].numel() == 3
 
+
 def test_eval_index_alignment_handles_bias_neutralized_question_rewrite():
-    question_item = {"row": {"question": "Neutral rewrite", "windows": [{"answer": "Yes"}]}}
+    question_item = {
+        "row": {"question": "Neutral rewrite", "windows": [{"answer": "Yes"}]}
+    }
     teacher_item = {"row": {"question": "Older wording", "windows_0_answer": " yes "}}
     matches, used, strategy = align_eval_rows(
         "SMD", {"alignment": "index", "expected": 1}, [question_item], [teacher_item]
@@ -335,7 +490,8 @@ def test_audited_training_recovery_bundle(tmp_path):
         "_multi_axis_recovery": {"source_shard": "shard-a", "source_index": 7},
     }
     questions_path.write_text(
-        json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8"
+        json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n",
+        encoding="utf-8",
     )
     manifest = {
         "format": "multi-axis-training-recovery-v1",
@@ -348,12 +504,16 @@ def test_audited_training_recovery_bundle(tmp_path):
     manifest_path = recovery_root / "recovery_manifest.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    lookup, loaded_manifest, source_files = load_training_recovery(tmp_path, hash_inputs=True)
+    lookup, loaded_manifest, source_files = load_training_recovery(
+        tmp_path, hash_inputs=True
+    )
     assert normalized_question(row) == "which channel?"
     assert set(lookup) == {("shard-a", 7)}
     assert loaded_manifest == manifest
     assert all(item["sha256"] for item in source_files)
 
-    questions_path.write_text(questions_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    questions_path.write_text(
+        questions_path.read_text(encoding="utf-8") + "\n", encoding="utf-8"
+    )
     with pytest.raises(RuntimeError, match="size"):
         load_training_recovery(tmp_path, hash_inputs=True)

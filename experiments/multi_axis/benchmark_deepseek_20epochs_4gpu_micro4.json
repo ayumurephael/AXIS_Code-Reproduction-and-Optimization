@@ -31,14 +31,14 @@
     "use_cache_during_training": false
   },
   "training": {
-    "epochs": 40,
+    "epochs": 20,
     "seed": 42,
     "learning_rate": 0.0001,
     "weight_decay": 0.01,
     "warmup_ratio": 0.05,
     "gradient_clip_norm": 1.0,
-    "micro_batch_size": 1,
-    "accumulation_steps": 8,
+    "micro_batch_size": 4,
+    "accumulation_steps": 2,
     "expected_world_size": 4,
     "num_workers": 2,
     "validation_fraction": 0.10,

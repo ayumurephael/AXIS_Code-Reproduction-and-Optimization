@@ -33,9 +33,13 @@ def answer_only_causal_nll(
 ) -> AnswerOnlyCausalLMOutput:
     """Exact causal-LM NLL without materializing prompt-position vocabulary logits."""
     if hidden_states.ndim != 3 or labels.ndim != 2:
-        raise ValueError("hidden_states and labels must have shapes [B, L, D] and [B, L]")
+        raise ValueError(
+            "hidden_states and labels must have shapes [B, L, D] and [B, L]"
+        )
     if hidden_states.shape[:2] != labels.shape:
-        raise ValueError("hidden_states and labels must share batch/sequence dimensions")
+        raise ValueError(
+            "hidden_states and labels must share batch/sequence dimensions"
+        )
     shifted_labels = labels[:, 1:].contiguous()
     supervised = shifted_labels.ne(-100)
     supervised_token_count = int(supervised.sum().item())
@@ -130,22 +134,40 @@ class MultiAxisHintTuner(nn.Module):
         ):
             raise ValueError("TimeRCD embeddings/logits have incompatible shapes")
         if len(intervals) != batch or len(channel_counts) != batch:
-            raise ValueError("Interval/channel-count batches do not match TimeRCD output")
+            raise ValueError(
+                "Interval/channel-count batches do not match TimeRCD output"
+            )
 
         signed_evidence = torch.tanh(
             (anomaly_logits[..., 1] - anomaly_logits[..., 0]) / 2.0
         )
         enhanced_samples: List[torch.Tensor] = []
-        for index, ((start, end), channels) in enumerate(zip(intervals, channel_counts)):
+        for index, ((start, end), channels) in enumerate(
+            zip(intervals, channel_counts)
+        ):
             if not (0 <= start < end <= total_steps):
-                raise ValueError(f"Invalid interval [{start}, {end}) for T={total_steps}")
+                raise ValueError(
+                    f"Invalid interval [{start}, {end}) for T={total_steps}"
+                )
             if not (1 <= channels <= max_channels):
-                raise ValueError(f"Invalid channel count {channels} for C={max_channels}")
+                raise ValueError(
+                    f"Invalid channel count {channels} for C={max_channels}"
+                )
             # [L,C,D] -> [C,L,D] -> [C*L,D], exactly channel-major.
-            step = local_embeddings[index, start:end, :channels].transpose(0, 1).reshape(-1, d_proj)
+            step = (
+                local_embeddings[index, start:end, :channels]
+                .transpose(0, 1)
+                .reshape(-1, d_proj)
+            )
             evidence = (
-                signed_evidence[index, start:end, :channels].transpose(0, 1).reshape(-1)
-            ) if self.use_anomaly_evidence else signed_evidence.new_zeros(step.shape[0])
+                (
+                    signed_evidence[index, start:end, :channels]
+                    .transpose(0, 1)
+                    .reshape(-1)
+                )
+                if self.use_anomaly_evidence
+                else signed_evidence.new_zeros(step.shape[0])
+            )
             enhanced = rms_unit(
                 rms_unit(step, self.config.representation_epsilon)
                 + evidence[:, None] * self.anomaly_direction[None, :],
@@ -155,7 +177,9 @@ class MultiAxisHintTuner(nn.Module):
 
         max_step_hints = max(sample.shape[0] for sample in enhanced_samples)
         enhanced_padded = local_embeddings.new_zeros(batch, max_step_hints, self.d_proj)
-        step_mask = torch.zeros(batch, max_step_hints, dtype=torch.bool, device=local_embeddings.device)
+        step_mask = torch.zeros(
+            batch, max_step_hints, dtype=torch.bool, device=local_embeddings.device
+        )
         for index, enhanced in enumerate(enhanced_samples):
             count = enhanced.shape[0]
             enhanced_padded[index, :count] = enhanced
@@ -168,7 +192,9 @@ class MultiAxisHintTuner(nn.Module):
         )
         expected = (self.config.num_prototypes, self.llm_hidden_size)
         if prototype_bank.shape != expected:
-            raise ValueError(f"Prototype bank shape {tuple(prototype_bank.shape)} != {expected}")
+            raise ValueError(
+                f"Prototype bank shape {tuple(prototype_bank.shape)} != {expected}"
+            )
         prototypes = prototype_bank.unsqueeze(0).expand(batch, -1, -1)
 
         step_queries = self.step_projection(enhanced_padded)
@@ -232,7 +258,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
         dtype = getattr(torch, config.llm.torch_dtype)
         source = os.environ.get("MULTI_AXIS_MODEL_PATH") or config.llm.model_name
         if source != config.llm.model_name and not Path(source).is_dir():
-            raise FileNotFoundError(f"MULTI_AXIS_MODEL_PATH is not a directory: {source}")
+            raise FileNotFoundError(
+                f"MULTI_AXIS_MODEL_PATH is not a directory: {source}"
+            )
         tokenizer = AutoTokenizer.from_pretrained(
             source,
             token=token,
@@ -281,7 +309,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
         for token in HINT_TOKENS:
             ids = self.tokenizer.encode(token, add_special_tokens=False)
             if len(ids) != 1:
-                raise AssertionError(f"Registered hint token {token} is not atomic: {ids}")
+                raise AssertionError(
+                    f"Registered hint token {token} is not atomic: {ids}"
+                )
 
     def _freeze_llm(self) -> None:
         for parameter in self.llm.parameters():
@@ -323,20 +353,130 @@ class MultiAxisForConditionalGeneration(nn.Module):
             prefix = getattr(self.llm, "base_model_prefix", "")
             backbone = getattr(self.llm, prefix, None) if prefix else None
         if backbone is None or backbone is self.llm:
-            raise AttributeError("Could not locate the causal LLM backbone for sparse answer NLL")
+            raise AttributeError(
+                "Could not locate the causal LLM backbone for sparse answer NLL"
+            )
         return backbone
 
+    def attention_backend_audit(self) -> Dict[str, Any]:
+        """Fail closed unless every formal attention path resolves to FlashAttention 2."""
+        requested = self.config.llm.attention_implementation
+        if not self.config.hints.require_flash_attention:
+            raise RuntimeError("Formal execution requires require_flash_attention=true")
+        if requested != "flash_attention_2":
+            raise RuntimeError(
+                f"Formal execution requested attention backend {requested!r}, not flash_attention_2"
+            )
+
+        config_objects = [("llm.config", self.llm.config)]
+        text_config = getattr(self.llm.config, "text_config", None)
+        if text_config is not None and text_config is not self.llm.config:
+            config_objects.append(("llm.config.text_config", text_config))
+        resolved_configs = {}
+        for name, value in config_objects:
+            resolved = getattr(value, "_attn_implementation", None)
+            internal = getattr(value, "_attn_implementation_internal", None)
+            resolved_configs[name] = {
+                "resolved": resolved,
+                "internal": internal,
+            }
+        effective = [
+            item["resolved"] or item["internal"] for item in resolved_configs.values()
+        ]
+        if not effective or any(item != "flash_attention_2" for item in effective):
+            raise RuntimeError(
+                "LLM attention backend did not resolve to flash_attention_2: "
+                f"{resolved_configs}"
+            )
+
+        attention_modules = []
+        for name, module in self.llm.named_modules():
+            class_name = type(module).__name__
+            if name.endswith("self_attn") or class_name.lower().endswith("attention"):
+                module_config = getattr(module, "config", None)
+                if module_config is None:
+                    continue
+                resolved = getattr(module_config, "_attn_implementation", None)
+                internal = getattr(module_config, "_attn_implementation_internal", None)
+                implementation = resolved or internal
+                attention_modules.append(
+                    {
+                        "name": name,
+                        "class": class_name,
+                        "implementation": implementation,
+                    }
+                )
+        if not attention_modules:
+            raise RuntimeError(
+                "Could not identify any LLM attention modules for backend audit"
+            )
+        invalid_modules = [
+            item
+            for item in attention_modules
+            if item["implementation"] != "flash_attention_2"
+        ]
+        if invalid_modules:
+            raise RuntimeError(
+                "One or more LLM attention modules resolved away from flash_attention_2: "
+                f"{invalid_modules[:5]}"
+            )
+
+        try:
+            import flash_attn
+            from flash_attn import flash_attn_func, flash_attn_varlen_func
+        except Exception as error:
+            raise RuntimeError("FlashAttention kernels are not importable") from error
+        if not callable(flash_attn_func) or not callable(flash_attn_varlen_func):
+            raise RuntimeError(
+                "FlashAttention dense/varlen kernel entry points are unavailable"
+            )
+
+        cross_attention_modules = [
+            module
+            for module in self.hint_tuner.modules()
+            if isinstance(module, FlashCrossAttention)
+        ]
+        if not cross_attention_modules or any(
+            not module.require_flash for module in cross_attention_modules
+        ):
+            raise RuntimeError(
+                "Hint Tuner cross-attention is not fail-closed on FlashAttention"
+            )
+
+        return {
+            "requested": requested,
+            "llm_resolved_configs": resolved_configs,
+            "llm_attention_module_count": len(attention_modules),
+            "llm_attention_module_classes": sorted(
+                {item["class"] for item in attention_modules}
+            ),
+            "hint_cross_attention_module_count": len(cross_attention_modules),
+            "flash_attn_version": getattr(flash_attn, "__version__", "unknown"),
+            "dense_kernel_importable": True,
+            "varlen_kernel_importable": True,
+            "fallback_allowed": False,
+        }
+
     def trainable_parameter_names(self) -> List[str]:
-        return [name for name, parameter in self.named_parameters() if parameter.requires_grad]
+        return [
+            name
+            for name, parameter in self.named_parameters()
+            if parameter.requires_grad
+        ]
 
     def assert_freeze_contract(self) -> None:
         leaked = [name for name, p in self.llm.named_parameters() if p.requires_grad]
-        leaked += [f"timercd.{name}" for name, p in self.timercd.named_parameters() if p.requires_grad]
+        leaked += [
+            f"timercd.{name}"
+            for name, p in self.timercd.named_parameters()
+            if p.requires_grad
+        ]
         if leaked:
             raise AssertionError(f"Frozen parameter contract violated: {leaked[:10]}")
         expected_prefix = "hint_tuner."
         unexpected = [
-            name for name, p in self.named_parameters()
+            name
+            for name, p in self.named_parameters()
             if p.requires_grad and not name.startswith(expected_prefix)
         ]
         if unexpected:
@@ -361,7 +501,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
         timercd_override: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
         if timercd_override is None:
-            local, anomaly_logits = self.timercd(normalized_series, time_mask, channel_mask)
+            local, anomaly_logits = self.timercd(
+                normalized_series, time_mask, channel_mask
+            )
         else:
             local, anomaly_logits = timercd_override
         return self.hint_tuner(
@@ -390,7 +532,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
             joint_pos = tokenized.joint_positions[index].to(device)
             fixed_pos = tokenized.fixed_positions[index].to(device)
             if step_hints[index].shape[0] != step_pos.numel():
-                raise AssertionError("Step hint count changed between prompt and encoder")
+                raise AssertionError(
+                    "Step hint count changed between prompt and encoder"
+                )
             embeddings[index, step_pos] = step_hints[index].to(embeddings.dtype)
             if joint_hints is not None and joint_pos.numel():
                 embeddings[index, joint_pos] = joint_hints[index].to(embeddings.dtype)
@@ -495,11 +639,17 @@ class MultiAxisForConditionalGeneration(nn.Module):
         prompt_width = input_ids.shape[1]
         decoded = []
         for sequence in sequences:
-            generated = sequence[prompt_width:] if sequence.numel() > prompt_width else sequence
-            decoded.append(self.tokenizer.decode(generated, skip_special_tokens=True).strip())
+            generated = (
+                sequence[prompt_width:] if sequence.numel() > prompt_width else sequence
+            )
+            decoded.append(
+                self.tokenizer.decode(generated, skip_special_tokens=True).strip()
+            )
         return decoded
 
-    def hint_checkpoint_payload(self, epoch: int, global_step: int, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    def hint_checkpoint_payload(
+        self, epoch: int, global_step: int, metadata: Dict[str, Any]
+    ) -> Dict[str, Any]:
         return {
             "format": "multi-axis-hints-v1",
             "epoch": epoch,
@@ -510,12 +660,16 @@ class MultiAxisForConditionalGeneration(nn.Module):
             "metadata": metadata,
         }
 
-    def load_hint_checkpoint(self, path: str | Path, strict: bool = True) -> Dict[str, Any]:
+    def load_hint_checkpoint(
+        self, path: str | Path, strict: bool = True
+    ) -> Dict[str, Any]:
         payload = torch.load(path, map_location="cpu", weights_only=False)
         if payload.get("format") != "multi-axis-hints-v1":
             raise ValueError("Not a Multi-AXIS hint checkpoint")
         expected_hash = payload.get("timercd_sha256")
         if expected_hash and self.timercd.checkpoint_sha256 != expected_hash:
-            raise ValueError("TimeRCD checkpoint hash does not match the hint checkpoint")
+            raise ValueError(
+                "TimeRCD checkpoint hash does not match the hint checkpoint"
+            )
         self.hint_tuner.load_state_dict(payload["hint_tuner_state_dict"], strict=strict)
         return payload

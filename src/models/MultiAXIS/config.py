@@ -10,8 +10,10 @@ DEEPSEEK_MODEL_ID = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
 QWEN35_MODEL_ID = "Qwen/Qwen3.5-9B"
 SUPPORTED_LLM_IDS = (DEEPSEEK_MODEL_ID, QWEN35_MODEL_ID)
 FORMAL_DISTRIBUTED_PROFILES = {
-    (4, 8): 32,
-    (5, 6): 30,
+    (4, 1, 8, 20): 32,
+    (4, 2, 4, 20): 32,
+    (4, 4, 2, 20): 32,
+    (5, 1, 6, 40): 30,
 }
 
 
@@ -58,7 +60,9 @@ class LLMConfig:
         if self.torch_dtype != "bfloat16":
             raise ValueError("Formal Multi-AXIS training requires bfloat16.")
         if self.max_context_tokens < 32768:
-            raise ValueError("The documented architecture requires at least a 32768-token context.")
+            raise ValueError(
+                "The documented architecture requires at least a 32768-token context."
+            )
 
 
 @dataclass
@@ -79,30 +83,45 @@ class TrainingConfig:
 
     @property
     def effective_batch_size(self) -> int:
-        return self.micro_batch_size * self.accumulation_steps * self.expected_world_size
+        return (
+            self.micro_batch_size * self.accumulation_steps * self.expected_world_size
+        )
 
     def validate(self) -> None:
-        if self.epochs != 40:
-            raise ValueError("The formal experiment is fixed to exactly 40 epochs.")
         if self.seed != 42 or self.validation_fraction != 0.10:
             raise ValueError("The confirmed grouped split is 90/10 with seed 42.")
         if self.early_stopping:
-            raise ValueError("The confirmed protocol runs all 40 epochs without early stopping.")
+            raise ValueError(
+                "The confirmed protocol runs all configured epochs without early stopping."
+            )
         if self.select_by != "validation_answer_nll":
-            raise ValueError("Checkpoint selection must use validation answer-token NLL only.")
-        if self.micro_batch_size != 1:
-            raise ValueError("Formal Multi-AXIS training requires micro_batch_size=1.")
-        profile = (self.expected_world_size, self.accumulation_steps)
+            raise ValueError(
+                "Checkpoint selection must use validation answer-token NLL only."
+            )
+        profile = (
+            self.expected_world_size,
+            self.micro_batch_size,
+            self.accumulation_steps,
+            self.epochs,
+        )
         if profile not in FORMAL_DISTRIBUTED_PROFILES:
             supported = ", ".join(
-                f"{world_size} GPUs / accumulation {accumulation} / effective batch {batch_size}"
-                for (world_size, accumulation), batch_size in sorted(
-                    FORMAL_DISTRIBUTED_PROFILES.items()
-                )
+                f"{world_size} GPUs / micro {micro_batch} / accumulation {accumulation} "
+                f"/ {epochs} epochs / effective batch {batch_size}"
+                for (
+                    world_size,
+                    micro_batch,
+                    accumulation,
+                    epochs,
+                ), batch_size in sorted(FORMAL_DISTRIBUTED_PROFILES.items())
             )
-            raise ValueError(f"Unsupported formal distributed profile; use {supported}.")
+            raise ValueError(
+                f"Unsupported formal distributed profile; use {supported}."
+            )
         if self.effective_batch_size != FORMAL_DISTRIBUTED_PROFILES[profile]:
-            raise ValueError("Configured effective batch size does not match its formal profile.")
+            raise ValueError(
+                "Configured effective batch size does not match its formal profile."
+            )
 
 
 @dataclass
@@ -130,7 +149,9 @@ class MultiAxisConfig:
         if self.timercd.d_proj % self.hints.joint_heads:
             raise ValueError("TimeRCD d_proj must be divisible by joint_heads.")
         if self.hints.fixed_tokens != 30 or self.hints.num_prototypes != 1024:
-            raise ValueError("The specified architecture fixes K_F=30 and N_proto=1024.")
+            raise ValueError(
+                "The specified architecture fixes K_F=30 and N_proto=1024."
+            )
 
         if self.hints.ablation_phase not in {"A", "B", "C", "D"}:
             raise ValueError("Ablation phase must be A, B, C, or D (full model).")
