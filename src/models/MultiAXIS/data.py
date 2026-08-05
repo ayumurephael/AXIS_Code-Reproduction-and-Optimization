@@ -10,10 +10,17 @@ import torch
 from torch.utils.data import Dataset
 
 
-TEACHER_ANSWER_FIELDS = ("model_answer", "teacher_answer_llm", "answer")
+TEACHER_ANSWER_FIELDS = ("model_answer", "teacher_answer_llm", "windows_0_answer", "answer")
+
+
+def teacher_model_answer(row: Dict[str, Any]) -> str:
+    """Return only the natural-language model_answer used for formal supervision."""
+    value = row.get("model_answer")
+    return value.strip() if isinstance(value, str) else ""
 
 
 def teacher_answer(row: Dict[str, Any]) -> str:
+    """Best-effort answer extraction for evaluation/reference compatibility."""
     for field in TEACHER_ANSWER_FIELDS:
         value = row.get(field)
         if isinstance(value, str) and value.strip():

@@ -8,7 +8,7 @@ import random
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
-from src.models.MultiAXIS.data import question_type_group, teacher_answer
+from src.models.MultiAXIS.data import question_type_group, teacher_answer, teacher_model_answer
 
 
 EVAL_SPECS = {
@@ -170,7 +170,7 @@ def load_training_recovery(data_root: Path, hash_inputs: bool):
     return lookup, manifest, source_files
 
 
-def train_record(data_root: Path, question_item, teacher_item) -> Dict[str, Any]:
+def train_record(data_root: Path, question_item, teacher_item, answer_text: str | None = None) -> Dict[str, Any]:
     row = question_item["row"]
     return {
         "question_path": question_item["path"].relative_to(data_root).as_posix(),
@@ -184,7 +184,7 @@ def train_record(data_root: Path, question_item, teacher_item) -> Dict[str, Any]
         "question": str(row["question"]),
         "question_group": question_type_group(row),
         "interval": [int(row["target_interval"]["start"]), int(row["target_interval"]["end"])],
-        "teacher_answer": teacher_answer(teacher_item["row"]),
+        "teacher_answer": teacher_answer(teacher_item["row"]) if answer_text is None else answer_text,
     }
 
 
@@ -254,7 +254,12 @@ def build_train(data_root: Path, output_dir: Path, seed: int, validation_fractio
                 used_recovery.add(recovery_key)
                 recovered_matches += 1
             paired_before_empty += 1
-            record = train_record(data_root, question_item, teacher_item)
+            record = train_record(
+                data_root,
+                question_item,
+                teacher_item,
+                answer_text=teacher_model_answer(teacher_item["row"]),
+            )
             if not record["teacher_answer"]:
                 empty_answers += 1
                 continue

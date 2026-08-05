@@ -10,7 +10,11 @@ import torch
 
 from src.models.AXIS.ts_encoder_bi_bias import TimeSeriesEncoder
 from src.models.MultiAXIS.attention import FlashCrossAttention
-from src.models.MultiAXIS.data import normalize_and_serialize
+from src.models.MultiAXIS.data import (
+    normalize_and_serialize,
+    teacher_answer,
+    teacher_model_answer,
+)
 from src.models.MultiAXIS.model import MultiAxisHintTuner, rms_unit
 from src.models.MultiAXIS.prompting import HINT_TOKENS, MultiAxisPromptBuilder
 from tools.multi_axis.build_manifests import load_training_recovery, normalized_question, sha256_file
@@ -60,6 +64,12 @@ def test_prompt_placeholder_counts_and_order():
     assert tokenized.fixed_positions[0].numel() == 30
     assert torch.all(tokenized.labels[0, : tokenized.prompt_lengths[0]] == -100)
     assert (tokenized.labels[0] != -100).sum() > 0
+
+
+def test_formal_teacher_target_does_not_fall_back_to_short_label():
+    row = {"model_answer": "  ", "windows_0_answer": "short fallback", "answer": "A"}
+    assert teacher_model_answer(row) == ""
+    assert teacher_answer(row) == "short fallback"
 
 
 def test_channelwise_normalization_and_serialization():

@@ -9,7 +9,7 @@ This directory contains the full multivariate AXIS Phase-II pipeline specified i
 - Frozen multivariate TimeRCD encoder and anomaly head, loaded strictly from the supplied checkpoint.
 - Full Phase D architecture: Step-Local, anomaly evidence, Joint-Local, 30 Fixed hints, 1,024 vocabulary prototypes.
 - All ordinary cross-attention uses the CUDA FlashAttention backend; CPU exists only as a unit-test fallback.
-- Teacher supervision is answer-only NLL. The 17 empty teacher answers are filtered.
+- Teacher supervision is answer-only NLL over the natural-language `model_answer` field only. The 17 empty `model_answer` rows are filtered; short-label fields are never used as a training fallback.
 - Training alignment follows the authoritative 62-shard teacher summary: 67,773 rows are matched one-to-one by normalized question text within each shard, and the remaining 47 are supplied by a SHA-256-audited same-index recovery bundle derived from the raw teacher records.
 - Split is by `base_sample_id`, 90/10, seed 42, with zero group overlap.
 - Exactly 40 epochs, no early stopping; select the lowest validation answer-token NLL after all epochs.
@@ -22,6 +22,7 @@ The checked-in formal configuration records the actual world size and effective 
 ## Components
 
 - `src/models/MultiAXIS/`: configuration, prompt construction, frozen TimeRCD wrapper, Flash cross-attention, Hint Tuner, and dual-LLM model wrapper.
+- `tools/multi_axis/build_training_recovery.py`: reproducibly derives the 47-row, SHA-256-audited recovery bundle from the registered raw teacher records.
 - `tools/multi_axis/build_manifests.py`: deterministic pairing, filtering, grouped split, source hashes, random-access indices, and the five evaluation manifests.
 - `tools/multi_axis/train.py`: five-process manual data parallelism, frozen-encoder group cache, exact answer NLL, 40 epoch checkpoints, and crash resume.
 - `tools/multi_axis/infer.py`: five-GPU, group-preserving, crash-resumable generation and deterministic merge.
@@ -41,6 +42,16 @@ python -m pip install --no-build-isolation --no-deps "flash-attn==2.7.4.post1"
 ```
 
 Before any formal work, verify `torch.cuda.device_count() == 5`, that all devices are H100, BF16 is supported, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. Export `PYTHONPATH` to the repository root and put Hugging Face caches on a filesystem with enough space. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in the configuration and checkpoint metadata.
+
+## Rebuild the audited recovery bundle
+
+This one-time derivation requires the original raw `teacher_gpt55.jsonl` files. The formal asset root only needs the two generated files. The command fails unless the registered counts are exactly 67,820 total, 67,773 direct text matches, 47 same-index recoveries, and 17 empty teacher answers.
+
+```bash
+python tools/multi_axis/build_training_recovery.py \
+  --source-root /path/to/original-collaborator-assets \
+  --output-dir /path/to/formal-assets/derived/training_recovery
+```
 
 ## Build immutable manifests
 
