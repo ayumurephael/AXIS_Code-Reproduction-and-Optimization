@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -10,6 +11,7 @@ import torch
 
 from src.models.AXIS.ts_encoder_bi_bias import TimeSeriesEncoder
 from src.models.MultiAXIS.attention import FlashCrossAttention
+from src.models.MultiAXIS.config import MultiAxisConfig, TrainingConfig
 from src.models.MultiAXIS.data import (
     normalize_and_serialize,
     teacher_answer,
@@ -77,6 +79,46 @@ def test_formal_teacher_target_does_not_fall_back_to_short_label():
     row = {"model_answer": "  ", "windows_0_answer": "short fallback", "answer": "A"}
     assert teacher_model_answer(row) == ""
     assert teacher_answer(row) == "short fallback"
+
+
+@pytest.mark.parametrize(
+    ("world_size", "accumulation_steps", "effective_batch_size"),
+    [(5, 6, 30), (4, 8, 32)],
+)
+def test_supported_formal_distributed_profiles(
+    world_size, accumulation_steps, effective_batch_size
+):
+    config = TrainingConfig(
+        expected_world_size=world_size,
+        accumulation_steps=accumulation_steps,
+    )
+    config.validate()
+    assert config.effective_batch_size == effective_batch_size
+
+
+def test_unsupported_formal_distributed_profile_fails_closed():
+    with pytest.raises(ValueError, match="Unsupported formal distributed profile"):
+        TrainingConfig(expected_world_size=4, accumulation_steps=6).validate()
+
+
+def test_checked_in_four_and_five_gpu_configs():
+    root = Path(__file__).resolve().parents[2]
+    five_gpu = MultiAxisConfig.load_json(
+        root / "experiments/multi_axis/formal_deepseek_40epochs.json"
+    )
+    four_gpu = MultiAxisConfig.load_json(
+        root / "experiments/multi_axis/formal_deepseek_40epochs_4gpu.json"
+    )
+    assert (
+        five_gpu.training.expected_world_size,
+        five_gpu.training.accumulation_steps,
+        five_gpu.training.effective_batch_size,
+    ) == (5, 6, 30)
+    assert (
+        four_gpu.training.expected_world_size,
+        four_gpu.training.accumulation_steps,
+        four_gpu.training.effective_batch_size,
+    ) == (4, 8, 32)
 
 
 def test_channelwise_normalization_and_serialization():

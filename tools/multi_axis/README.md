@@ -19,15 +19,15 @@ This directory contains the full multivariate AXIS Phase-II pipeline specified i
 
 The checked-in formal configuration records the actual world size and effective batch size. Do not change accumulation or world size after launch; a resumed run must use the same configuration.
 
-The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. The five-process run uses micro-batch 1 and six-step accumulation for effective batch size 30.
+The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. Two fail-closed distributed profiles are registered: the preserved five-process profile uses micro-batch 1 and six-step accumulation for effective batch size 30; the four-process profile uses micro-batch 1 and eight-step accumulation for effective batch size 32.
 
 ## Components
 
 - `src/models/MultiAXIS/`: configuration, prompt construction, frozen TimeRCD wrapper, Flash cross-attention, Hint Tuner, and dual-LLM model wrapper.
 - `tools/multi_axis/build_training_recovery.py`: reproducibly derives the 47-row, SHA-256-audited recovery bundle from the registered raw teacher records.
 - `tools/multi_axis/build_manifests.py`: deterministic pairing, filtering, grouped split, source hashes, random-access indices, and the five evaluation manifests.
-- `tools/multi_axis/train.py`: five-process manual data parallelism, frozen-encoder group cache, exact answer NLL, 40 epoch checkpoints, and crash resume.
-- `tools/multi_axis/infer.py`: five-GPU, group-preserving, crash-resumable generation and deterministic merge.
+- `tools/multi_axis/train.py`: registered four- or five-process manual data parallelism, frozen-encoder group cache, exact answer NLL, 40 epoch checkpoints, and crash resume.
+- `tools/multi_axis/infer.py`: configured four- or five-GPU, group-preserving, crash-resumable generation and deterministic merge.
 - `tools/multi_axis/label_metrics.py`: exact MC/TF label metrics and OE parse rate.
 - `tools/multi_axis/geval_runner.py`: crash-resilient five-Judge scoring with provider-specific probability handling.
 - `tools/multi_axis/aggregate_geval.py`: ten metrics for every dataset × Judge plus micro/macro and cross-Judge statistics.
@@ -36,14 +36,14 @@ The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=25
 
 ## Environment
 
-Use Linux, five visible NVIDIA H100 GPUs, BF16, PyTorch 2.5 or newer, Transformers 4.57 or newer, and FlashAttention compatible with the installed Torch/CUDA ABI. On a preconfigured server, preserve its PyTorch build and install the additional packages selectively instead of allowing pip to replace Torch.
+Use Linux, four or five visible NVIDIA H100 GPUs as selected by the formal configuration, BF16, PyTorch 2.5 or newer, Transformers 4.57 or newer, and FlashAttention compatible with the installed Torch/CUDA ABI. On a preconfigured server, preserve its PyTorch build and install the additional packages selectively instead of allowing pip to replace Torch.
 
 ```bash
 python -m pip install --upgrade "transformers>=4.57,<5" "openai>=1.99" "google-genai>=1.30" "httpx>=0.28" packaging psutil ninja
 python -m pip install --no-build-isolation --no-deps "flash-attn==2.7.4.post1"
 ```
 
-Before any formal work, verify `torch.cuda.device_count() == 5`, that all devices are H100, BF16 is supported, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. Export `PYTHONPATH` to the repository root and put Hugging Face caches on a filesystem with enough space. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in the configuration and checkpoint metadata.
+Before any formal work, verify that `torch.cuda.device_count()` equals the configuration's `expected_world_size`, that all visible devices are H100, BF16 is supported, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. Export `PYTHONPATH` to the repository root and put Hugging Face caches on a filesystem with enough space. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in the configuration and checkpoint metadata.
 
 ## Rebuild the audited recovery bundle
 
@@ -72,6 +72,19 @@ This must report 62 authoritative shards, 67,773 direct text matches, 47 audited
 
 Release only the experiment's own verified reservation processes immediately before launch. Never terminate another user's process.
 
+Four-GPU profile (effective batch 32):
+
+```bash
+torchrun --standalone --nproc_per_node=4 tools/multi_axis/train.py \
+  --config experiments/multi_axis/formal_deepseek_40epochs_4gpu.json \
+  --data-root /path/to/multi-axis-assets \
+  --manifest-dir /path/to/run/manifests \
+  --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
+  --output-dir /path/to/run/training
+```
+
+Preserved five-GPU profile (effective batch 30):
+
 ```bash
 torchrun --standalone --nproc_per_node=5 tools/multi_axis/train.py \
   --config experiments/multi_axis/formal_deepseek_40epochs.json \
@@ -83,13 +96,13 @@ torchrun --standalone --nproc_per_node=5 tools/multi_axis/train.py \
 
 To resume after an interruption, provide `--resume /path/to/run/training/last_train_state.pt`. A valid completion has `TRAINING_COMPLETE`, 40 records in `epochs.jsonl`, 40 hint checkpoints, and `best_checkpoint.json` pointing to the minimum validation answer NLL.
 
-## Five-GPU inference
+## Four- or five-GPU inference
 
-Read the selected checkpoint filename from `best_checkpoint.json`; do not select by test or Judge scores.
+Read the selected checkpoint filename from `best_checkpoint.json`; do not select by test or Judge scores. Inference uses the same registered distributed profile as its training run. The current four-GPU formal run uses:
 
 ```bash
-torchrun --standalone --nproc_per_node=5 tools/multi_axis/infer.py \
-  --config experiments/multi_axis/formal_deepseek_40epochs.json \
+torchrun --standalone --nproc_per_node=4 tools/multi_axis/infer.py \
+  --config experiments/multi_axis/formal_deepseek_40epochs_4gpu.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
