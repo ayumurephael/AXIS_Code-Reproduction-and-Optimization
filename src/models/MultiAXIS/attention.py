@@ -23,6 +23,47 @@ def _flash_only_context(require_flash: bool):
         )
 
 
+def _flash_varlen_cross_attention(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    key_padding_mask: torch.Tensor,
+) -> torch.Tensor:
+    """Run masked non-causal cross-attention with FlashAttention varlen packing."""
+    try:
+        from flash_attn import flash_attn_varlen_func
+    except (ImportError, OSError) as exc:
+        raise RuntimeError(
+            "Masked CUDA cross-attention requires the flash-attn package"
+        ) from exc
+
+    batch, _, q_len, _ = q.shape
+    q_bshd = q.transpose(1, 2).contiguous()
+    k_bshd = k.transpose(1, 2).contiguous()
+    v_bshd = v.transpose(1, 2).contiguous()
+    q_unpadded = q_bshd.view(batch * q_len, q.shape[1], q.shape[-1])
+    k_unpadded = k_bshd[key_padding_mask]
+    v_unpadded = v_bshd[key_padding_mask]
+    key_lengths = key_padding_mask.sum(dim=-1, dtype=torch.int32)
+    cu_q = torch.arange(
+        0, (batch + 1) * q_len, q_len, device=q.device, dtype=torch.int32
+    )
+    cu_k = torch.zeros(batch + 1, device=q.device, dtype=torch.int32)
+    cu_k[1:] = torch.cumsum(key_lengths, dim=0)
+    output = flash_attn_varlen_func(
+        q_unpadded,
+        k_unpadded,
+        v_unpadded,
+        cu_q,
+        cu_k,
+        q_len,
+        int(key_lengths.max().item()),
+        dropout_p=0.0,
+        causal=False,
+    )
+    return output.view(batch, q_len, q.shape[1], q.shape[-1]).transpose(1, 2)
+
+
 class FlashCrossAttention(nn.Module):
     """Non-causal MHA whose CUDA path is forced onto the FlashAttention-2 SDPA kernel."""
 
@@ -65,24 +106,33 @@ class FlashCrossAttention(nn.Module):
         k = split(self.k_proj(key), kv_len)
         v = split(self.v_proj(value), kv_len)
         attention_mask = None
+        has_padding = False
         if key_padding_mask is not None:
             if key_padding_mask.shape != (batch, kv_len):
                 raise ValueError("key_padding_mask must have shape [B, K]")
             if not bool(key_padding_mask.any(dim=-1).all()):
                 raise ValueError("Every sample must expose at least one valid key")
-            attention_mask = key_padding_mask[:, None, None, :].bool()
+            key_padding_mask = key_padding_mask.bool()
+            has_padding = not bool(key_padding_mask.all())
+            if not has_padding:
+                key_padding_mask = None
 
-        try:
-            with _flash_only_context(self.require_flash):
-                output = F.scaled_dot_product_attention(
-                    q, k, v, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-                )
-        except RuntimeError as exc:
-            if torch.cuda.is_available() and self.require_flash:
-                raise RuntimeError(
-                    "FlashAttention-2 was required but PyTorch could not dispatch this "
-                    "cross-attention operation to the flash SDPA backend."
-                ) from exc
-            raise
+        if has_padding and q.is_cuda and self.require_flash:
+            output = _flash_varlen_cross_attention(q, k, v, key_padding_mask)
+        else:
+            if key_padding_mask is not None:
+                attention_mask = key_padding_mask[:, None, None, :]
+            try:
+                with _flash_only_context(self.require_flash):
+                    output = F.scaled_dot_product_attention(
+                        q, k, v, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
+                    )
+            except RuntimeError as exc:
+                if q.is_cuda and self.require_flash:
+                    raise RuntimeError(
+                        "FlashAttention-2 was required but no CUDA flash kernel accepted "
+                        "this cross-attention operation."
+                    ) from exc
+                raise
         output = output.transpose(1, 2).contiguous().view(batch, q_len, self.embed_dim)
         return self.out_proj(output)

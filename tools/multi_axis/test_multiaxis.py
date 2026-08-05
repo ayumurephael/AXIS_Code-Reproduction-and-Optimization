@@ -92,6 +92,21 @@ def test_flash_cross_attention_cpu_reference_path_and_mask():
     assert query.grad is not None and memory.grad is not None
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA-only FlashAttention regression")
+def test_flash_cross_attention_cuda_varlen_mask():
+    pytest.importorskip("flash_attn")
+    layer = FlashCrossAttention(embed_dim=256, num_heads=4, require_flash=True).cuda().to(torch.bfloat16)
+    query = torch.randn(2, 1, 256, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+    memory = torch.randn(2, 40, 256, device="cuda", dtype=torch.bfloat16, requires_grad=True)
+    mask = torch.ones(2, 40, device="cuda", dtype=torch.bool)
+    mask[1, 31:] = False
+    output = layer(query, memory, memory, mask)
+    assert output.shape == (2, 1, 256)
+    assert torch.isfinite(output).all()
+    output.float().sum().backward()
+    assert query.grad is not None and memory.grad is not None
+
+
 def test_hint_tuner_shapes_and_zero_initialized_anomaly_gate():
     config = SimpleNamespace(num_prototypes=7, prototype_heads=4, fixed_tokens=5, joint_heads=2, representation_epsilon=1e-6, require_flash_attention=True)
     tuner = MultiAxisHintTuner(vocab_size=13, llm_hidden_size=16, d_proj=8, config=config)
