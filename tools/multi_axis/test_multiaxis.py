@@ -408,6 +408,8 @@ def test_vlm_renderer_consumes_normalized_array_without_mutation(tmp_path):
     assert np.array_equal(values, before)
     assert output.is_file() and audit["sha256"]
     assert audit["width"] > 0 and audit["height"] > 0
+    assert audit["font_family"] == "Times New Roman"
+    assert len(audit["font_bundle_sha256"]) == 64
 
 
 def test_dynamic_timercd_encoder_accepts_runtime_channel_count():

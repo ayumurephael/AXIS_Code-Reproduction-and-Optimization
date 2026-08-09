@@ -46,7 +46,7 @@ python -m pip install --upgrade "transformers>=4.57,<5" "Pillow>=11" "matplotlib
 python -m pip install --no-build-isolation --no-deps "flash-attn==2.7.4.post1"
 ```
 
-Before any formal work, verify that `torch.cuda.device_count()` equals the configuration's `expected_world_size`, that all visible devices are H800, BF16 is supported, Times New Roman is discoverable by Matplotlib, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. Export `PYTHONPATH` to the repository root and put Hugging Face caches on WORK storage. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in configuration and checkpoint metadata.
+Before any formal work, verify that `torch.cuda.device_count()` equals the configuration's `expected_world_size`, that all visible devices are H800, BF16 is supported, Times New Roman is discoverable by Matplotlib, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. When the cluster does not install Times New Roman system-wide, place the four authorized files `times.ttf`, `timesbd.ttf`, `timesi.ttf`, and `timesbi.ttf` in a private experiment asset directory and set `MULTI_AXIS_TIMES_FONT_DIR` to that directory. The renderer registers that exact bundle and records its per-file and aggregate SHA-256 provenance; an incomplete or incorrectly named bundle fails closed. Export `PYTHONPATH` to the repository root and put Hugging Face caches on WORK storage. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in configuration and checkpoint metadata.
 
 ## Rebuild the audited recovery bundle
 

@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
@@ -21,6 +22,7 @@ CONTEXT_COLOR = "#000000"
 TARGET_COLOR = "#173f7a"
 TARGET_BACKGROUND = "#fff2b2"
 RENDER_FORMAT = "multi-axis-vl-image-manifest-v1"
+TIMES_FONT_FILES = ("times.ttf", "timesbd.ttf", "timesi.ttf", "timesbi.ttf")
 
 
 def sha256_file(path: Path) -> str:
@@ -39,16 +41,55 @@ def normalized_series_sha256(values: np.ndarray) -> str:
     return digest.hexdigest()
 
 
-def require_times_new_roman() -> None:
+@lru_cache(maxsize=1)
+def require_times_new_roman() -> Dict[str, Any]:
     from matplotlib import font_manager
 
+    explicit_root = os.environ.get("MULTI_AXIS_TIMES_FONT_DIR")
+    registered: List[Path] = []
+    if explicit_root:
+        font_root = Path(explicit_root).resolve()
+        if not font_root.is_dir():
+            raise RuntimeError(
+                f"MULTI_AXIS_TIMES_FONT_DIR is not a directory: {font_root}"
+            )
+        missing = [name for name in TIMES_FONT_FILES if not (font_root / name).is_file()]
+        if missing:
+            raise RuntimeError(
+                f"The explicit Times New Roman bundle is incomplete: {missing}"
+            )
+        for name in TIMES_FONT_FILES:
+            path = font_root / name
+            font_manager.fontManager.addfont(str(path))
+            registered.append(path)
     try:
-        font_manager.findfont("Times New Roman", fallback_to_default=False)
+        resolved = Path(
+            font_manager.findfont("Times New Roman", fallback_to_default=False)
+        ).resolve()
     except ValueError as exc:
         raise RuntimeError(
             "Times New Roman is required by the VLM rendering specification but "
             "is not installed on this compute node."
         ) from exc
+    if font_manager.FontProperties(fname=str(resolved)).get_name() != "Times New Roman":
+        raise RuntimeError("Resolved renderer font is not Times New Roman")
+    audited = registered or [resolved]
+    files = [
+        {"name": path.name, "bytes": path.stat().st_size, "sha256": sha256_file(path)}
+        for path in audited
+    ]
+    bundle_digest = hashlib.sha256()
+    for item in files:
+        bundle_digest.update(item["name"].encode("utf-8"))
+        bundle_digest.update(b"\0")
+        bundle_digest.update(item["sha256"].encode("ascii"))
+        bundle_digest.update(b"\n")
+    return {
+        "family": "Times New Roman",
+        "registration_source": "explicit_bundle" if registered else "system_font",
+        "bundle_sha256": bundle_digest.hexdigest(),
+        "files": files,
+    }
 
 
 def render_normalized_series(
@@ -77,7 +118,7 @@ def render_normalized_series(
     if dpi != 600:
         raise ValueError("The VLM architecture fixes renderer dpi at 600")
 
-    require_times_new_roman()
+    font_audit = require_times_new_roman()
     figure_height = max(2.4, min(16.0, 1.0 + 0.55 * channels))
     font_size = max(4.0, min(7.0, 8.0 - 0.06 * channels))
     x = np.arange(steps, dtype=np.int64)
@@ -153,6 +194,8 @@ def render_normalized_series(
         "height": height,
         "pixels": width * height,
         "sha256": sha256_file(output_path),
+        "font_family": font_audit["family"],
+        "font_bundle_sha256": font_audit["bundle_sha256"],
     }
 
 
@@ -178,6 +221,7 @@ def render_manifests(
 ) -> Dict[str, Any]:
     if not config.vision.enabled:
         raise ValueError("Image rendering requires vision.enabled=true")
+    font_audit = require_times_new_roman()
     output_root.mkdir(parents=True, exist_ok=True)
     existing_records: Dict[str, Dict[str, Any]] = {}
     existing_manifest = output_root / "image_manifest.jsonl"
@@ -245,6 +289,8 @@ def render_manifests(
                     "renderer_version": config.vision.renderer_version,
                     "dpi": config.vision.renderer_dpi,
                     "image_relpath": relative,
+                    "font_family": font_audit["family"],
+                    "font_bundle_sha256": font_audit["bundle_sha256"],
                 }
                 mismatched = {
                     key: (previous.get(key), value)
@@ -311,6 +357,7 @@ def render_manifests(
         "unique_images": len(records),
         "manifest_rows": manifest_counts,
         "normalization": "consumed ManifestDataset.normalized_series without re-normalization",
+        "font": font_audit,
         "image_manifest_sha256": sha256_file(manifest_output),
     }
     (output_root / "image_manifest_summary.json").write_text(
