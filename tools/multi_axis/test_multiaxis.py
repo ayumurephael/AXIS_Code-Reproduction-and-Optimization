@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -630,6 +631,41 @@ def test_embedding_hook_preserves_input_ids_and_only_replaces_full_prompt():
     assert torch.allclose(incremental, embedding(input_ids[:, -1:]))
     replaced.sum().backward()
     assert fixed.grad is not None and step[0].grad is not None and joint.grad is not None
+
+
+def test_generation_bridge_preserves_mm_token_types_for_visual_prefill():
+    class FakeVisualModel(torch.nn.Module):
+        def forward(self, **kwargs):
+            return kwargs
+
+    class FakeLLM(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.model = FakeVisualModel()
+
+        def prepare_inputs_for_generation(self, input_ids, pixel_values=None, **kwargs):
+            del kwargs
+            return {"input_ids": input_ids, "pixel_values": pixel_values}
+
+    wrapper = object.__new__(MultiAxisForConditionalGeneration)
+    torch.nn.Module.__init__(wrapper)
+    wrapper.config = SimpleNamespace(vision=SimpleNamespace(enabled=True))
+    wrapper.llm = FakeLLM()
+    model_inputs = {
+        "input_ids": torch.tensor([[1, 2, 3]]),
+        "pixel_values": torch.ones(1, 3, 4, 4),
+        "mm_token_type_ids": torch.tensor([[0, 1, 0]]),
+    }
+    with wrapper._native_generation_metadata_context(model_inputs) as audit:
+        signature = inspect.signature(wrapper.llm.prepare_inputs_for_generation)
+        assert "mm_token_type_ids" in signature.parameters
+        prepared = wrapper.llm.prepare_inputs_for_generation(**model_inputs)
+        forwarded = wrapper.llm.model(**prepared)
+        assert torch.equal(
+            forwarded["mm_token_type_ids"], model_inputs["mm_token_type_ids"]
+        )
+    assert audit == {"required": True, "prefill_calls": 1, "metadata_present": True}
+    assert wrapper.last_generation_metadata_audit == audit
 
 
 def test_frozen_vlm_stays_in_eval_mode_during_hint_training():

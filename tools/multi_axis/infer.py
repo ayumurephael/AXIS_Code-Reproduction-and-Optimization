@@ -111,6 +111,9 @@ def run_dataset(model, dataset_name: str, manifest_dir: Path, data_root: Path, i
                 "generation_seconds": time.monotonic() - started,
                 "model": model.config.llm.model_name,
                 "image_id": sample["image_id"] if model.config.vision.enabled else None,
+                "native_generation_metadata_audit": getattr(
+                    model, "last_generation_metadata_audit", None
+                ),
             }
             records.append(record)
             completed[index] = record

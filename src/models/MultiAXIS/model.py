@@ -4,6 +4,7 @@ import contextlib
 from dataclasses import asdict, dataclass
 import os
 from pathlib import Path
+import types
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import torch
@@ -597,6 +598,72 @@ class MultiAxisForConditionalGeneration(nn.Module):
 
         return model_inputs, labels, hint_hook
 
+    @contextlib.contextmanager
+    def _native_generation_metadata_context(
+        self, model_inputs: Dict[str, torch.Tensor]
+    ):
+        """Bridge processor MM metadata through Transformers generation validation.
+
+        Transformers 4.57 Qwen3-VL accepts ``mm_token_type_ids`` through the
+        model's typed kwargs, but its generation prepare signature does not list
+        the key. Keep the official tensor for the visual prefill instead of
+        deleting it merely to satisfy ``GenerationMixin`` validation.
+        """
+
+        if not self.config.vision.enabled:
+            audit = {"required": False, "prefill_calls": 0, "metadata_present": True}
+            yield audit
+            self.last_generation_metadata_audit = dict(audit)
+            return
+        if "mm_token_type_ids" not in model_inputs:
+            raise RuntimeError("Native generation requires mm_token_type_ids")
+        original_prepare = self.llm.prepare_inputs_for_generation
+        audit = {"required": True, "prefill_calls": 0, "metadata_present": True}
+
+        def prepare_with_mm_token_types(
+            module,
+            input_ids,
+            mm_token_type_ids=None,
+            **kwargs,
+        ):
+            del module
+            prepared = original_prepare(input_ids, **kwargs)
+            if prepared.get("pixel_values") is not None:
+                if mm_token_type_ids is None:
+                    audit["metadata_present"] = False
+                    raise RuntimeError(
+                        "Qwen3-VL visual generation prefill lost mm_token_type_ids"
+                    )
+                prepared["mm_token_type_ids"] = mm_token_type_ids
+            return prepared
+
+        def audit_prefill(module, args, kwargs):
+            del module, args
+            if kwargs.get("pixel_values") is not None:
+                audit["prefill_calls"] += 1
+                if kwargs.get("mm_token_type_ids") is None:
+                    audit["metadata_present"] = False
+                    raise RuntimeError(
+                        "Qwen3-VL model prefill did not receive mm_token_type_ids"
+                    )
+
+        self.llm.prepare_inputs_for_generation = types.MethodType(
+            prepare_with_mm_token_types, self.llm
+        )
+        handle = self.llm.model.register_forward_pre_hook(
+            audit_prefill, with_kwargs=True
+        )
+        try:
+            yield audit
+            if audit["prefill_calls"] < 1 or not audit["metadata_present"]:
+                raise RuntimeError(
+                    f"Native Qwen3-VL generation metadata audit failed: {audit}"
+                )
+        finally:
+            handle.remove()
+            self.llm.prepare_inputs_for_generation = original_prepare
+            self.last_generation_metadata_audit = dict(audit)
+
     def forward(
         self,
         *,
@@ -718,12 +785,13 @@ class MultiAxisForConditionalGeneration(nn.Module):
             try:
                 handle = self.llm.get_input_embeddings().register_forward_hook(hint_hook)
                 try:
-                    sequences = self.llm.generate(
-                        **model_inputs,
-                        pad_token_id=self.tokenizer.pad_token_id,
-                        eos_token_id=self.tokenizer.eos_token_id,
-                        **kwargs,
-                    )
+                    with self._native_generation_metadata_context(model_inputs):
+                        sequences = self.llm.generate(
+                            **model_inputs,
+                            pad_token_id=self.tokenizer.pad_token_id,
+                            eos_token_id=self.tokenizer.eos_token_id,
+                            **kwargs,
+                        )
                 finally:
                     handle.remove()
             finally:
