@@ -8,8 +8,13 @@ import statistics
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
+from tools.multi_axis.datasets import (
+    OFFICIAL_BIAS_NEUTRALIZED_DATASETS,
+    SUPPORTED_EVALUATION_DATASETS,
+    validate_datasets,
+)
 
-DATASETS = ("478new", "SMD", "SWaT", "LEMMA-RCA", "VTA")
+DATASETS = OFFICIAL_BIAS_NEUTRALIZED_DATASETS
 JUDGES = ("deepseek-v4-pro", "gemini-2.5-pro", "gpt-5.4", "qwen3.5-397b-a17b", "qwen3-30b-a3b-instruct-2507")
 COLUMNS = ("MC Final", "MC Corr.", "MC Rsn.", "OE Final", "OE Acc.", "OE Comp.", "OE Rel.", "TF Final", "TF Corr.", "TF Justif.")
 TYPE_INFO = {
@@ -79,17 +84,40 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results-root", required=True, help="Contains <judge>/<dataset>.jsonl")
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        choices=SUPPORTED_EVALUATION_DATASETS,
+        default=list(DATASETS),
+    )
+    parser.add_argument(
+        "--judges", nargs="+", choices=JUDGES, default=list(JUDGES)
+    )
     args = parser.parse_args()
     root, output_dir = Path(args.results_root), Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    datasets = validate_datasets(args.datasets)
+    judges = tuple(args.judges)
+    if len(judges) != len(set(judges)):
+        raise ValueError("Judge names must be unique")
     result = {"by_judge_dataset": {}, "micro": {}, "macro": {}}
     all_examples = {}
-    markdown_parts = ["# Multi-AXIS five-Judge G-Eval", "", "All scores are raw G-Eval scores on the 1–5 scale."]
-    for judge in JUDGES:
+    result["datasets"] = list(datasets)
+    result["judges"] = list(judges)
+    result["macro_warning"] = (
+        "478 and 478new are wording views of the same samples; a macro across both "
+        "is a view-level diagnostic, not an independent-dataset macro."
+        if {"478", "478new"}.issubset(datasets)
+        else None
+    )
+    markdown_parts = ["# Multi-AXIS G-Eval", "", "All scores are raw G-Eval scores on the 1–5 scale."]
+    if result["macro_warning"]:
+        markdown_parts.extend(["", f"> {result['macro_warning']}"])
+    for judge in judges:
         result["by_judge_dataset"][judge] = {}
         all_examples[judge] = []
         dataset_tables = []
-        for dataset in DATASETS:
+        for dataset in datasets:
             path = root / judge / f"{dataset}.jsonl"
             examples = example_scores(read_jsonl(path))
             if any(item["dataset"] != dataset for item in examples):
@@ -100,18 +128,18 @@ def main():
             all_examples[judge].extend(examples)
         result["micro"][judge] = ten_metrics(all_examples[judge])
         result["macro"][judge] = mean_tables(dataset_tables)
-        markdown_parts.extend(["", table_markdown(judge, [(dataset, result["by_judge_dataset"][judge][dataset]) for dataset in DATASETS] + [("Micro", result["micro"][judge]), ("Macro", result["macro"][judge])])])
+        markdown_parts.extend(["", table_markdown(judge, [(dataset, result["by_judge_dataset"][judge][dataset]) for dataset in datasets] + [("Micro", result["micro"][judge]), ("Macro", result["macro"][judge])])])
     robustness = {}
-    for dataset in DATASETS + ("micro", "macro"):
+    for dataset in datasets + ("micro", "macro"):
         robustness[dataset] = {}
-        tables = [result[dataset][judge] if dataset in ("micro", "macro") else result["by_judge_dataset"][judge][dataset] for judge in JUDGES]
+        tables = [result[dataset][judge] if dataset in ("micro", "macro") else result["by_judge_dataset"][judge][dataset] for judge in judges]
         for column in COLUMNS:
             values = [table[column] for table in tables]
             robustness[dataset][column] = {"mean": statistics.fmean(values), "std_population": statistics.pstdev(values), "min": min(values), "max": max(values), "range": max(values) - min(values)}
     result["cross_judge_robustness"] = robustness
     (output_dir / "geval_10metrics.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     (output_dir / "geval_10metrics.md").write_text("\n".join(markdown_parts) + "\n", encoding="utf-8")
-    print(json.dumps({"judges": len(JUDGES), "datasets": len(DATASETS), "complete": True}))
+    print(json.dumps({"judges": len(judges), "datasets": len(datasets), "complete": True}))
 
 
 if __name__ == "__main__":

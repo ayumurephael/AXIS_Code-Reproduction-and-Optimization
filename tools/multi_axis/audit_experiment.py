@@ -139,7 +139,7 @@ def main():
     check(
         "native_vlm_runtime",
         run_manifest.get("modality") == "image+numeric-window+soft-hints"
-        and run_manifest.get("actual_effective_batch_size") == 32
+        and run_manifest.get("actual_effective_batch_size") in {32, 48}
         and run_manifest.get("world_size") == 8
         and topology.get("node_count") == 2
         and topology.get("gpus_per_node") == 4

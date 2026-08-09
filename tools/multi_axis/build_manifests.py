@@ -15,6 +15,10 @@ from src.models.MultiAXIS.data import (
     visual_image_id,
     visual_image_relpath,
 )
+from tools.multi_axis.datasets import (
+    SUPPORTED_EVALUATION_DATASETS,
+    validate_datasets,
+)
 
 
 EVAL_SPECS = {
@@ -22,6 +26,12 @@ EVAL_SPECS = {
         "questions": ["question/question_eval_bias_neutralized_20260710b/*/questions_1000.jsonl"],
         "alignment": "question_text",
         "teachers": ["teacheranswer/teacher_eval_bias_neutralized_20260710b/*/teacher_gpt55.answers.jsonl"],
+        "expected": 478,
+    },
+    "478": {
+        "questions": ["question/question_eval/*/questions_1000.jsonl"],
+        "alignment": "question_text",
+        "teachers": ["teacheranswer/teacher_eval/*/teacher_gpt55.answers.jsonl"],
         "expected": 478,
     },
     "SMD": {
@@ -409,9 +419,22 @@ def expand_patterns(data_root: Path, patterns: Sequence[str]) -> List[Path]:
     return sorted(set(paths))
 
 
-def build_eval(data_root: Path, output_dir: Path, hash_inputs: bool):
+def build_eval(
+    data_root: Path,
+    output_dir: Path,
+    hash_inputs: bool,
+    datasets: Sequence[str] = SUPPORTED_EVALUATION_DATASETS,
+):
+    datasets = validate_datasets(datasets)
+    summary_path = output_dir / "eval_summary.json"
     all_summary = {}
-    for dataset, spec in EVAL_SPECS.items():
+    if set(datasets) != set(SUPPORTED_EVALUATION_DATASETS) and summary_path.is_file():
+        existing = json.loads(summary_path.read_text(encoding="utf-8"))
+        if not isinstance(existing, dict):
+            raise RuntimeError(f"Existing evaluation summary is not an object: {summary_path}")
+        all_summary.update(existing)
+    for dataset in datasets:
+        spec = EVAL_SPECS[dataset]
         question_paths = expand_patterns(data_root, spec["questions"])
         teacher_paths = expand_patterns(data_root, spec["teachers"])
         questions = []
@@ -461,7 +484,9 @@ def build_eval(data_root: Path, output_dir: Path, hash_inputs: bool):
         }
         (output_dir / f"eval_{dataset}_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         all_summary[dataset] = summary
-    (output_dir / "eval_summary.json").write_text(json.dumps(all_summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(all_summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return all_summary
 
 
@@ -473,6 +498,13 @@ def parse_args():
     parser.add_argument("--validation-fraction", type=float, default=0.10)
     parser.add_argument("--skip-input-hashes", action="store_true")
     parser.add_argument("--only", choices=["all", "train", "eval"], default="all")
+    parser.add_argument(
+        "--eval-datasets",
+        nargs="+",
+        choices=SUPPORTED_EVALUATION_DATASETS,
+        default=list(SUPPORTED_EVALUATION_DATASETS),
+        help="Evaluation manifests to build when --only is all or eval.",
+    )
     return parser.parse_args()
 
 
@@ -485,7 +517,19 @@ def main():
     if args.only in ("all", "train"):
         print(json.dumps({"train": build_train(data_root, output_dir, args.seed, args.validation_fraction, hash_inputs)}, ensure_ascii=False))
     if args.only in ("all", "eval"):
-        print(json.dumps({"eval": build_eval(data_root, output_dir, hash_inputs)}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "eval": build_eval(
+                        data_root,
+                        output_dir,
+                        hash_inputs,
+                        datasets=args.eval_datasets,
+                    )
+                },
+                ensure_ascii=False,
+            )
+        )
 
 
 if __name__ == "__main__":

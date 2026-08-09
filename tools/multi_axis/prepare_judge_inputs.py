@@ -4,9 +4,14 @@ import argparse
 import json
 from pathlib import Path
 
+from tools.multi_axis.datasets import (
+    OFFICIAL_BIAS_NEUTRALIZED_DATASETS,
+    SUPPORTED_EVALUATION_DATASETS,
+    validate_datasets,
+)
 
 TYPE_NAMES = {"MC": "multiple_choice", "OE": "open_ended", "TF": "true_false"}
-DATASETS = ("478new", "SMD", "SWaT", "LEMMA-RCA", "VTA")
+DATASETS = OFFICIAL_BIAS_NEUTRALIZED_DATASETS
 
 
 def read_jsonl(path: Path):
@@ -19,11 +24,18 @@ def main():
     parser.add_argument("--manifest-dir", required=True)
     parser.add_argument("--predictions-dir", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        choices=SUPPORTED_EVALUATION_DATASETS,
+        default=list(DATASETS),
+    )
     args = parser.parse_args()
     manifest_dir, predictions_dir, output_dir = map(Path, (args.manifest_dir, args.predictions_dir, args.output_dir))
     output_dir.mkdir(parents=True, exist_ok=True)
+    datasets = validate_datasets(args.datasets)
     summary = {}
-    for dataset in DATASETS:
+    for dataset in datasets:
         references = read_jsonl(manifest_dir / f"eval_{dataset}.jsonl")
         predictions = read_jsonl(predictions_dir / f"{dataset}.predictions.jsonl")
         if len(references) != len(predictions):

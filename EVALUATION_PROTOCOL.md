@@ -1,198 +1,254 @@
-# AXIS 三评测协议
+# 多变量 Multi-AXIS 评测协议
 
-本仓库同时支持 DeepSeek v4-pro、Gemini 2.5 Pro 和 Qwen 系列。三者评估同一份 AXIS predictions，但用途和统计口径不同。
+本文只描述本仓库的多变量 AXIS，包括数值/文本单模态路径与图像增强的
+VLM 路径。它不再使用原论文单变量 AXIS 的 `paper140`、`full284` 或
+`tools.axis_repro` 口径。
 
-## 固定职责
+## 1. 不可变原则
 
-| 场景 | Judge | 用途 | 是否可与论文数值直接对齐 |
-|---|---|---|---|
-| 日常迭代、消融筛选 | DeepSeek v4-pro | 低成本、同裁判的相对比较 | 否 |
-| 最终正式评测 | Gemini 2.5 Pro | 作者 prompt/rubric 下的 Table 1 | 是，仍需报告接口限制 |
-| 独立交叉评测 | Qwen 系列 | 直接读取 score-token logprobs，检验结论的 Judge 稳健性 | 否 |
-| Gemini 稳定性检查 | Gemini strict sampling | 估计无 logprobs 时的采样波动 | 否，仅诊断 |
+1. checkpoint 只能由 grouped validation 的 `validation_answer_nll` 选择；禁止用
+   测试集标签、G-Eval 或 Judge 分数挑 epoch、seed、超参数或架构。
+2. 正式五数据集结果统一使用 bias-neutralized 视图：478new、SMD、SWaT、
+   LEMMA-RCA、VTA。
+3. Teacher-Eval 478 与 478new 是同一批 478 个合成样本的两种问题文本视图，
+   不是两个独立数据集。可以同时报告敏感性，但不得把二者当成 956 个独立样本，
+   也不得在正式五数据集 macro 中双重计权。
+4. MC、TF 报最终标签 exact-match accuracy；OE 报可解析率。G-Eval 分数是独立的
+   1–5 语义质量指标，不能与标签准确率混称为 accuracy。
+5. 推理、正式 Judge 调用与评分审计必须在 GPU 服务器执行。API Judge 本身不消耗
+   本地 CUDA 算力，但其任务、断点文件与审计产物仍必须落在正式 GPU 实验目录。
+6. 比较模型时固定数据视图、问题顺序、teacher、rubric、Judge model ID、endpoint、
+   scoring method、生成参数和代码 commit。
 
-不同 Judge 的分数不得拼成一张“混合”表或当作同一量尺。比较两个 checkpoint 时，必须固定 predictions 子集、judge、prompt、model id、endpoint、scoring mode 和脚本 commit。
+## 2. 数据集与权威来源
 
-## 输入协议
+| 入口名 | 视图 | N | MC/OE/TF | Question | Teacher |
+|---|---|---:|---:|---|---|
+| `478new` | 合成、去偏置问法 | 478 | 176/139/163 | `question/question_eval_bias_neutralized_20260710b/*/questions_1000.jsonl` | `teacheranswer/teacher_eval_bias_neutralized_20260710b/*/teacher_gpt55.answers.jsonl` |
+| `478` | 同一合成样本、原始问法 | 478 | 176/139/163 | `question/question_eval/*/questions_1000.jsonl` | `teacheranswer/teacher_eval/*/teacher_gpt55.answers.jsonl` |
+| `SMD` | 真实、去偏置 | 200 | 66/67/67 | `question/question_smd_axis_v1_no_root_200_gpt54_bias_neutralized_20260713c/questions_200.jsonl` | `teacheranswer/teacher_smd_axis_v1_no_root_200_gpt54_bias_neutralized_20260713a/teacher_gpt54.answers.jsonl` |
+| `SWaT` | 真实、去偏置 | 184 | 61/62/61 | `question/question_swat_axis_v1_eval92_regular_184_gpt54_bias_neutralized_20260712c/questions_184.jsonl` | `teacheranswer/teacher_swat_axis_v1_eval92_regular_184_gpt54_20260712a/teacher_gpt54.answers.jsonl` |
+| `LEMMA-RCA` | 真实、去偏置 | 12 | 4/4/4 | `question/question_lemma_rca_cloud_curated_onset_v1_no_root_12_gpt54_bias_neutralized_openfirst_20260713b/questions_12.jsonl` | `teacheranswer/teacher_lemma_rca_cloud_curated_onset_v1_no_root_12_gpt54_bias_neutralized_openfirst_20260713a/teacher_gpt54.answers.jsonl` |
+| `VTA` | 真实、去偏置 | 200 | 67/67/66 | `question/question_vta_articulary_axis_v1_no_root_200_gpt54_llm2_bias_neutralized_openfirst_20260713b/questions_200.jsonl` | `teacheranswer/teacher_vta_articulary_axis_v1_no_root_200_gpt54_llm2_bias_neutralized_openfirst_20260713a/teacher_gpt54.answers.jsonl` |
 
-三种 judge 均只接收已经完成并审计的 JSONL：
+478/478new 的问题池各有 2,000 行，但只有 478 行具有 teacher 长答案；本协议的
+G-Eval 和表格均使用这 478 行。manifest builder 以规范化问题文本在各自视图内部
+匹配 teacher，禁止跨视图拿原始问题匹配去偏置 teacher。
 
-```bash
-python -m tools.axis_repro.audit_results \
-  --predictions <prediction_dir>/predictions.jsonl \
-  --manifest experiments/reproduction/manifests_author42/paper140.json \
-  --modes base
-```
+训练数据的权威契约是 62 个 question/teacher shard：67,820 对，监督目标字段为
+teacher `model_answer`；过滤 17 条空目标后保留 67,803 条，并按 `base_sample_id`
+以 seed 42 做 grouped 90/10 划分。train/validation 的 `base_sample_id` 交集必须为 0。
 
-正式输入必须是 `paper140` 的 140 条 base prediction。不要把 validation、full284、partial journal 或不同 batching 的文件混入。
-
-## DeepSeek v4-pro：日常默认
-
-密钥只放进当前进程环境。官方或兼容中转地址可用 `DEEPSEEK_BASE_URL` 或 `--endpoint` 指定；不要把含密钥的 URL 写入文档。
-
-```bash
-export DEEPSEEK_API_KEY='<set outside repository>'
-export DEEPSEEK_BASE_URL='https://api.deepseek.com/chat/completions'
-
-python -m tools.axis_repro.geval_resilient \
-  --predictions <prediction_dir>/predictions.jsonl \
-  --output <score_dir>/geval_deepseek_v4_pro.jsonl \
-  --model deepseek-v4-pro \
-  --max-tokens 4096 \
-  --fallback-samples 20 \
-  --primary-workers 8 \
-  --fallback-workers 1 \
-  --max-retry-rounds 12
-```
-
-runner 会优先读取最终 Score token 的 1–5 概率分布；服务端没有完整候选概率时，使用恰好 20 个有效采样分数的均值。`*.fallback_pending.jsonl` 是断点 journal，不是最终 score 文件。原命令重跑会跳过已完成键。
-
-HTTP 401/403/404 等永久请求错误会立即失败；408/409/425/429、5xx
-和传输层故障只在有界轮次内重试。这样可以保留断点恢复能力，同时避免认证、
-模型名或端点配置错误导致无限请求。
-
-若服务端不支持 logprobs，结果仍可用于同一 DeepSeek 配置下的日常相对比较，但必须记录 `method`，不能宣称与论文 Gemini G-Eval 等价。
-
-## Gemini 2.5 Pro：正式评测
-
-默认兼容 endpoint 是 PackyAPI，也可通过 `GEMINI_BASE_URL` 或 `--endpoint` 显式设置。发送测试问题、参考答案与生成回答属于外部 API 数据传输，执行前应确认授权和预算。
+## 3. 构建与审计 manifest
 
 ```bash
-export GEMINI_API_KEY='<set outside repository>'
-export GEMINI_BASE_URL='https://www.packyapi.com/v1/chat/completions'
-
-python -m tools.axis_repro.geval_gemini \
-  --predictions <prediction_dir>/predictions.jsonl \
-  --output <score_dir>/geval_gemini25pro_author.jsonl \
-  --model gemini-2.5-pro \
-  --prompt-template author \
-  --scoring-mode author \
-  --primary-workers 3
+export PYTHONPATH="$PWD"
+python tools/multi_axis/build_manifests.py \
+  --data-root /path/to/multi-axis-assets \
+  --output-dir /path/to/manifests \
+  --seed 42 --validation-fraction 0.10
 ```
 
-`--prompt-template author` 使用作者补充 G-Eval 的维度、权重、rubric 与布局。`--scoring-mode author` 的行为是：若接口返回完整 score-token logprobs，则使用概率期望；否则按作者代码可执行的回退语义保存 temperature=0 单次整数分。
-
-PackyAPI 对 Gemini 2.5 Pro 的实测兼容响应不含可用 `choices[].logprobs`，原生路径也不能假定支持。因此正式结果必须保留 `logprobs_requested`、`logprobs_returned`、`method`、`prompt_sha256`、`model`、`endpoint_host` 和 usage 元数据。
-
-## Gemini 严格采样校准
-
-只在独立目录运行，禁止覆盖正式 author-mode 文件：
+若已有正式 train/validation 与五个去偏置测试 manifest，只增补原始问法视图时使用：
 
 ```bash
-python -m tools.axis_repro.geval_gemini \
-  --predictions <prediction_dir>/predictions.jsonl \
-  --output <calibration_dir>/geval_gemini25pro_strict.jsonl \
-  --model gemini-2.5-pro \
-  --prompt-template author \
-  --scoring-mode strict \
-  --fallback-samples 20
+python tools/multi_axis/build_manifests.py \
+  --data-root /path/to/multi-axis-assets \
+  --output-dir /path/to/existing-manifests \
+  --only eval --eval-datasets 478
 ```
 
-strict 结果估计服务端无 logprobs 时的波动，不替代论文/作者代码的 author-mode 结果。
+该命令只写 `eval_478*` 并合并 `eval_summary.json`，不重建或覆盖训练划分。
 
+必须得到：
 
-## Qwen 系列：直接 logprobs 交叉评测
+- paired 67,820；direct match 67,773；audited recovery 47；structured-reference
+  match 67,820；过滤空 teacher 17；最终 67,803；
+- train 61,053、validation 6,750；train/validation group overlap 0；
+- 六个可选择评测入口的数量与上表完全一致；
+- 每个 manifest 保存 question/teacher 源路径、行号或字节偏移、输入 SHA-256、
+  `sample_id`、`base_sample_id` 与题型。
 
-Qwen 使用阿里云百炼 OpenAI 兼容接口。中国内地（北京）默认完整 endpoint 为
-`https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`；其他地域的
-API key 必须配套对应地域或 Workspace endpoint，并通过 `QWEN_BASE_URL` 或
-`--endpoint` 显式覆盖。模型 ID 可自由指定；本实验固定
-`qwen3-30b-a3b-instruct-2507`，扩展交叉评测另使用
-`qwen3.5-397b-a17b`。
+VLM 还必须为所选评测 manifest 渲染图像，并执行字体、600 DPI、半开区间边界、
+无标签/异常分数泄漏以及 PNG SHA-256 审计。单模态路径忽略图像字段。
 
-Qwen3 开源模型支持输出 token logprobs，但百炼 `top_logprobs` 上限为 5。
-runner 使用作者 prompt，并定位最终 `**Score:**` 后的单个 ASCII 数字 token。
-若 top-5 恰好覆盖 1--5，则计算精确归一化期望；若非评分 token 挤占 top-5，
-每个未返回数字的 logprob 都不大于已返回第 5 名的 cutoff。runner 据此计算缺失
-评分质量的最坏上界，只有上界不超过 `1e-6` 才接受有界截断分布，并记录
-`missing_score_mass_upper_bound`、`score_error_upper_bound` 和缺失数字。超过阈值
-仍 fail-closed；不能静默把任意缺失候选当作概率 0。只有明确采用 AXIS 回退协议
-时才可传 `--fallback-samples 20`。
+## 4. checkpoint 与推理
 
-若原始最终数字的 top-5 仍超过该上界，先写入 pending journal，再使用
-`geval_qwen_readout`：它把已经生成的作者式判断原文作为 assistant 历史，只要求
-同一模型把其中的整数分数编码为 JSON 单标签 A--E（A=1，…，E=5）。读出标签
-必须与原始整数完全一致，仍使用 top-5 直接 logprobs 和相同 `1e-6` 上界；否则
-继续 fail-closed。该二阶段只是确定性标签读出，不重新判断答案，也不是 20 次
-采样回退。
+读取训练目录的 `best_checkpoint.json`。文件必须声明：
+
+```json
+{
+  "selection_metric": "validation_answer_nll",
+  "best_epoch": 10,
+  "checkpoint": "hint_epoch_10.pt"
+}
+```
+
+其中数值只是示例；实际值以当前已完成 epoch 为准。不得等待或窥视测试分数后改选。
+
+`infer.py` 默认运行五个 bias-neutralized 数据集。诊断原始/去偏置问法敏感性时显式
+传入两个视图。推理 world size 可以与训练不同，但必须显式登记并与实际
+`torchrun` world 完全一致：
 
 ```bash
-export QWEN_API_KEY='<set outside repository>'
-export QWEN_BASE_URL='https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
-
-python -m tools.axis_repro.geval_qwen \
-  --predictions <prediction_dir>/predictions.jsonl \
-  --output <score_dir>/geval_qwen3_30b_a3b_instruct_2507.jsonl \
-  --model qwen3-30b-a3b-instruct-2507 \
-  --top-logprobs 5 \
-  --seed 72 \
-  --primary-workers 6 \
-  --max-missing-score-mass-upper-bound 1e-6 \
-  --max-retry-rounds 12
-
-python -m tools.axis_repro.geval_qwen_readout \
-  --pending <score_dir>/fallback_pending.jsonl \
-  --output <score_dir>/geval_qwen3_30b_a3b_instruct_2507.jsonl \
-  --model qwen3-30b-a3b-instruct-2507 \
-  --top-logprobs 5 \
-  --seed 72 \
-  --max-missing-score-mass-upper-bound 1e-6 \
-  --workers 2 \
-  --max-retry-rounds 12
-
-python -m tools.axis_repro.audit_results \
-  --predictions <prediction_dir>/predictions.jsonl \
-  --scores <score_dir>/geval_qwen3_30b_a3b_instruct_2507.jsonl \
-  --manifest experiments/reproduction/manifests_author42/paper140.json \
-  --modes base \
-  --expected-model qwen3-30b-a3b-instruct-2507 \
-  --expected-provider qwen \
-  --expected-enable-thinking auto \
-  --allowed-methods final_score_top_logprobs \
-                    final_score_top_logprobs_bounded \
-                    final_score_top_logprobs_readout \
-                    final_score_top_logprobs_readout_bounded \
-  --max-missing-score-mass-upper-bound 1e-6 \
-  --require-logprobs \
-  --require-prompt-hashes
+torchrun --standalone --nproc_per_node=3 tools/multi_axis/infer.py \
+  --config experiments/multi_axis/formal_deepseek_20epochs_4gpu.json \
+  --data-root /path/to/multi-axis-assets \
+  --manifest-dir /path/to/manifests \
+  --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
+  --hint-checkpoint /path/to/hint_epoch_10.pt \
+  --output-dir /path/to/predictions \
+  --expected-inference-world-size 3 \
+  --datasets 478new 478
 ```
 
-`qwen3-30b-a3b-instruct-2507` 是仅非思考模式模型，默认不要发送
-`enable_thinking`。对支持混合模式的其他 Qwen3 模型，可以使用
-`--enable-thinking true|false`；`auto` 表示不发送该扩展字段。正式 Qwen
-结果应执行上述 fail-closed 审计。
+每个 `<dataset>.predictions.jsonl` 必须逐行对应 manifest，并至少包含：
+`index`、`sample_id`、`dataset`、`question_group`、`raw_response`。推理 manifest
+必须记录 checkpoint epoch/SHA-256、TimeRCD SHA-256、模型、生成参数、world size、
+代码来源与数据集顺序。
 
-`qwen3.5-397b-a17b` 是支持思考/非思考的混合模式模型。本项目为保证两臂及
-两个 Qwen Judge 的 score-token 口径一致，主评分和 JSON readout 都显式传
-`--enable-thinking false`，并在最终审计传
-`--expected-enable-thinking false`。pending journal、最终 score row 和 readout
-元数据必须保存同一模式；发现主判词与 readout 模式不一致时立即 fail-closed。
+### 4.1 长上下文与禁止截断
 
-Qwen API key、模型和 endpoint 具有地域一致性要求。401/403 应检查 key 与权限，
-404 应检查模型 ID/地域，429 与 5xx 才进行有界退避。结果必须记录实际返回
-model、endpoint host、prompt hash、seed、usage、method、归一化 1--5 分布与
-缺失质量/分数误差上界。
-
-## 聚合与完整性审计
+数值提示必须完整保留，禁止为适配显存而截断 channel、window 或问题文本。运行前应以
+正式 tokenizer 审计全部 prompt。当前两个 478 视图各有 18/478 条超过 32,768 tokens，
+最大为 38,325；因此本次 Epoch-10 诊断使用
+`experiments/multi_axis/eval_deepseek_epoch10_context131072.json`，只把推理上下文上限
+提升到模型原生 YaRN 131,072 上限，不改变 checkpoint、beam-5 或其他生成参数。
 
 ```bash
-python -m tools.axis_repro.audit_results \
-  --predictions <prediction_dir>/predictions.jsonl \
-  --scores <score_dir>/geval_*.jsonl \
-  --manifest experiments/reproduction/manifests_author42/paper140.json \
-  --modes base
-
-python -m tools.axis_repro.table_runner \
-  --scores <score_dir>/geval_*.jsonl \
-  --output-prefix <score_dir>/table1
+python tools/multi_axis/audit_prompt_lengths.py \
+  --config experiments/multi_axis/eval_deepseek_epoch10_context131072.json \
+  --model-path /path/to/deepseek-r1-0528-qwen3-8b \
+  --data-root /path/to/multi-axis-assets \
+  --manifest-dir /path/to/manifests \
+  --datasets 478new 478 \
+  --output /path/to/prompt_length_group_audit.json
 ```
 
-`audit_results` 必须返回 `ok=true`。paper140/base 的期望数量是 140 条 prediction 和 335 条 dimension score。
+混合显存推理必须先做边界探针。本次审计中，A100 40GB 对 23,883-token prompt
+即使启用 `expandable_segments` 仍然 OOM，而完整 15,801-token 两样本探针成功；
+正式分片进一步采用 14,000-token 安全阈值，所有更长 group 只分配给 80GB GPU。
+该阈值是本次硬件/beam-5 配置的容量记录，不是通用模型常数。
 
-## 成本控制
+### 4.2 保持 group 的异构 GPU 分片
 
-- 基线 predictions 和 judge scores 生成一次后按 checkpoint hash、prompt hash 和 judge 配置缓存。
-- 日常首先比较完整 validation loss、forced-choice 准确率、数值/文本代理指标和因果诊断。
-- 里程碑候选使用固定小样本 DeepSeek；只有唯一最终候选运行完整 Gemini 335 维评分。
-- Qwen 只对已选定 checkpoint 的既有 paper140 predictions 做独立交叉评测，不得参与选模。
-- 不能用任何测试 judge 分数选择 epoch、seed、学习率或架构。
+外部分片以 `ManifestDataset.groups` 的 group number 为单位，不能拆开同一
+`base_sample_id`。每个 worker 显式登记完整分片总数和自己承担的 group residue：
+
+```bash
+torchrun --nproc_per_node=1 tools/multi_axis/infer.py \
+  ... \
+  --datasets 478new 478 \
+  --expected-inference-world-size 1 \
+  --inference-shard-count 216 \
+  --inference-shard-indices 0 10 17 19
+```
+
+各 worker 输出不可直接拼接。必须验证 checkpoint、TimeRCD、生成参数、LLM/attention
+配置一致，分片互斥且覆盖全部 group，并按原 manifest `index` 还原顺序：
+
+```bash
+python tools/multi_axis/merge_sharded_inference_outputs.py \
+  --source /path/to/worker-a \
+  --source /path/to/worker-b \
+  --manifest-dir /path/to/manifests \
+  --output-dir /path/to/merged_predictions \
+  --datasets 478new 478
+```
+
+正式报告必须保存 prompt-length audit、worker plan、失败/成功容量探针和合并 manifest。
+
+## 5. 确定性任务指标
+
+```bash
+python tools/multi_axis/label_metrics.py \
+  --manifest-dir /path/to/manifests \
+  --predictions-dir /path/to/predictions \
+  --output-dir /path/to/label_metrics \
+  --datasets 478new 478
+```
+
+- MC：解析最终 A–F 标签并做 exact match；无法解析计错，同时单列不可解析数。
+- TF：规范化 Yes/No/True/False 后做 exact match；无法解析计错。
+- OE：非空且非错误占位文本记为可解析；它不是开放题事实正确率。
+- 同时报告 overall、分题型、分数据集。对 478/478new 的 combined overall 只作
+  两视图诊断，不解释为独立样本总体。
+
+## 6. G-Eval：GPT-5.4 基线对齐口径
+
+先生成 Judge 输入：
+
+```bash
+python tools/multi_axis/prepare_judge_inputs.py \
+  --manifest-dir /path/to/manifests \
+  --predictions-dir /path/to/predictions \
+  --output-dir /path/to/judge_inputs \
+  --datasets 478new 478
+```
+
+rubric 固定为 `experiments/multi_axis/geval_rubrics.json`：
+
+| 题型 | 维度与权重 |
+|---|---|
+| MC | correctness 0.7 + reasoning_quality 0.3 |
+| OE | accuracy 0.35 + completeness 0.35 + relevance 0.3 |
+| TF | correctness 0.6 + justification_quality 0.4 |
+
+与 `BASELINE_TABLES.md` 比较必须使用 `gpt-5.4` profile，不得用其他 Judge 的
+结果替代。密钥只由 GPU 服务器的私有环境文件注入，不写入仓库、日志、命令行或
+报告。`gpt-5.4` profile 还要求 `GPT54_CA_BUNDLE` 指向服务器信任的 CA bundle；
+不得用 `--insecure`、未校验 SSL context 或全局关闭 TLS 校验代替。报告只记录 CA
+文件 SHA-256，不记录 endpoint 明文：
+
+```bash
+export GPT54_CA_BUNDLE=/path/to/audited-ca-bundle.pem
+python tools/multi_axis/geval_runner.py \
+  --input /path/to/judge_inputs/478new.judge_input.jsonl \
+  --rubrics experiments/multi_axis/geval_rubrics.json \
+  --profiles experiments/multi_axis/judge_profiles.json \
+  --judge gpt-5.4 \
+  --output /path/to/geval/gpt-5.4/478new.jsonl
+```
+
+对 `478` 重复同一命令。断点续跑必须复用同一输出文件；完整任务数为每个视图
+1,095 个 dimension scores。GPT-5.4 的当前接口口径是单次整数 1–5 分，结果必须
+记录 `method=integer_score`、prompt hash、请求/返回模型、匿名 endpoint 指纹、
+usage 与 latency。
+
+## 7. 十指标、micro/macro 与双视图纪律
+
+```bash
+python tools/multi_axis/aggregate_geval.py \
+  --results-root /path/to/geval \
+  --output-dir /path/to/aggregate \
+  --judges gpt-5.4 \
+  --datasets 478new 478
+```
+
+每个“数据视图 × Judge”输出：MC Final/Corr./Rsn.、OE Final/Acc./Comp./Rel.、
+TF Final/Corr./Justif.。micro 按题目数加权，macro 是两个视图表的等权诊断均值。
+由于两视图共享底层样本，此处 macro 必须标注为 wording-view macro；正式五数据集
+macro 只能使用 `478new SMD SWaT LEMMA-RCA VTA`。
+
+## 8. 完整性审计与交付文件
+
+```bash
+python tools/multi_axis/audit_evaluation.py \
+  --manifest-dir /path/to/manifests \
+  --predictions-dir /path/to/predictions \
+  --judge-input-dir /path/to/judge_inputs \
+  --geval-results-root /path/to/geval \
+  --label-metrics-dir /path/to/label_metrics \
+  --datasets 478new 478 \
+  --judges gpt-5.4 \
+  --expected-checkpoint-epoch 10 \
+  --output /path/to/evaluation_audit.json
+```
+
+审计必须 `passed=true`。结果 Markdown 至少包含：数据与代码来源、checkpoint
+选择证据、生成配置、GPU/world、每视图标签指标、每视图十项 G-Eval、micro/macro、
+与基线的绝对差及相对变化、失败/重试/缺失任务、API usage、数据视图相关性 caveat、
+可复现文件路径和 SHA-256。
+
+任何 partial JSONL、pending journal、first-N smoke、未通过身份/数量检查的文件都不得
+进入正式表格。

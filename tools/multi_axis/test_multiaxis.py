@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import inspect
 import re
@@ -26,6 +27,7 @@ from src.models.MultiAXIS.model import (
 )
 from src.models.MultiAXIS.prompting import HINT_TOKENS, MultiAxisPromptBuilder, TokenizedPrompts
 from tools.multi_axis.build_manifests import (
+    EVAL_SPECS,
     align_eval_rows,
     load_training_recovery,
     normalized_question,
@@ -33,13 +35,21 @@ from tools.multi_axis.build_manifests import (
     sha256_file,
     teacher_reference_answer,
 )
-from tools.multi_axis.geval_runner import bounded_distribution
+from tools.multi_axis.datasets import (
+    EXPECTED_DATASET_COUNTS,
+    EXPECTED_TYPE_COUNTS,
+    OFFICIAL_BIAS_NEUTRALIZED_DATASETS,
+    SUPPORTED_EVALUATION_DATASETS,
+    validate_datasets,
+)
+from tools.multi_axis.geval_runner import JudgeClient, append_jsonl, bounded_distribution
 from tools.multi_axis.distributed import validate_topology_records
 from tools.multi_axis.label_metrics import (
     canonical_label,
     open_parseable,
     parse_prediction,
 )
+from tools.multi_axis.infer import dataset_indices
 from tools.multi_axis.train import compute_timercd_cached
 from tools.multi_axis.render_images import render_normalized_series
 
@@ -50,6 +60,9 @@ class FakeTokenizer:
         self.pad_token_id = 0
         self.eos_token_id = 1
         self.padding_side = "right"
+
+    def __len__(self):
+        return len(self.vocab)
 
     def add_special_tokens(self, payload):
         added = 0
@@ -219,6 +232,7 @@ def test_generation_uses_left_padding_and_image_off_has_no_visual_section():
     assert tokenized.attention_mask[0, 0].item() == 0
     assert tokenized.attention_mask[0, -1].item() == 1
     assert tokenized.visual_token_counts == [0, 0]
+    assert isinstance(processor.last_messages[1]["content"], str)
     text = builder.build_text("Short?", 0, 2, [[1, 2]], ["ch_0"], "TF")
     assert "### Visual Evidence" not in text
 
@@ -688,7 +702,10 @@ def test_generation_bridge_preserves_mm_token_types_for_visual_prefill():
 
 def test_frozen_vlm_stays_in_eval_mode_during_hint_training():
     dummy = SimpleNamespace(
-        config=SimpleNamespace(llm=SimpleNamespace(gradient_checkpointing=True)),
+        config=SimpleNamespace(
+            llm=SimpleNamespace(gradient_checkpointing=True),
+            vision=SimpleNamespace(enabled=True),
+        ),
         llm=torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Dropout(0.5)),
     )
     MultiAxisForConditionalGeneration._set_llm_runtime_mode(dummy, True)
@@ -696,6 +713,66 @@ def test_frozen_vlm_stays_in_eval_mode_during_hint_training():
     assert not dummy.llm[1].training
     MultiAxisForConditionalGeneration._set_llm_runtime_mode(dummy, False)
     assert not dummy.llm.training and not dummy.llm[0].training
+
+
+def test_text_only_gradient_checkpointing_preserves_legacy_runtime_mode():
+    dummy = SimpleNamespace(
+        config=SimpleNamespace(
+            llm=SimpleNamespace(gradient_checkpointing=True),
+            vision=SimpleNamespace(enabled=False),
+        ),
+        llm=torch.nn.Sequential(torch.nn.Linear(3, 3), torch.nn.Dropout(0.5)),
+    )
+    MultiAxisForConditionalGeneration._set_llm_runtime_mode(dummy, True)
+    assert dummy.llm.training and dummy.llm[0].training
+    assert not dummy.llm[1].training
+    MultiAxisForConditionalGeneration._set_llm_runtime_mode(dummy, False)
+    assert not dummy.llm.training and not dummy.llm[0].training
+
+
+def test_text_only_tokenizer_preserves_legacy_embedding_shrink_for_checkpoints():
+    class FakeLLM:
+        def __init__(self):
+            self.embedding = torch.nn.Embedding(10, 4)
+            self.resized_to = None
+
+        def get_input_embeddings(self):
+            return self.embedding
+
+        def resize_token_embeddings(self, size):
+            self.resized_to = size
+
+    tokenizer = FakeTokenizer()
+    dummy = SimpleNamespace(
+        tokenizer=tokenizer,
+        llm=FakeLLM(),
+        config=SimpleNamespace(vision=SimpleNamespace(enabled=False)),
+    )
+    MultiAxisForConditionalGeneration._prepare_tokenizer(dummy)
+    assert dummy.llm.resized_to == len(tokenizer)
+    assert dummy.llm.resized_to < 10
+
+
+def test_vlm_tokenizer_does_not_shrink_native_embedding_table():
+    class FakeLLM:
+        def __init__(self):
+            self.embedding = torch.nn.Embedding(20, 4)
+            self.resized_to = None
+
+        def get_input_embeddings(self):
+            return self.embedding
+
+        def resize_token_embeddings(self, size):
+            self.resized_to = size
+
+    tokenizer = FakeTokenizer()
+    dummy = SimpleNamespace(
+        tokenizer=tokenizer,
+        llm=FakeLLM(),
+        config=SimpleNamespace(vision=SimpleNamespace(enabled=True)),
+    )
+    MultiAxisForConditionalGeneration._prepare_tokenizer(dummy)
+    assert dummy.llm.resized_to is None
 
 
 def test_eval_safe_activation_checkpointing_recomputes_without_train_mode():
@@ -737,6 +814,74 @@ def test_label_parsing_contract():
     assert not open_parseable("  ")
 
 
+def test_multiaxis_evaluation_dataset_registry_and_views():
+    assert OFFICIAL_BIAS_NEUTRALIZED_DATASETS == (
+        "478new",
+        "SMD",
+        "SWaT",
+        "LEMMA-RCA",
+        "VTA",
+    )
+    assert SUPPORTED_EVALUATION_DATASETS == (
+        "478new",
+        "478",
+        "SMD",
+        "SWaT",
+        "LEMMA-RCA",
+        "VTA",
+    )
+    assert set(EVAL_SPECS) == set(SUPPORTED_EVALUATION_DATASETS)
+    assert EVAL_SPECS["478"]["questions"] == [
+        "question/question_eval/*/questions_1000.jsonl"
+    ]
+    assert EVAL_SPECS["478"]["teachers"] == [
+        "teacheranswer/teacher_eval/*/teacher_gpt55.answers.jsonl"
+    ]
+    for dataset in SUPPORTED_EVALUATION_DATASETS:
+        assert EVAL_SPECS[dataset]["expected"] == EXPECTED_DATASET_COUNTS[dataset]
+        assert sum(EXPECTED_TYPE_COUNTS[dataset].values()) == EXPECTED_DATASET_COUNTS[dataset]
+
+
+def test_evaluation_dataset_selection_fails_closed():
+    assert validate_datasets(["478new", "478"]) == ("478new", "478")
+    with pytest.raises(ValueError, match="wording views"):
+        validate_datasets(["478new", "478"], allow_duplicate_views=False)
+    with pytest.raises(ValueError, match="must be unique"):
+        validate_datasets(["478new", "478new"])
+    with pytest.raises(ValueError, match="Unsupported"):
+        validate_datasets(["paper140"])
+
+
+def test_group_sharded_inference_indices_are_disjoint_and_complete():
+    dataset = SimpleNamespace(groups=[[0, 1], [2], [3, 4], [5], [6, 7], [8]])
+    shards = [
+        set(
+            dataset_indices(
+                dataset,
+                rank=0,
+                world=1,
+                shard_count=3,
+                shard_indices=(shard,),
+            )
+        )
+        for shard in range(3)
+    ]
+    assert shards == [{0, 1, 5}, {2, 6, 7}, {3, 4, 8}]
+    assert set.union(*shards) == set(range(9))
+    assert not any(shards[left] & shards[right] for left in range(3) for right in range(left))
+
+
+def test_multiple_group_shards_can_share_one_worker():
+    dataset = SimpleNamespace(groups=[[0], [1], [2], [3], [4], [5], [6], [7]])
+    assert dataset_indices(
+        dataset,
+        rank=0,
+        world=1,
+        shard_count=8,
+        shard_indices=(0, 3),
+    ) == [0, 3]
+
+
 def test_bounded_logprob_distribution():
     entry = {
         "top_logprobs": [
@@ -751,6 +896,44 @@ def test_bounded_logprob_distribution():
     assert 1 <= score <= 5
     assert abs(sum(probabilities.values()) - 1.0) < 1e-8
     assert metadata["missing_mass_upper_bound"] == 0.0
+
+
+def test_judge_client_uses_explicit_hashed_ca_bundle(tmp_path, monkeypatch):
+    ca_bundle = tmp_path / "judge-ca.pem"
+    ca_bundle.write_bytes(b"audited-ca-bundle")
+    context = object()
+    observed = {}
+
+    def fake_create_default_context(*, cafile):
+        observed["cafile"] = cafile
+        return context
+
+    monkeypatch.setattr(
+        "tools.multi_axis.geval_runner.ssl.create_default_context",
+        fake_create_default_context,
+    )
+    monkeypatch.setenv("TEST_JUDGE_URL", "https://judge.invalid/v1")
+    monkeypatch.setenv("TEST_JUDGE_KEY", "private-test-key")
+    monkeypatch.setenv("TEST_JUDGE_CA", str(ca_bundle))
+    client = JudgeClient(
+        "test",
+        {
+            "endpoint_env": "TEST_JUDGE_URL",
+            "api_key_env": "TEST_JUDGE_KEY",
+            "ca_bundle_env": "TEST_JUDGE_CA",
+        },
+    )
+    assert client.ssl_context is context
+    assert observed["cafile"] == str(ca_bundle.resolve())
+    assert client.tls_ca_bundle_sha256 == sha256_file(ca_bundle)
+
+
+def test_concurrent_judge_journal_appends_are_complete(tmp_path):
+    journal = tmp_path / "judge.jsonl"
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(lambda index: append_jsonl(journal, {"index": index}), range(40)))
+    rows = [json.loads(line) for line in journal.read_text(encoding="utf-8").splitlines()]
+    assert sorted(row["index"] for row in rows) == list(range(40))
 
 
 def test_phase_a_disables_anomaly_and_joint_paths():

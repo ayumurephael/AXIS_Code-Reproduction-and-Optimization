@@ -8,6 +8,7 @@ import math
 import os
 import re
 import socket
+import ssl
 import threading
 import time
 import urllib.error
@@ -20,6 +21,7 @@ SCORE_RE = re.compile(r"(?i)(?:\*\*)?Score(?:\*\*)?\s*:\s*(?:\*\*)?\s*\[?([1-5])
 READOUT_RE = re.compile(r'"score"\s*:\s*"([A-E])"')
 LABEL_TO_SCORE = {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5}
 READOUT_INSTRUCTION = ('Encode the final evaluation score using A=1, B=2, C=3, D=4, E=5. Return exactly one JSON object with this schema: {"score":"D"}. Replace D with the correct one-letter code. Output valid JSON only.')
+APPEND_LOCK = threading.Lock()
 
 
 def read_jsonl(path: Path):
@@ -30,10 +32,11 @@ def read_jsonl(path: Path):
 
 
 def append_jsonl(path: Path, record: dict):
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-        handle.flush()
-        os.fsync(handle.fileno())
+    with APPEND_LOCK:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
 
 
 def endpoint_url(value: str) -> str:
@@ -107,6 +110,18 @@ class JudgeClient:
             raise RuntimeError(f"Missing API-key environment variable {profile['api_key_env']}")
         self.endpoint = endpoint_url(endpoint_value)
         self.endpoint_fingerprint = hashlib.sha256(urlparse(self.endpoint).netloc.encode()).hexdigest()
+        self.ssl_context = None
+        self.tls_ca_bundle_sha256 = None
+        ca_bundle_env = profile.get("ca_bundle_env")
+        if ca_bundle_env:
+            ca_bundle_value = os.environ.get(ca_bundle_env)
+            if not ca_bundle_value:
+                raise RuntimeError(f"Missing CA-bundle environment variable {ca_bundle_env}")
+            ca_bundle = Path(ca_bundle_value).resolve()
+            if not ca_bundle.is_file():
+                raise RuntimeError(f"Configured CA bundle is not a file: {ca_bundle}")
+            self.ssl_context = ssl.create_default_context(cafile=str(ca_bundle))
+            self.tls_ca_bundle_sha256 = hashlib.sha256(ca_bundle.read_bytes()).hexdigest()
 
     def body(self, messages, *, temperature=None, logprobs=False, readout=False):
         profile = self.profile
@@ -130,7 +145,9 @@ class JudgeClient:
         for attempt in range(6):
             request = urllib.request.Request(self.endpoint, data=encoded, headers={"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}, method="POST")
             try:
-                with urllib.request.urlopen(request, timeout=300) as response:
+                with urllib.request.urlopen(
+                    request, timeout=300, context=self.ssl_context
+                ) as response:
                     return json.load(response)
             except urllib.error.HTTPError as exc:
                 last = exc
@@ -261,7 +278,7 @@ def judge_task(client: JudgeClient, task: dict, missing_mass_bound: float):
         else:
             score, fallback_scores = deepseek_fallback(client, prompt, count=20)
             method = "exact_sample_mean_20"
-    return {"record_id": row["record_id"], "sample_id": row["sample_id"], "dataset": row["dataset"], "mode": row["mode"], "question_type": row["question_type"], "dimension": dimension, "weight": weight, "score": score, "integer_score": integer, "method": method, "distribution": distribution, "distribution_metadata": metadata, "fallback_scores": fallback_scores, "judge_content": raw, "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "provider_profile": client.profile_name, "requested_model": client.profile["model"], "returned_model": primary.get("model"), "system_fingerprint": primary.get("system_fingerprint"), "usage": primary.get("usage"), "latency_seconds": time.monotonic() - started, "temperature": client.profile["temperature"], "logprobs_requested": request_logprobs, "top_logprobs": client.profile.get("top_logprobs"), "endpoint_host_sha256": client.endpoint_fingerprint}
+    return {"record_id": row["record_id"], "sample_id": row["sample_id"], "dataset": row["dataset"], "mode": row["mode"], "question_type": row["question_type"], "dimension": dimension, "weight": weight, "score": score, "integer_score": integer, "method": method, "distribution": distribution, "distribution_metadata": metadata, "fallback_scores": fallback_scores, "judge_content": raw, "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "provider_profile": client.profile_name, "requested_model": client.profile["model"], "returned_model": primary.get("model"), "system_fingerprint": primary.get("system_fingerprint"), "usage": primary.get("usage"), "latency_seconds": time.monotonic() - started, "temperature": client.profile["temperature"], "logprobs_requested": request_logprobs, "top_logprobs": client.profile.get("top_logprobs"), "endpoint_host_sha256": client.endpoint_fingerprint, "tls_ca_bundle_sha256": client.tls_ca_bundle_sha256}
 
 
 def main():

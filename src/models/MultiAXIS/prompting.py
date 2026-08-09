@@ -198,7 +198,9 @@ class MultiAxisPromptBuilder:
 
     def _messages(self, user_text: str, image: Any = None) -> List[Dict[str, Any]]:
         if image is None:
-            user_content: Any = [{"type": "text", "text": user_text}]
+            # Text-only tokenizers such as DeepSeek/Qwen3 use chat templates that
+            # concatenate message content directly and therefore require strings.
+            user_content: Any = user_text
         else:
             user_content = [
                 {"type": "image", "image": image},
@@ -351,8 +353,13 @@ class MultiAxisPromptBuilder:
                 answer = answers[index]
                 if not answer or not answer.strip():
                     raise ValueError("Empty teacher answer reached model forward")
+                assistant_content: Any = (
+                    [{"type": "text", "text": answer.strip()}]
+                    if self.use_images
+                    else answer.strip()
+                )
                 full_messages = messages + [
-                    {"role": "assistant", "content": [{"type": "text", "text": answer.strip()}]}
+                    {"role": "assistant", "content": assistant_content}
                 ]
                 full_texts.append(
                     self._render_chat(full_messages, add_generation_prompt=False)

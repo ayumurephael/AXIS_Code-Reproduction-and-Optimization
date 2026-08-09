@@ -26,6 +26,7 @@
     "model": "gpt-5.4",
     "endpoint_env": "GPT54_BASE_URL",
     "api_key_env": "GPT54_API_KEY",
+    "ca_bundle_env": "GPT54_CA_BUNDLE",
     "scoring": "integer",
     "temperature": 0.5,
     "max_tokens": 4096,

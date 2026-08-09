@@ -254,7 +254,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
             max_pixels=config.vision.runtime_max_pixels,
         )
         self.eval_checkpointed_decoder_layers = 0
-        if config.llm.gradient_checkpointing:
+        if config.vision.enabled and config.llm.gradient_checkpointing:
             self.eval_checkpointed_decoder_layers = (
                 self._enable_eval_safe_activation_checkpointing()
             )
@@ -293,6 +293,15 @@ class MultiAxisForConditionalGeneration(nn.Module):
             )
             llm = Qwen3VLForConditionalGeneration.from_pretrained(source, **kwargs)
         else:
+            # A text-only checkpoint does not require torchvision. Some older
+            # cluster Python builds expose a broken system torchvision (for
+            # example, a stdlib build without _lzma); letting Transformers probe
+            # it prevents Qwen3ForCausalLM from loading even though no image path
+            # is used. Mark the optional dependency unavailable before lazy model
+            # imports, while keeping it mandatory for the native VLM branch above.
+            from transformers.utils import import_utils as transformers_import_utils
+
+            transformers_import_utils._torchvision_available = False
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
             processor = AutoTokenizer.from_pretrained(
@@ -333,7 +342,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
                 raise ValueError("Tokenizer has neither pad nor EOS token")
             self.tokenizer.pad_token = self.tokenizer.eos_token
         embedding_rows = int(self.llm.get_input_embeddings().weight.shape[0])
-        if added and len(self.tokenizer) > embedding_rows:
+        if added and (
+            not self.config.vision.enabled or len(self.tokenizer) > embedding_rows
+        ):
             self.llm.resize_token_embeddings(len(self.tokenizer))
         for token in HINT_TOKENS:
             ids = self.tokenizer.encode(token, add_special_tokens=False)
@@ -348,6 +359,17 @@ class MultiAxisForConditionalGeneration(nn.Module):
         self.llm.eval()
         if hasattr(self.llm.config, "use_cache"):
             self.llm.config.use_cache = self.config.llm.use_cache_during_training
+        if (
+            not self.config.vision.enabled
+            and self.config.llm.gradient_checkpointing
+            and hasattr(self.llm, "gradient_checkpointing_enable")
+        ):
+            try:
+                self.llm.gradient_checkpointing_enable(
+                    gradient_checkpointing_kwargs={"use_reentrant": False}
+                )
+            except TypeError:
+                self.llm.gradient_checkpointing_enable()
 
     def _enable_eval_safe_activation_checkpointing(self) -> int:
         """Checkpoint frozen text layers without switching the VLM out of eval.
@@ -394,10 +416,20 @@ class MultiAxisForConditionalGeneration(nn.Module):
         return installed
 
     def _set_llm_runtime_mode(self, training: bool) -> None:
-        del training
-        # The method specification requires the entire frozen VLM to stay in eval
-        # mode. Autograd remains enabled in forward so gradients reach Hint Tuner.
-        self.llm.eval()
+        if self.config.vision.enabled:
+            # The VLM specification requires the entire frozen native VLM to stay
+            # in eval mode. Autograd still reaches the injected soft hints.
+            self.llm.eval()
+        elif training and self.config.llm.gradient_checkpointing:
+            # Preserve the text-only Multi-AXIS behavior: Transformers activates
+            # decoder checkpointing only in train mode, while frozen dropout stays
+            # disabled for deterministic hint tuning.
+            self.llm.train(True)
+            for module in self.llm.modules():
+                if isinstance(module, nn.Dropout):
+                    module.eval()
+        else:
+            self.llm.eval()
 
     def train(self, mode: bool = True):
         super().train(mode)
