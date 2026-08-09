@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from .attention import FlashCrossAttention
 from .config import MultiAxisConfig, QWEN3_VL_MODEL_ID
@@ -249,7 +250,14 @@ class MultiAxisForConditionalGeneration(nn.Module):
             max_context_tokens=config.llm.max_context_tokens,
             include_joint=config.hints.ablation_phase in {"C", "D"},
             use_images=config.vision.enabled,
+            min_pixels=config.vision.min_pixels,
+            max_pixels=config.vision.runtime_max_pixels,
         )
+        self.eval_checkpointed_decoder_layers = 0
+        if config.llm.gradient_checkpointing:
+            self.eval_checkpointed_decoder_layers = (
+                self._enable_eval_safe_activation_checkpointing()
+            )
 
     @classmethod
     def from_pretrained(
@@ -340,15 +348,50 @@ class MultiAxisForConditionalGeneration(nn.Module):
         self.llm.eval()
         if hasattr(self.llm.config, "use_cache"):
             self.llm.config.use_cache = self.config.llm.use_cache_during_training
-        if self.config.llm.gradient_checkpointing and hasattr(
-            self.llm, "gradient_checkpointing_enable"
-        ):
-            try:
-                self.llm.gradient_checkpointing_enable(
-                    gradient_checkpointing_kwargs={"use_reentrant": False}
-                )
-            except TypeError:
-                self.llm.gradient_checkpointing_enable()
+
+    def _enable_eval_safe_activation_checkpointing(self) -> int:
+        """Checkpoint frozen text layers without switching the VLM out of eval.
+
+        Transformers' built-in checkpointing is conditional on ``module.training``.
+        The method specification requires the frozen VLM to remain in eval mode,
+        so wrap the language decoder layers explicitly with non-reentrant PyTorch
+        checkpointing instead. This preserves autograd back to injected hints.
+        """
+
+        model = getattr(self.llm, "model", None)
+        language_model = getattr(model, "language_model", None)
+        layers = getattr(language_model, "layers", None)
+        if layers is None or len(layers) == 0:
+            raise RuntimeError(
+                "Could not locate Qwen3-VL language decoder layers for activation checkpointing"
+            )
+        installed = 0
+        for layer in layers:
+            if getattr(layer, "_multi_axis_eval_checkpointing", False):
+                installed += 1
+                continue
+            original_forward = layer.forward
+
+            def checkpointed_forward(
+                module,
+                *args,
+                _original_forward=original_forward,
+                **kwargs,
+            ):
+                del module
+                if torch.is_grad_enabled():
+                    return checkpoint(
+                        _original_forward,
+                        *args,
+                        use_reentrant=False,
+                        **kwargs,
+                    )
+                return _original_forward(*args, **kwargs)
+
+            layer.forward = types.MethodType(checkpointed_forward, layer)
+            layer._multi_axis_eval_checkpointing = True
+            installed += 1
+        return installed
 
     def _set_llm_runtime_mode(self, training: bool) -> None:
         del training

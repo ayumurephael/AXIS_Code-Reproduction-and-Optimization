@@ -149,8 +149,14 @@ def main():
             for node in topology.get("nodes", [])
             for gpu_name in node.get("gpu_names", [])
         )
-        and run_manifest.get("qwen3_vl_pixel_budget", {}).get("min_pixels") == 65_536
-        and run_manifest.get("qwen3_vl_pixel_budget", {}).get("max_pixels") == 16_777_216,
+        and run_manifest.get("qwen3_vl_pixel_budget", {}).get("official_min_pixels") == 65_536
+        and run_manifest.get("qwen3_vl_pixel_budget", {}).get("official_max_pixels") == 16_777_216
+        and run_manifest.get("qwen3_vl_pixel_budget", {}).get("runtime_min_pixels") == 65_536
+        and 65_536
+        <= run_manifest.get("qwen3_vl_pixel_budget", {}).get("runtime_max_pixels", 0)
+        <= 16_777_216
+        and run_manifest.get("llm_gradient_checkpointing") is True
+        and run_manifest.get("eval_safe_checkpointed_decoder_layers") == 36,
         {
             "modality": run_manifest.get("modality"),
             "world_size": run_manifest.get("world_size"),

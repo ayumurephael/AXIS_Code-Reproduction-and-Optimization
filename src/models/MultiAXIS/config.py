@@ -77,6 +77,7 @@ class VisionConfig:
     enabled: bool = False
     min_pixels: int = 65_536
     max_pixels: int = 16_777_216
+    runtime_max_pixels: int = 4_194_304
     renderer_dpi: int = 600
     renderer_version: str = "multi-axis-vl-render-v1"
     require_mm_token_type_ids: bool = True
@@ -90,6 +91,11 @@ class VisionConfig:
             raise ValueError(
                 "The formal VLM run uses the official Qwen3-VL processor budget: "
                 "65,536 through 16,777,216 pixels."
+            )
+        if not self.min_pixels <= self.runtime_max_pixels <= self.max_pixels:
+            raise ValueError(
+                "runtime_max_pixels must stay inside the official Qwen3-VL "
+                "processor range."
             )
         if self.renderer_dpi != 600:
             raise ValueError("The specified VLM renderer requires dpi=600.")

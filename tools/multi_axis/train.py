@@ -215,11 +215,16 @@ def environment_manifest(
         "answer_loss_implementation": "native_multimodal_base_model/causal_answer_positions_sparse_logits",
         "modality": "image+numeric-window+soft-hints" if config.vision.enabled else "numeric-window+soft-hints",
         "qwen3_vl_pixel_budget": {
-            "min_pixels": config.vision.min_pixels,
-            "max_pixels": config.vision.max_pixels,
-            "source": "official Qwen/Qwen3-VL-8B-Instruct preprocessor_config.json",
+            "official_min_pixels": config.vision.min_pixels,
+            "official_max_pixels": config.vision.max_pixels,
+            "runtime_min_pixels": config.vision.min_pixels,
+            "runtime_max_pixels": config.vision.runtime_max_pixels,
+            "source": "official Qwen/Qwen3-VL-8B-Instruct preprocessor_config.json plus audited runtime cap",
         },
         "llm_gradient_checkpointing": config.llm.gradient_checkpointing,
+        "eval_safe_checkpointed_decoder_layers": getattr(
+            model, "eval_checkpointed_decoder_layers", 0
+        ),
         "flash_attention_audit": attention_audit,
         "timercd_sha256": model.timercd.checkpoint_sha256,
         "trainable_parameter_count": sum(

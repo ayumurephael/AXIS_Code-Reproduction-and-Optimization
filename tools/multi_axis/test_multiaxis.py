@@ -77,6 +77,7 @@ class FakeProcessor:
         self.image_processor = SimpleNamespace(merge_size=2)
         self.image_token = "<image_pad>"
         self.last_messages = None
+        self.last_call_kwargs = None
         self.tokenizer.add_special_tokens(
             {
                 "additional_special_tokens": list(HINT_TOKENS)
@@ -114,7 +115,7 @@ class FakeProcessor:
 
     def __call__(self, *, text, padding, return_tensors, images=None, **kwargs):
         assert return_tensors == "pt"
-        del kwargs
+        self.last_call_kwargs = dict(kwargs)
         grids = torch.tensor([[1, 4, 4]] * len(images), dtype=torch.long) if images else None
         rows = []
         for index, value in enumerate(text):
@@ -191,6 +192,8 @@ def test_native_vlm_image_first_prefix_mask_and_pixel_metadata(tmp_path):
     assert str(image_path) not in user_content[1]["text"]
     assert tokenized.visual_token_counts == [4]
     assert tokenized.original_image_sizes == [(32, 32)]
+    assert processor.last_call_kwargs["min_pixels"] == 65_536
+    assert processor.last_call_kwargs["max_pixels"] == 4_194_304
     assert {"pixel_values", "image_grid_thw", "mm_token_type_ids"}.issubset(
         tokenized.model_inputs
     )
@@ -320,7 +323,9 @@ def test_checked_in_four_and_five_gpu_configs():
         vlm.vision.enabled,
         vlm.vision.min_pixels,
         vlm.vision.max_pixels,
-    ) == (25, 8, 2, 2, 2, 32, True, 65_536, 16_777_216)
+        vlm.vision.runtime_max_pixels,
+        vlm.llm.gradient_checkpointing,
+    ) == (25, 8, 2, 2, 2, 32, True, 65_536, 16_777_216, 4_194_304, True)
 
 
 def test_two_node_four_gpu_topology_validation():
@@ -678,6 +683,37 @@ def test_frozen_vlm_stays_in_eval_mode_during_hint_training():
     assert not dummy.llm[1].training
     MultiAxisForConditionalGeneration._set_llm_runtime_mode(dummy, False)
     assert not dummy.llm.training and not dummy.llm[0].training
+
+
+def test_eval_safe_activation_checkpointing_recomputes_without_train_mode():
+    class CountingLayer(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def forward(self, hidden_states, scale=1.0):
+            self.calls += 1
+            return torch.sin(hidden_states * scale)
+
+    layer = CountingLayer()
+    layer.eval()
+    dummy = SimpleNamespace(
+        llm=SimpleNamespace(
+            model=SimpleNamespace(
+                language_model=SimpleNamespace(layers=torch.nn.ModuleList([layer]))
+            )
+        )
+    )
+    installed = MultiAxisForConditionalGeneration._enable_eval_safe_activation_checkpointing(
+        dummy
+    )
+    value = torch.tensor([3.0], requires_grad=True)
+    output = layer(value, scale=2.0)
+    output.sum().backward()
+    assert installed == 1
+    assert layer.calls == 2
+    assert not layer.training
+    assert torch.allclose(value.grad, 2.0 * torch.cos(value.detach() * 2.0))
 
 
 def test_label_parsing_contract():

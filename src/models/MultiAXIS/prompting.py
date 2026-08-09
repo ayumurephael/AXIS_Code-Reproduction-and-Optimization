@@ -102,6 +102,8 @@ class MultiAxisPromptBuilder:
         max_context_tokens: int = 131072,
         include_joint: bool = True,
         use_images: bool = True,
+        min_pixels: int = 65_536,
+        max_pixels: int = 4_194_304,
     ):
         self.processor = processor
         self.tokenizer = getattr(processor, "tokenizer", processor)
@@ -109,6 +111,10 @@ class MultiAxisPromptBuilder:
         self.include_joint = bool(include_joint)
         self.use_images = bool(use_images)
         self.max_context_tokens = int(max_context_tokens)
+        self.min_pixels = int(min_pixels)
+        self.max_pixels = int(max_pixels)
+        if self.use_images and not 0 < self.min_pixels <= self.max_pixels:
+            raise ValueError("Invalid Qwen3-VL runtime pixel budget")
         self.token_ids: Dict[str, int] = {}
         for token in HINT_TOKENS:
             ids = self.tokenizer.encode(token, add_special_tokens=False)
@@ -255,6 +261,11 @@ class MultiAxisPromptBuilder:
         if images:
             kwargs["images"] = list(images)
             kwargs["return_mm_token_type_ids"] = True
+            # Pass the budget on every call. Transformers 4.57 may otherwise
+            # recover the AutoProcessor construction-time value from tokenizer
+            # init kwargs instead of the current image-processor size.
+            kwargs["min_pixels"] = self.min_pixels
+            kwargs["max_pixels"] = self.max_pixels
         features = self.processor(**kwargs)
         native_keys = {
             "input_ids",

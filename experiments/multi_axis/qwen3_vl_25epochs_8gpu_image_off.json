@@ -27,13 +27,14 @@
     "max_context_tokens": 131072,
     "trust_remote_code": true,
     "attention_implementation": "flash_attention_2",
-    "gradient_checkpointing": false,
+    "gradient_checkpointing": true,
     "use_cache_during_training": false
   },
   "vision": {
     "enabled": false,
     "min_pixels": 65536,
     "max_pixels": 16777216,
+    "runtime_max_pixels": 4194304,
     "renderer_dpi": 600,
     "renderer_version": "multi-axis-vl-render-v1",
     "require_mm_token_type_ids": true
