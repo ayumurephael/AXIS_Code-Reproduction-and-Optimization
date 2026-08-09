@@ -58,6 +58,9 @@ def model_inputs(batch, device):
         "intervals": batch["intervals"],
         "channel_counts": batch["channel_counts"],
         "window_values": batch["window_values"],
+        "channel_ids": batch["channel_ids"],
+        "question_groups": batch["question_groups"],
+        "image_paths": batch["image_paths"],
     }
 
 
@@ -66,12 +69,15 @@ def dataset_indices(dataset: ManifestDataset, rank: int, world: int):
     return [index for group_number, group in enumerate(dataset.groups) if group_number % world == rank for index in group]
 
 
-def run_dataset(model, dataset_name: str, manifest_dir: Path, data_root: Path, output_dir: Path, rank: int, world: int, device: torch.device):
+def run_dataset(model, dataset_name: str, manifest_dir: Path, data_root: Path, image_root: Path | None, output_dir: Path, rank: int, world: int, device: torch.device):
     dataset = ManifestDataset(
         manifest_dir / f"eval_{dataset_name}.jsonl",
         data_root,
         window_epsilon=model.config.hints.window_epsilon,
         window_scale=model.config.hints.window_scale,
+        image_root=image_root,
+        require_image=model.config.vision.enabled,
+        renderer_version=model.config.vision.renderer_version,
     )
     rank_path = output_dir / f"{dataset_name}.rank{rank}.jsonl"
     completed = read_existing(rank_path)
@@ -103,6 +109,7 @@ def run_dataset(model, dataset_name: str, manifest_dir: Path, data_root: Path, o
                 "raw_response": response,
                 "generation_seconds": time.monotonic() - started,
                 "model": model.config.llm.model_name,
+                "image_id": sample["image_id"] if model.config.vision.enabled else None,
             }
             records.append(record)
             completed[index] = record
@@ -129,6 +136,7 @@ def parse_args():
     parser.add_argument("--config", required=True)
     parser.add_argument("--data-root", required=True)
     parser.add_argument("--manifest-dir", required=True)
+    parser.add_argument("--image-root", default=None)
     parser.add_argument("--timercd-checkpoint", required=True)
     parser.add_argument("--hint-checkpoint", required=True)
     parser.add_argument("--output-dir", required=True)
@@ -139,6 +147,8 @@ def parse_args():
 def main():
     args = parse_args()
     config = MultiAxisConfig.load_json(args.config)
+    if config.vision.enabled and not args.image_root:
+        raise ValueError("--image-root is required for image-enabled inference")
     rank, world, device = setup()
     if world != config.training.expected_world_size:
         raise RuntimeError(f"Expected {config.training.expected_world_size} inference GPUs, got {world}")
@@ -163,12 +173,23 @@ def main():
             "world_size": world,
             "datasets": args.datasets,
             "generation": config.generation.__dict__,
+            "vision": config.vision.__dict__,
         }
         (output_dir / "inference_manifest.json").write_text(
             json.dumps(manifest, indent=2), encoding="utf-8"
         )
     for dataset_name in args.datasets:
-        run_dataset(model, dataset_name, Path(args.manifest_dir), Path(args.data_root), output_dir, rank, world, device)
+        run_dataset(
+            model,
+            dataset_name,
+            Path(args.manifest_dir),
+            Path(args.data_root),
+            Path(args.image_root) if args.image_root else None,
+            output_dir,
+            rank,
+            world,
+            device,
+        )
     if rank == 0:
         (output_dir / "INFERENCE_COMPLETE").write_text(json.dumps({"datasets": args.datasets}), encoding="utf-8")
     dist.destroy_process_group()

@@ -5,7 +5,9 @@ import collections
 import json
 from pathlib import Path
 
-from src.models.MultiAXIS.config import DEEPSEEK_MODEL_ID, MultiAxisConfig
+from src.models.MultiAXIS.config import MultiAxisConfig, QWEN3_VL_MODEL_ID
+from src.models.MultiAXIS.data import visual_image_id, visual_image_relpath
+from src.models.MultiAXIS.timercd import sha256_file
 from tools.multi_axis.aggregate_geval import DATASETS, JUDGES, TYPE_INFO
 
 
@@ -39,6 +41,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--manifest-dir", required=True)
+    parser.add_argument("--image-root", required=True)
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--predictions-dir", required=True)
     parser.add_argument("--judge-input-dir", required=True)
@@ -53,12 +56,15 @@ def main():
     config = MultiAxisConfig.load_json(args.config)
     check(
         "formal_model",
-        config.llm.model_name == DEEPSEEK_MODEL_ID,
-        config.llm.model_name,
+        config.llm.model_name == QWEN3_VL_MODEL_ID and config.vision.enabled,
+        {"model": config.llm.model_name, "vision_enabled": config.vision.enabled},
     )
     check(
         "configured_epochs",
-        config.training.epochs > 0 and not config.training.early_stopping,
+        config.training.epochs == 25
+        and config.training.expected_world_size == 8
+        and config.training.effective_batch_size == 32
+        and not config.training.early_stopping,
         config.training.__dict__,
     )
     check(
@@ -128,6 +134,20 @@ def main():
     run_manifest = json.loads(
         (run_dir / "run_manifest.json").read_text(encoding="utf-8")
     )
+    check(
+        "native_vlm_runtime",
+        run_manifest.get("modality") == "image+numeric-window+soft-hints"
+        and run_manifest.get("actual_effective_batch_size") == 32
+        and run_manifest.get("world_size") == 8
+        and run_manifest.get("qwen3_vl_pixel_budget", {}).get("min_pixels") == 65_536
+        and run_manifest.get("qwen3_vl_pixel_budget", {}).get("max_pixels") == 16_777_216,
+        {
+            "modality": run_manifest.get("modality"),
+            "world_size": run_manifest.get("world_size"),
+            "effective_batch": run_manifest.get("actual_effective_batch_size"),
+            "pixel_budget": run_manifest.get("qwen3_vl_pixel_budget"),
+        },
+    )
     flash_audit = run_manifest.get("flash_attention_audit", {})
     resolved_configs = flash_audit.get("llm_resolved_configs", {})
     check(
@@ -169,8 +189,51 @@ def main():
             args.geval_results_root,
         ),
     )
+    image_root = Path(args.image_root)
+    image_manifest_path = image_root / "image_manifest.jsonl"
+    image_records = {
+        row["image_id"]: row for row in read_jsonl(image_manifest_path)
+    }
+    image_audit_ok = bool(image_records)
+    for image_id, row in image_records.items():
+        image_path = image_root / row["image_relpath"]
+        image_audit_ok = image_audit_ok and (
+            row.get("renderer_version") == config.vision.renderer_version
+            and row.get("dpi") == 600
+            and row.get("contains_anomaly_score") is False
+            and row.get("contains_label_annotation") is False
+            and row.get("half_open_boundaries")
+            == [row["interval"][0] - 0.5, row["interval"][1] - 0.5]
+            and image_path.is_file()
+            and sha256_file(image_path) == row.get("sha256")
+        )
+        if not image_audit_ok:
+            break
+    check(
+        "vlm_image_manifest",
+        image_audit_ok,
+        {"unique_images": len(image_records), "path": str(image_manifest_path)},
+    )
     for dataset in DATASETS:
         references = read_jsonl(manifest_dir / f"eval_{dataset}.jsonl")
+        reference_image_ids = [
+            str(
+                row.get("image_id")
+                or visual_image_id(
+                    str(row["base_sample_id"]), tuple(row["interval"]), config.vision.renderer_version
+                )
+            )
+            for row in references
+        ]
+        check(
+            f"{dataset}_images",
+            all(
+                image_id in image_records
+                and (image_root / visual_image_relpath(image_id)).is_file()
+                for image_id in reference_image_ids
+            ),
+            {"rows": len(reference_image_ids), "unique": len(set(reference_image_ids))},
+        )
         counts = collections.Counter(row["question_group"] for row in references)
         check(
             f"{dataset}_manifest_count",
@@ -188,7 +251,8 @@ def main():
             f"{dataset}_predictions",
             len(predictions) == len(references)
             and len(set(prediction_ids)) == len(references)
-            and prediction_ids == [row["sample_id"] for row in references],
+            and prediction_ids == [row["sample_id"] for row in references]
+            and [row.get("image_id") for row in predictions] == reference_image_ids,
             {"rows": len(predictions), "unique": len(set(prediction_ids))},
         )
         judge_inputs = read_jsonl(judge_input_dir / f"{dataset}.judge_input.jsonl")

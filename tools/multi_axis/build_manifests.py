@@ -8,7 +8,13 @@ import random
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
-from src.models.MultiAXIS.data import question_type_group, teacher_answer, teacher_model_answer
+from src.models.MultiAXIS.data import (
+    question_type_group,
+    teacher_answer,
+    teacher_model_answer,
+    visual_image_id,
+    visual_image_relpath,
+)
 
 
 EVAL_SPECS = {
@@ -210,6 +216,9 @@ def load_training_recovery(data_root: Path, hash_inputs: bool):
 
 def train_record(data_root: Path, question_item, teacher_item, answer_text: str | None = None) -> Dict[str, Any]:
     row = question_item["row"]
+    base_sample_id = str(row.get("base_sample_id") or row["sample_id"])
+    interval = [int(row["target_interval"]["start"]), int(row["target_interval"]["end"])]
+    image_id = visual_image_id(base_sample_id, tuple(interval))
     return {
         "question_path": question_item["path"].relative_to(data_root).as_posix(),
         "question_offset": question_item["offset"],
@@ -218,11 +227,13 @@ def train_record(data_root: Path, question_item, teacher_item, answer_text: str 
         "teacher_path": teacher_item["path"].relative_to(data_root).as_posix(),
         "teacher_line": teacher_item["line"],
         "sample_id": str(row["sample_id"]),
-        "base_sample_id": str(row.get("base_sample_id") or row["sample_id"]),
+        "base_sample_id": base_sample_id,
         "question": str(row["question"]),
         "question_group": question_type_group(row),
-        "interval": [int(row["target_interval"]["start"]), int(row["target_interval"]["end"])],
+        "interval": interval,
         "teacher_answer": teacher_answer(teacher_item["row"]) if answer_text is None else answer_text,
+        "image_id": image_id,
+        "image_relpath": visual_image_relpath(image_id),
     }
 
 

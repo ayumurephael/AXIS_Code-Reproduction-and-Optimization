@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .attention import FlashCrossAttention
-from .config import MultiAxisConfig
+from .config import MultiAxisConfig, QWEN3_VL_MODEL_ID
 from .prompting import HINT_TOKENS, MultiAxisPromptBuilder, TokenizedPrompts
 from .timercd import FrozenTimeRCD
 
@@ -24,6 +24,7 @@ def rms_unit(value: torch.Tensor, epsilon: float = 1e-6) -> torch.Tensor:
 class AnswerOnlyCausalLMOutput:
     loss: torch.Tensor
     supervised_token_count: int
+    visual_token_count: int = 0
 
 
 def answer_only_causal_nll(
@@ -222,12 +223,13 @@ class MultiAxisHintTuner(nn.Module):
 
 
 class MultiAxisForConditionalGeneration(nn.Module):
-    def __init__(self, llm: nn.Module, tokenizer, config: MultiAxisConfig):
+    def __init__(self, llm: nn.Module, processor, config: MultiAxisConfig):
         super().__init__()
         config.validate()
         self.config = config
         self.llm = llm
-        self.tokenizer = tokenizer
+        self.processor = processor
+        self.tokenizer = getattr(processor, "tokenizer", processor)
         self._prepare_tokenizer()
         self._freeze_llm()
         hidden_size = self._hidden_size()
@@ -240,10 +242,11 @@ class MultiAxisForConditionalGeneration(nn.Module):
             config=config.hints,
         )
         self.prompt_builder = MultiAxisPromptBuilder(
-            tokenizer,
+            processor,
             fixed_tokens=config.hints.fixed_tokens,
             max_context_tokens=config.llm.max_context_tokens,
             include_joint=config.hints.ablation_phase in {"C", "D"},
+            use_images=config.vision.enabled,
         )
 
     @classmethod
@@ -253,20 +256,12 @@ class MultiAxisForConditionalGeneration(nn.Module):
         token: Optional[str] = None,
         device: Optional[torch.device] = None,
     ):
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-
         dtype = getattr(torch, config.llm.torch_dtype)
         source = os.environ.get("MULTI_AXIS_MODEL_PATH") or config.llm.model_name
         if source != config.llm.model_name and not Path(source).is_dir():
             raise FileNotFoundError(
                 f"MULTI_AXIS_MODEL_PATH is not a directory: {source}"
             )
-        tokenizer = AutoTokenizer.from_pretrained(
-            source,
-            token=token,
-            trust_remote_code=config.llm.trust_remote_code,
-            use_fast=True,
-        )
         kwargs = dict(
             token=token,
             trust_remote_code=config.llm.trust_remote_code,
@@ -276,15 +271,33 @@ class MultiAxisForConditionalGeneration(nn.Module):
         )
         if device is not None:
             kwargs["device_map"] = {"": str(device)}
-        try:
-            llm = AutoModelForCausalLM.from_pretrained(source, **kwargs)
-        except ValueError:
-            # Qwen3.5 releases may register through the unified image-text auto class
-            # even when used text-only. DeepSeek uses the causal-LM path above.
-            from transformers import AutoModelForImageTextToText
+        if config.llm.model_name == QWEN3_VL_MODEL_ID:
+            from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
-            llm = AutoModelForImageTextToText.from_pretrained(source, **kwargs)
-        instance = cls(llm=llm, tokenizer=tokenizer, config=config)
+            processor = AutoProcessor.from_pretrained(
+                source,
+                token=token,
+                trust_remote_code=config.llm.trust_remote_code,
+                min_pixels=config.vision.min_pixels,
+                max_pixels=config.vision.max_pixels,
+            )
+            llm = Qwen3VLForConditionalGeneration.from_pretrained(source, **kwargs)
+        else:
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+
+            processor = AutoTokenizer.from_pretrained(
+                source,
+                token=token,
+                trust_remote_code=config.llm.trust_remote_code,
+                use_fast=True,
+            )
+            try:
+                llm = AutoModelForCausalLM.from_pretrained(source, **kwargs)
+            except ValueError:
+                from transformers import AutoModelForImageTextToText
+
+                llm = AutoModelForImageTextToText.from_pretrained(source, **kwargs)
+        instance = cls(llm=llm, processor=processor, config=config)
         instance.pretrained_source = str(source)
         return instance
 
@@ -293,7 +306,12 @@ class MultiAxisForConditionalGeneration(nn.Module):
             return int(self.llm.config.hidden_size)
         text_config = getattr(self.llm.config, "text_config", None)
         if text_config is not None and hasattr(text_config, "hidden_size"):
-            return int(text_config.hidden_size)
+            hidden_size = int(text_config.hidden_size)
+            if self.config.llm.model_name == QWEN3_VL_MODEL_ID and hidden_size != 4096:
+                raise ValueError(
+                    f"Qwen3-VL-8B text hidden size must be 4096, got {hidden_size}"
+                )
+            return hidden_size
         raise AttributeError("Could not determine the LLM text hidden size")
 
     def _prepare_tokenizer(self) -> None:
@@ -304,7 +322,8 @@ class MultiAxisForConditionalGeneration(nn.Module):
             if self.tokenizer.eos_token_id is None:
                 raise ValueError("Tokenizer has neither pad nor EOS token")
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        if added:
+        embedding_rows = int(self.llm.get_input_embeddings().weight.shape[0])
+        if added and len(self.tokenizer) > embedding_rows:
             self.llm.resize_token_embeddings(len(self.tokenizer))
         for token in HINT_TOKENS:
             ids = self.tokenizer.encode(token, add_special_tokens=False)
@@ -330,15 +349,10 @@ class MultiAxisForConditionalGeneration(nn.Module):
                 self.llm.gradient_checkpointing_enable()
 
     def _set_llm_runtime_mode(self, training: bool) -> None:
-        if training and self.config.llm.gradient_checkpointing:
-            # Transformers activates decoder checkpointing only in train mode.
-            # Parameters stay frozen and dropout stays disabled for determinism.
-            self.llm.train(True)
-            for module in self.llm.modules():
-                if isinstance(module, nn.Dropout):
-                    module.eval()
-        else:
-            self.llm.eval()
+        del training
+        # The method specification requires the entire frozen VLM to stay in eval
+        # mode. Autograd remains enabled in forward so gradients reach Hint Tuner.
+        self.llm.eval()
 
     def train(self, mode: bool = True):
         super().train(mode)
@@ -515,31 +529,72 @@ class MultiAxisForConditionalGeneration(nn.Module):
             prototype_override=prototype_override,
         )
 
-    def _inject_hints(
+    def _model_inputs_and_hint_hook(
         self,
         tokenized: TokenizedPrompts,
         step_hints: Sequence[torch.Tensor],
         joint_hints: Optional[torch.Tensor],
         fixed_hints: torch.Tensor,
         device: torch.device,
-    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor], torch.Tensor]:
-        input_ids = tokenized.input_ids.to(device)
-        attention_mask = tokenized.attention_mask.to(device)
+    ) -> Tuple[Dict[str, torch.Tensor], Optional[torch.Tensor], Any]:
+        model_inputs = {
+            key: value.to(device, non_blocking=True)
+            for key, value in tokenized.model_inputs.items()
+        }
+        input_ids = model_inputs["input_ids"]
         labels = tokenized.labels.to(device) if tokenized.labels is not None else None
-        embeddings = self.llm.get_input_embeddings()(input_ids).clone()
+        if self.config.vision.enabled:
+            required = {"pixel_values", "image_grid_thw", "mm_token_type_ids"}
+            missing = sorted(required - set(model_inputs))
+            if missing:
+                raise RuntimeError(f"Native Qwen3-VL inputs are incomplete: {missing}")
+        elif any(key in model_inputs for key in ("pixel_values", "image_grid_thw")):
+            raise RuntimeError("Image-off control unexpectedly received visual tensors")
+
+        step_positions = [positions.to(device) for positions in tokenized.step_positions]
+        joint_positions = [positions.to(device) for positions in tokenized.joint_positions]
+        fixed_positions = [positions.to(device) for positions in tokenized.fixed_positions]
         for index in range(input_ids.shape[0]):
-            step_pos = tokenized.step_positions[index].to(device)
-            joint_pos = tokenized.joint_positions[index].to(device)
-            fixed_pos = tokenized.fixed_positions[index].to(device)
-            if step_hints[index].shape[0] != step_pos.numel():
-                raise AssertionError(
-                    "Step hint count changed between prompt and encoder"
+            if step_hints[index].shape[0] != step_positions[index].numel():
+                raise AssertionError("Step hint count changed between prompt and encoder")
+            if fixed_hints[index].shape[0] != fixed_positions[index].numel():
+                raise AssertionError("Fixed hint count changed between prompt and encoder")
+            if joint_hints is not None and joint_positions[index].numel() != 1:
+                raise AssertionError("Joint hint placeholder is missing")
+
+        def hint_hook(module, args, base_embeddings):
+            del module
+            token_ids = args[0]
+            # Preserve all Qwen3-VL native input ids. Incremental generation and
+            # internal special-token lookups must not receive hint replacement.
+            # Beam generation repeat-interleaves complete prompts before its first
+            # forward, so accept only an exact full-prompt repeat expansion.
+            if (
+                token_ids.ndim != 2
+                or token_ids.shape[1] != input_ids.shape[1]
+                or token_ids.shape[0] % input_ids.shape[0] != 0
+            ):
+                return base_embeddings
+            expansion = token_ids.shape[0] // input_ids.shape[0]
+            expected_ids = input_ids.repeat_interleave(expansion, dim=0)
+            if not torch.equal(token_ids, expected_ids):
+                return base_embeddings
+            output = base_embeddings.clone()
+            for index in range(token_ids.shape[0]):
+                source_index = index // expansion
+                output[index, fixed_positions[source_index]] = fixed_hints[source_index].to(
+                    device=output.device, dtype=output.dtype
                 )
-            embeddings[index, step_pos] = step_hints[index].to(embeddings.dtype)
-            if joint_hints is not None and joint_pos.numel():
-                embeddings[index, joint_pos] = joint_hints[index].to(embeddings.dtype)
-            embeddings[index, fixed_pos] = fixed_hints[index].to(embeddings.dtype)
-        return input_ids, attention_mask, labels, embeddings
+                output[index, step_positions[source_index]] = step_hints[source_index].to(
+                    device=output.device, dtype=output.dtype
+                )
+                if joint_hints is not None:
+                    output[index, joint_positions[source_index]] = joint_hints[source_index].to(
+                        device=output.device, dtype=output.dtype
+                    )
+            return output
+
+        return model_inputs, labels, hint_hook
 
     def forward(
         self,
@@ -552,12 +607,21 @@ class MultiAxisForConditionalGeneration(nn.Module):
         intervals: Sequence[Tuple[int, int]],
         channel_counts: Sequence[int],
         window_values: Sequence[Sequence[Sequence[int]]],
+        channel_ids: Sequence[Sequence[str]],
+        question_groups: Sequence[str],
+        image_paths: Sequence[Optional[str]],
         prototype_override: Optional[torch.Tensor] = None,
         timercd_override: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ):
         self.assert_freeze_contract()
         tokenized = self.prompt_builder.tokenize(
-            questions, intervals, window_values, answers=answers
+            questions,
+            intervals,
+            window_values,
+            channel_ids,
+            question_groups,
+            image_paths,
+            answers=answers,
         )
         step, joint, fixed = self._hint_embeddings(
             normalized_series,
@@ -569,22 +633,28 @@ class MultiAxisForConditionalGeneration(nn.Module):
             timercd_override,
         )
         device = normalized_series.device
-        _, attention_mask, labels, embeddings = self._inject_hints(
+        model_inputs, labels, hint_hook = self._model_inputs_and_hint_hook(
             tokenized, step, joint, fixed, device
         )
         if labels is None:
             raise ValueError("Training forward requires answer labels")
-        backbone_outputs = self._llm_backbone()(
-            inputs_embeds=embeddings,
-            attention_mask=attention_mask,
-            use_cache=False,
-            return_dict=True,
+        handle = self.llm.get_input_embeddings().register_forward_hook(hint_hook)
+        try:
+            # Use the native multimodal base model so image placeholders, M-RoPE,
+            # DeepStack and all processor metadata remain intact. Sparse exact NLL
+            # avoids materializing vocabulary logits over the visual prompt.
+            backbone_outputs = self.llm.model(
+                **model_inputs,
+                use_cache=False,
+                return_dict=True,
+            )
+        finally:
+            handle.remove()
+        output = answer_only_causal_nll(
+            backbone_outputs.last_hidden_state, labels, self.llm.get_output_embeddings()
         )
-        return answer_only_causal_nll(
-            backbone_outputs.last_hidden_state,
-            labels,
-            self.llm.get_output_embeddings(),
-        )
+        output.visual_token_count = sum(tokenized.visual_token_counts)
+        return output
 
     @torch.no_grad()
     def generate_answers(
@@ -597,13 +667,22 @@ class MultiAxisForConditionalGeneration(nn.Module):
         intervals: Sequence[Tuple[int, int]],
         channel_counts: Sequence[int],
         window_values: Sequence[Sequence[Sequence[int]]],
+        channel_ids: Sequence[Sequence[str]],
+        question_groups: Sequence[str],
+        image_paths: Sequence[Optional[str]],
         prototype_override: Optional[torch.Tensor] = None,
         timercd_override: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         generation_overrides: Optional[Mapping[str, Any]] = None,
     ) -> List[str]:
         self.eval()
         tokenized = self.prompt_builder.tokenize(
-            questions, intervals, window_values, answers=None
+            questions,
+            intervals,
+            window_values,
+            channel_ids,
+            question_groups,
+            image_paths,
+            answers=None,
         )
         step, joint, fixed = self._hint_embeddings(
             normalized_series,
@@ -615,28 +694,35 @@ class MultiAxisForConditionalGeneration(nn.Module):
             timercd_override,
         )
         device = normalized_series.device
-        input_ids, attention_mask, _, embeddings = self._inject_hints(
+        model_inputs, _, hint_hook = self._model_inputs_and_hint_hook(
             tokenized, step, joint, fixed, device
         )
         kwargs = asdict(self.config.generation)
         if generation_overrides:
             kwargs.update(dict(generation_overrides))
+        hint_bad_words = [[self.prompt_builder.token_ids[token]] for token in HINT_TOKENS]
+        supplied_bad_words = kwargs.pop("bad_words_ids", None)
+        if supplied_bad_words:
+            hint_bad_words.extend(supplied_bad_words)
+        kwargs["bad_words_ids"] = hint_bad_words
         old_cache = getattr(self.llm.config, "use_cache", None)
         if old_cache is not None:
             self.llm.config.use_cache = True
         try:
-            sequences = self.llm.generate(
-                input_ids=input_ids,
-                inputs_embeds=embeddings,
-                attention_mask=attention_mask,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
-                **kwargs,
-            )
+            handle = self.llm.get_input_embeddings().register_forward_hook(hint_hook)
+            try:
+                sequences = self.llm.generate(
+                    **model_inputs,
+                    pad_token_id=self.tokenizer.pad_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    **kwargs,
+                )
+            finally:
+                handle.remove()
         finally:
             if old_cache is not None:
                 self.llm.config.use_cache = old_cache
-        prompt_width = input_ids.shape[1]
+        prompt_width = model_inputs["input_ids"].shape[1]
         decoded = []
         for sequence in sequences:
             generated = (
@@ -651,7 +737,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
         self, epoch: int, global_step: int, metadata: Dict[str, Any]
     ) -> Dict[str, Any]:
         return {
-            "format": "multi-axis-hints-v1",
+            "format": "multi-axis-vl-hints-v2" if self.config.llm.model_name == QWEN3_VL_MODEL_ID else "multi-axis-hints-v1",
             "epoch": epoch,
             "global_step": global_step,
             "config": self.config.to_dict(),
@@ -664,7 +750,12 @@ class MultiAxisForConditionalGeneration(nn.Module):
         self, path: str | Path, strict: bool = True
     ) -> Dict[str, Any]:
         payload = torch.load(path, map_location="cpu", weights_only=False)
-        if payload.get("format") != "multi-axis-hints-v1":
+        expected_format = (
+            "multi-axis-vl-hints-v2"
+            if self.config.llm.model_name == QWEN3_VL_MODEL_ID
+            else "multi-axis-hints-v1"
+        )
+        if payload.get("format") != expected_format:
             raise ValueError("Not a Multi-AXIS hint checkpoint")
         expected_hash = payload.get("timercd_sha256")
         if expected_hash and self.timercd.checkpoint_sha256 != expected_hash:

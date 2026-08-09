@@ -183,11 +183,11 @@ def main():
         run_manifest.get("config", {}).get("training", {}).get("epochs", "unknown")
     )
     lines = [
-        "# Multi-AXIS formal experiment analysis",
+        "# Multi-AXIS-VL formal experiment analysis",
         "",
         "## Outcome",
         "",
-        f"The formal student is DeepSeek-R1-0528-Qwen3-8B with frozen TimeRCD and frozen LLM parameters; only the documented Hint Tuner parameters are optimized for all {configured_epochs} configured epochs.",
+        f"The formal student is Qwen3-VL-8B-Instruct with one native time-series image, the exact numeric Window, and Step/Joint/Fixed AXIS hints. TimeRCD and the complete VLM remain frozen in eval mode; only the documented Hint Tuner parameters are optimized for all {configured_epochs} configured epochs.",
         "",
         "### GPT-5.4 results used for baseline comparison",
         "",
@@ -232,7 +232,8 @@ def main():
             f"- Completed epochs: {best.get('completed_epochs')}; selected epoch: {best.get('best_epoch')}; best validation answer NLL: {best.get('best_value')}.",
             f"- Actual effective batch size: {run_manifest.get('actual_effective_batch_size')}; world size: {run_manifest.get('world_size')}; precision: BF16.",
             f"- TimeRCD SHA-256: `{run_manifest.get('timercd_sha256')}`.",
-            f"- Trainable parameters: {run_manifest.get('trainable_parameter_count')}; LLM/TimeRCD parameters remained frozen; LLM runtime train mode was used only to activate gradient checkpointing.",
+            f"- Trainable parameters: {run_manifest.get('trainable_parameter_count')}; VLM/TimeRCD parameters remained frozen and the VLM stayed in eval mode while autograd propagated to the Hint Tuner.",
+            f"- Modality: {run_manifest.get('modality')}; official Qwen3-VL pixel budget: {json.dumps(run_manifest.get('qwen3_vl_pixel_budget', {}), ensure_ascii=False)}.",
             f"- FlashAttention runtime audit: {json.dumps(run_manifest.get('flash_attention_audit', {}), ensure_ascii=False)}.",
         ]
     )

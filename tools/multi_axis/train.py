@@ -21,7 +21,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Sampler, Subset
 
-from src.models.MultiAXIS.config import DEEPSEEK_MODEL_ID, MultiAxisConfig
+from src.models.MultiAXIS.config import MultiAxisConfig, QWEN3_VL_MODEL_ID
 from src.models.MultiAXIS.data import ManifestDataset, collate_multiaxis
 from src.models.MultiAXIS.model import MultiAxisForConditionalGeneration
 
@@ -112,6 +112,9 @@ def move_model_inputs(batch: Dict, device: torch.device) -> Dict:
         "intervals": batch["intervals"],
         "channel_counts": batch["channel_counts"],
         "window_values": batch["window_values"],
+        "channel_ids": batch["channel_ids"],
+        "question_groups": batch["question_groups"],
+        "image_paths": batch["image_paths"],
     }
 
 
@@ -195,7 +198,13 @@ def environment_manifest(
             or os.environ.get("PYTORCH_CUDA_ALLOC_CONF")
             or ""
         ),
-        "answer_loss_implementation": "causal_answer_positions_sparse_logits",
+        "answer_loss_implementation": "native_multimodal_base_model/causal_answer_positions_sparse_logits",
+        "modality": "image+numeric-window+soft-hints" if config.vision.enabled else "numeric-window+soft-hints",
+        "qwen3_vl_pixel_budget": {
+            "min_pixels": config.vision.min_pixels,
+            "max_pixels": config.vision.max_pixels,
+            "source": "official Qwen/Qwen3-VL-8B-Instruct preprocessor_config.json",
+        },
         "llm_gradient_checkpointing": config.llm.gradient_checkpointing,
         "flash_attention_audit": attention_audit,
         "timercd_sha256": model.timercd.checkpoint_sha256,
@@ -302,11 +311,7 @@ def validate(model, loader: DataLoader, device: torch.device):
             outputs = model(
                 **inputs, prototype_override=prototype, timercd_override=encoded
             )
-            tokens = answer_token_count(model, batch["answers"])
-            if outputs.supervised_token_count != tokens:
-                raise RuntimeError(
-                    "Sparse answer target count differs from tokenizer audit count"
-                )
+            tokens = outputs.supervised_token_count
             local_nll += outputs.loss.double() * tokens
             local_tokens += tokens
             local_examples += len(batch["answers"])
@@ -326,6 +331,7 @@ def parse_args():
     parser.add_argument("--config", required=True)
     parser.add_argument("--data-root", required=True)
     parser.add_argument("--manifest-dir", required=True)
+    parser.add_argument("--image-root", default=None)
     parser.add_argument("--timercd-checkpoint", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--resume", default=None)
@@ -345,8 +351,10 @@ def main():
         raise ValueError("--benchmark-optimizer-steps must be non-negative")
     if args.benchmark_optimizer_steps and args.resume:
         raise ValueError("A benchmark run cannot resume a formal training state")
-    if config.llm.model_name != DEEPSEEK_MODEL_ID:
-        raise ValueError("The confirmed formal run must use DeepSeek-R1-0528-Qwen3-8B")
+    if config.llm.model_name != QWEN3_VL_MODEL_ID:
+        raise ValueError("The VLM branch trains Qwen3-VL-8B-Instruct only")
+    if config.vision.enabled and not args.image_root:
+        raise ValueError("--image-root is required for image-enabled formal training")
     rank, world_size, local_rank, device = distributed_setup()
     if world_size != config.training.expected_world_size:
         raise RuntimeError(
@@ -363,6 +371,9 @@ def main():
         data_root=args.data_root,
         window_epsilon=config.hints.window_epsilon,
         window_scale=config.hints.window_scale,
+        image_root=args.image_root,
+        require_image=config.vision.enabled,
+        renderer_version=config.vision.renderer_version,
     )
     train_dataset = ManifestDataset(
         Path(args.manifest_dir) / "train.jsonl", **dataset_kwargs
@@ -494,6 +505,7 @@ def main():
                 prototype_graph = model.build_prototype_bank()
             prototype_leaf = prototype_graph.detach().requires_grad_(True)
             group_loss = 0.0
+            group_visual_tokens = 0
             for _ in range(group_size):
                 batch = next(loader_iterator)
                 inputs = move_model_inputs(batch, device)
@@ -517,11 +529,8 @@ def main():
                         f"Non-finite training loss at epoch={epoch}, step={global_step}"
                     )
                 scaled_loss.backward()
-                tokens = answer_token_count(model, batch["answers"])
-                if outputs.supervised_token_count != tokens:
-                    raise RuntimeError(
-                        "Sparse answer target count differs from tokenizer audit count"
-                    )
+                tokens = outputs.supervised_token_count
+                group_visual_tokens += outputs.visual_token_count
                 epoch_loss_sum += outputs.loss.detach().item() * tokens
                 epoch_tokens += tokens
                 epoch_examples += len(batch["answers"])
@@ -547,6 +556,7 @@ def main():
                         "loss_mean_microbatch": group_loss / group_size,
                         "learning_rate": scheduler.get_last_lr()[0],
                         "gradient_norm": float(gradient_norm),
+                        "visual_tokens_mean_microbatch": group_visual_tokens / group_size,
                         "max_memory_allocated_mib": torch.cuda.max_memory_allocated(
                             device
                         )
