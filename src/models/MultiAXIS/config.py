@@ -106,6 +106,7 @@ class TrainingConfig:
     micro_batch_size: int = 2
     accumulation_steps: int = 2
     expected_world_size: int = 8
+    expected_nodes: int = 1
     num_workers: int = 2
     validation_fraction: float = 0.10
     select_by: str = "validation_answer_nll"
@@ -127,6 +128,10 @@ class TrainingConfig:
         if self.select_by != "validation_answer_nll":
             raise ValueError(
                 "Checkpoint selection must use validation answer-token NLL only."
+            )
+        if self.expected_nodes <= 0 or self.expected_world_size % self.expected_nodes:
+            raise ValueError(
+                "expected_world_size must be divisible by a positive expected_nodes."
             )
         profile = (
             self.expected_world_size,

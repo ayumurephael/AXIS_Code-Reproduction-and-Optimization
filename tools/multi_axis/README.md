@@ -14,7 +14,7 @@ This branch extends the multivariate AXIS Phase-II pipeline according to `多元
 - Teacher supervision is answer-only NLL over the natural-language `model_answer` field only. The 17 empty `model_answer` rows are filtered; short-label fields are never used as a training fallback.
 - Training alignment follows the authoritative 62-shard teacher summary: 67,773 rows are matched one-to-one by normalized question text within each shard, and the remaining 47 are supplied by a SHA-256-audited same-index recovery bundle derived from the raw teacher records.
 - Split is by `base_sample_id`, 90/10, seed 42, with zero group overlap.
-- VLM formal experiment: exactly 25 epochs on one queued 8×H800 node, seed 42, grouped 90/10 manifests, no early stopping, and minimum validation answer-token NLL selected only after epoch 25.
+- VLM formal experiment: exactly 25 epochs with a global 8×H800 world formed by two nodes and four allocated H800s per node, seed 42, grouped 90/10 manifests, no early stopping, and minimum validation answer-token NLL selected only after epoch 25.
 - Formal inference covers 478new, SMD, SWaT, LEMMA-RCA, and VTA.
 - MC and TF use final-label exact match; OE uses parseability. Results are emitted overall, by question type, and by dataset.
 - Five Judges score every test set. GPT-5.4 is the only Judge used for baseline deltas; the other four are used for cross-Judge robustness.
@@ -39,14 +39,14 @@ The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=25
 
 ## Environment
 
-Use a Slurm compute allocation with one 8×NVIDIA H800 node, BF16, PyTorch compatible with that cluster driver, Transformers 4.57 or newer, and FlashAttention compatible with the installed Torch/CUDA ABI. Never install or run training on the login node.
+Use a single Slurm allocation spanning the confirmed H800 nodes (`g40` and `g44` for this formal run), with four NVIDIA H800s per node, BF16, PyTorch compatible with that cluster driver, Transformers 4.57 or newer, and FlashAttention compatible with the installed Torch/CUDA ABI. The two `torchrun` agents must join one rendezvous and one eight-rank NCCL process group; two unrelated four-rank jobs are not an eight-GPU experiment. Never install or run training on the login node.
 
 ```bash
 python -m pip install --upgrade "transformers>=4.57,<5" "Pillow>=11" "matplotlib>=3.10" "openai>=1.99" "google-genai>=1.30" "httpx>=0.28" packaging psutil ninja
 python -m pip install --no-build-isolation --no-deps "flash-attn==2.7.4.post1"
 ```
 
-Before any formal work, verify that `torch.cuda.device_count()` equals the configuration's `expected_world_size`, that all visible devices are H800, BF16 is supported, Times New Roman is discoverable by Matplotlib, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. When the cluster does not install Times New Roman system-wide, place the four authorized files `times.ttf`, `timesbd.ttf`, `timesi.ttf`, and `timesbi.ttf` in a private experiment asset directory and set `MULTI_AXIS_TIMES_FONT_DIR` to that directory. The renderer registers that exact bundle and records its per-file and aggregate SHA-256 provenance; an incomplete or incorrectly named bundle fails closed. Export `PYTHONPATH` to the repository root and put Hugging Face caches on WORK storage. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in configuration and checkpoint metadata.
+Before any formal work, verify on every node that `torch.cuda.device_count()` equals `expected_world_size / expected_nodes` (four for the formal 2×4 topology), that the global process-group size equals `expected_world_size`, that all visible devices are H800, BF16 is supported, Times New Roman is discoverable by Matplotlib, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. Training and inference all-gather every rank's hostname, local rank, visible-device count, GPU name, memory and compute capability, then fail closed unless the topology is exactly two nodes by four distinct H800 ranks. When the cluster does not install Times New Roman system-wide, place the four authorized files `times.ttf`, `timesbd.ttf`, `timesi.ttf`, and `timesbi.ttf` in a private experiment asset directory and set `MULTI_AXIS_TIMES_FONT_DIR` to that directory. The renderer registers that exact bundle and records its per-file and aggregate SHA-256 provenance; an incomplete or incorrectly named bundle fails closed. Export `PYTHONPATH` to the repository root and put Hugging Face caches on WORK storage. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in configuration and checkpoint metadata.
 
 ## Rebuild the audited recovery bundle
 
@@ -85,10 +85,13 @@ python tools/multi_axis/render_images.py \
 
 Release only the experiment's own verified reservation processes immediately before launch. Never terminate another user's process.
 
-Eight-H800 formal profile (effective batch 32):
+Two-node, eight-H800 formal profile (effective batch 32); execute this once on each of the two Slurm tasks with the shared rendezvous variables exported by the allocation launcher:
 
 ```bash
-torchrun --standalone --nproc_per_node=8 tools/multi_axis/train.py \
+torchrun --nnodes=2 --nproc_per_node=4 \
+  --node_rank="$SLURM_NODEID" \
+  --rdzv_backend=c10d --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+  tools/multi_axis/train.py \
   --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
@@ -104,7 +107,10 @@ To compare registered eight-GPU candidates, add `--benchmark-optimizer-steps N` 
 Read the selected checkpoint filename from `best_checkpoint.json`; do not select by test or Judge scores. Inference uses the same registered distributed profile as its training run:
 
 ```bash
-torchrun --standalone --nproc_per_node=8 tools/multi_axis/infer.py \
+torchrun --nnodes=2 --nproc_per_node=4 \
+  --node_rank="$SLURM_NODEID" \
+  --rdzv_backend=c10d --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+  tools/multi_axis/infer.py \
   --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \

@@ -14,6 +14,7 @@ import torch.distributed as dist
 from src.models.MultiAXIS.config import MultiAxisConfig
 from src.models.MultiAXIS.data import ManifestDataset, collate_multiaxis
 from src.models.MultiAXIS.model import MultiAxisForConditionalGeneration
+from tools.multi_axis.distributed import collect_distributed_topology
 
 
 DATASETS = ("478new", "SMD", "SWaT", "LEMMA-RCA", "VTA")
@@ -26,7 +27,7 @@ def setup():
     rank, world = dist.get_rank(), dist.get_world_size()
     local_rank = int(os.environ["LOCAL_RANK"])
     torch.cuda.set_device(local_rank)
-    return rank, world, torch.device("cuda", local_rank)
+    return rank, world, local_rank, torch.device("cuda", local_rank)
 
 
 def atomic_write_jsonl(path: Path, records: List[Dict]):
@@ -149,9 +150,16 @@ def main():
     config = MultiAxisConfig.load_json(args.config)
     if config.vision.enabled and not args.image_root:
         raise ValueError("--image-root is required for image-enabled inference")
-    rank, world, device = setup()
+    rank, world, local_rank, device = setup()
     if world != config.training.expected_world_size:
         raise RuntimeError(f"Expected {config.training.expected_world_size} inference GPUs, got {world}")
+    topology = collect_distributed_topology(
+        rank,
+        world,
+        local_rank,
+        expected_nodes=config.training.expected_nodes,
+        required_gpu_substring="H800" if config.vision.enabled else None,
+    )
     output_dir = Path(args.output_dir).resolve()
     if rank == 0:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -171,6 +179,7 @@ def main():
             "hint_checkpoint_epoch": checkpoint.get("epoch"),
             "timercd_sha256": model.timercd.checkpoint_sha256,
             "world_size": world,
+            "distributed_topology": topology,
             "datasets": args.datasets,
             "generation": config.generation.__dict__,
             "vision": config.vision.__dict__,

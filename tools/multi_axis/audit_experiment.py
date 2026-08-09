@@ -63,6 +63,7 @@ def main():
         "configured_epochs",
         config.training.epochs == 25
         and config.training.expected_world_size == 8
+        and config.training.expected_nodes == 2
         and config.training.effective_batch_size == 32
         and not config.training.early_stopping,
         config.training.__dict__,
@@ -134,17 +135,27 @@ def main():
     run_manifest = json.loads(
         (run_dir / "run_manifest.json").read_text(encoding="utf-8")
     )
+    topology = run_manifest.get("distributed_topology", {})
     check(
         "native_vlm_runtime",
         run_manifest.get("modality") == "image+numeric-window+soft-hints"
         and run_manifest.get("actual_effective_batch_size") == 32
         and run_manifest.get("world_size") == 8
+        and topology.get("node_count") == 2
+        and topology.get("gpus_per_node") == 4
+        and len(topology.get("nodes", [])) == 2
+        and all(
+            "H800" in gpu_name
+            for node in topology.get("nodes", [])
+            for gpu_name in node.get("gpu_names", [])
+        )
         and run_manifest.get("qwen3_vl_pixel_budget", {}).get("min_pixels") == 65_536
         and run_manifest.get("qwen3_vl_pixel_budget", {}).get("max_pixels") == 16_777_216,
         {
             "modality": run_manifest.get("modality"),
             "world_size": run_manifest.get("world_size"),
             "effective_batch": run_manifest.get("actual_effective_batch_size"),
+            "distributed_topology": topology,
             "pixel_budget": run_manifest.get("qwen3_vl_pixel_budget"),
         },
     )

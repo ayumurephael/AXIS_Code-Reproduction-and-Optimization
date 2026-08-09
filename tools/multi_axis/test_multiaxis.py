@@ -33,6 +33,7 @@ from tools.multi_axis.build_manifests import (
     teacher_reference_answer,
 )
 from tools.multi_axis.geval_runner import bounded_distribution
+from tools.multi_axis.distributed import validate_topology_records
 from tools.multi_axis.label_metrics import (
     canonical_label,
     open_parseable,
@@ -227,24 +228,26 @@ def test_formal_teacher_target_does_not_fall_back_to_short_label():
 @pytest.mark.parametrize(
     (
         "world_size",
+        "expected_nodes",
         "micro_batch_size",
         "accumulation_steps",
         "epochs",
         "effective_batch_size",
     ),
     [
-        (5, 1, 6, 40, 30),
-        (4, 1, 8, 20, 32),
-        (4, 2, 4, 20, 32),
-        (4, 4, 2, 20, 32),
-        (8, 1, 4, 25, 32),
-        (8, 2, 2, 25, 32),
-        (8, 4, 1, 25, 32),
-        (32, 1, 1, 25, 32),
+        (5, 1, 1, 6, 40, 30),
+        (4, 1, 1, 8, 20, 32),
+        (4, 1, 2, 4, 20, 32),
+        (4, 1, 4, 2, 20, 32),
+        (8, 2, 1, 4, 25, 32),
+        (8, 2, 2, 2, 25, 32),
+        (8, 2, 4, 1, 25, 32),
+        (32, 4, 1, 1, 25, 32),
     ],
 )
 def test_supported_formal_distributed_profiles(
     world_size,
+    expected_nodes,
     micro_batch_size,
     accumulation_steps,
     epochs,
@@ -252,6 +255,7 @@ def test_supported_formal_distributed_profiles(
 ):
     config = TrainingConfig(
         expected_world_size=world_size,
+        expected_nodes=expected_nodes,
         micro_batch_size=micro_batch_size,
         accumulation_steps=accumulation_steps,
         epochs=epochs,
@@ -308,13 +312,52 @@ def test_checked_in_four_and_five_gpu_configs():
     assert (
         vlm.training.epochs,
         vlm.training.expected_world_size,
+        vlm.training.expected_nodes,
         vlm.training.micro_batch_size,
         vlm.training.accumulation_steps,
         vlm.training.effective_batch_size,
         vlm.vision.enabled,
         vlm.vision.min_pixels,
         vlm.vision.max_pixels,
-    ) == (25, 8, 2, 2, 32, True, 65_536, 16_777_216)
+    ) == (25, 8, 2, 2, 2, 32, True, 65_536, 16_777_216)
+
+
+def test_two_node_four_gpu_topology_validation():
+    records = [
+        {
+            "rank": rank,
+            "local_rank": rank % 4,
+            "hostname": "g40" if rank < 4 else "g44",
+            "gpu_name": "NVIDIA H800 80GB HBM3",
+            "local_cuda_device_count": 4,
+        }
+        for rank in range(8)
+    ]
+    audit = validate_topology_records(
+        records,
+        world_size=8,
+        expected_nodes=2,
+        required_gpu_substring="H800",
+    )
+    assert audit["node_count"] == 2
+    assert audit["gpus_per_node"] == 4
+    assert [node["hostname"] for node in audit["nodes"]] == ["g40", "g44"]
+
+
+def test_two_node_topology_rejects_duplicate_local_device():
+    records = [
+        {
+            "rank": rank,
+            "local_rank": rank % 4,
+            "hostname": "g40" if rank < 4 else "g44",
+            "gpu_name": "NVIDIA H800 80GB HBM3",
+            "local_cuda_device_count": 4,
+        }
+        for rank in range(8)
+    ]
+    records[1]["local_rank"] = 0
+    with pytest.raises(RuntimeError, match="Duplicate distributed device assignment"):
+        validate_topology_records(records, world_size=8, expected_nodes=2)
 
 
 def test_batch_timercd_cache_reuses_base_series_and_preserves_padding():

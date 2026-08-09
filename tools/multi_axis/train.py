@@ -24,6 +24,7 @@ from torch.utils.data import DataLoader, Sampler, Subset
 from src.models.MultiAXIS.config import MultiAxisConfig, QWEN3_VL_MODEL_ID
 from src.models.MultiAXIS.data import ManifestDataset, collate_multiaxis
 from src.models.MultiAXIS.model import MultiAxisForConditionalGeneration
+from tools.multi_axis.distributed import collect_distributed_topology
 
 
 class GroupedDistributedSampler(Sampler[int]):
@@ -167,6 +168,17 @@ def git_revision() -> Dict[str, str]:
             "dirty": bool(run("git", "status", "--porcelain")),
         }
     except Exception:
+        commit = os.environ.get("MULTI_AXIS_SOURCE_COMMIT", "")
+        branch = os.environ.get("MULTI_AXIS_SOURCE_BRANCH", "")
+        archive_sha256 = os.environ.get("MULTI_AXIS_SOURCE_ARCHIVE_SHA256", "")
+        if len(commit) == 40 and all(character in "0123456789abcdef" for character in commit.lower()):
+            return {
+                "commit": commit.lower(),
+                "branch": branch or "multi-axis-VL",
+                "dirty": False,
+                "source": "audited-git-archive",
+                "archive_sha256": archive_sha256.lower(),
+            }
         return {"commit": "unknown", "branch": "unknown", "dirty": True}
 
 
@@ -174,6 +186,7 @@ def environment_manifest(
     config: MultiAxisConfig,
     rank: int,
     world_size: int,
+    topology: Dict,
     model,
     attention_audit: Dict,
     benchmark_optimizer_steps: int,
@@ -186,7 +199,8 @@ def environment_manifest(
         "cuda_runtime": torch.version.cuda,
         "cudnn": torch.backends.cudnn.version(),
         "world_size": world_size,
-        "gpu_names": [torch.cuda.get_device_name(index) for index in range(world_size)],
+        "gpu_names": [item["gpu_name"] for item in topology["ranks"]],
+        "distributed_topology": topology,
         "config": config.to_dict(),
         "pretrained_source": getattr(model, "pretrained_source", config.llm.model_name),
         "actual_effective_batch_size": config.training.micro_batch_size
@@ -360,6 +374,13 @@ def main():
         raise RuntimeError(
             f"Expected {config.training.expected_world_size} GPUs, got {world_size}"
         )
+    topology = collect_distributed_topology(
+        rank,
+        world_size,
+        local_rank,
+        expected_nodes=config.training.expected_nodes,
+        required_gpu_substring="H800" if config.vision.enabled else None,
+    )
     # Every rank must start from bit-identical Hint Tuner and special-token weights.
     seed_everything(config.training.seed, 0)
     output_dir = Path(args.output_dir).resolve()
@@ -465,6 +486,7 @@ def main():
             config,
             rank,
             world_size,
+            topology,
             model,
             attention_audit,
             args.benchmark_optimizer_steps,
