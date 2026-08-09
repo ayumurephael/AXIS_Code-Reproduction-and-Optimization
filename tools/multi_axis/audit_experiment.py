@@ -64,7 +64,7 @@ def main():
         config.training.epochs == 25
         and config.training.expected_world_size == 8
         and config.training.expected_nodes == 2
-        and config.training.effective_batch_size == 32
+        and config.training.effective_batch_size in {32, 48}
         and not config.training.early_stopping,
         config.training.__dict__,
     )

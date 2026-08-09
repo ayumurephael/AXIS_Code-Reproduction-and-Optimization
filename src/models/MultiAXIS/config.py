@@ -18,6 +18,7 @@ FORMAL_DISTRIBUTED_PROFILES = {
     (8, 1, 4, 25): 32,
     (8, 2, 2, 25): 32,
     (8, 4, 1, 25): 32,
+    (8, 6, 1, 25): 48,
     (32, 1, 1, 25): 32,
 }
 
@@ -109,8 +110,8 @@ class TrainingConfig:
     weight_decay: float = 0.01
     warmup_ratio: float = 0.05
     gradient_clip_norm: float = 1.0
-    micro_batch_size: int = 2
-    accumulation_steps: int = 2
+    micro_batch_size: int = 6
+    accumulation_steps: int = 1
     expected_world_size: int = 8
     expected_nodes: int = 1
     num_workers: int = 2

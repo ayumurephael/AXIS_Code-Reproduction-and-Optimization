@@ -246,6 +246,7 @@ def test_formal_teacher_target_does_not_fall_back_to_short_label():
         (8, 2, 1, 4, 25, 32),
         (8, 2, 2, 2, 25, 32),
         (8, 2, 4, 1, 25, 32),
+        (8, 2, 6, 1, 25, 48),
         (32, 4, 1, 1, 25, 32),
     ],
 )
@@ -292,6 +293,10 @@ def test_checked_in_four_and_five_gpu_configs():
     vlm = MultiAxisConfig.load_json(
         root / "experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json"
     )
+    vlm_fallback = MultiAxisConfig.load_json(
+        root
+        / "experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu_fallback_batch32.json"
+    )
     assert (
         five_gpu.training.epochs,
         five_gpu.training.expected_world_size,
@@ -325,7 +330,15 @@ def test_checked_in_four_and_five_gpu_configs():
         vlm.vision.max_pixels,
         vlm.vision.runtime_max_pixels,
         vlm.llm.gradient_checkpointing,
-    ) == (25, 8, 2, 2, 2, 32, True, 65_536, 16_777_216, 4_194_304, True)
+    ) == (25, 8, 2, 6, 1, 48, True, 65_536, 16_777_216, 4_194_304, True)
+    assert (
+        vlm_fallback.training.epochs,
+        vlm_fallback.training.expected_world_size,
+        vlm_fallback.training.expected_nodes,
+        vlm_fallback.training.micro_batch_size,
+        vlm_fallback.training.accumulation_steps,
+        vlm_fallback.training.effective_batch_size,
+    ) == (25, 8, 2, 4, 1, 32)
 
 
 def test_two_node_four_gpu_topology_validation():

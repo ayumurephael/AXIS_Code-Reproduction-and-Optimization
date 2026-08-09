@@ -46,7 +46,7 @@
     "weight_decay": 0.01,
     "warmup_ratio": 0.05,
     "gradient_clip_norm": 1.0,
-    "micro_batch_size": 6,
+    "micro_batch_size": 4,
     "accumulation_steps": 1,
     "expected_world_size": 8,
     "expected_nodes": 2,

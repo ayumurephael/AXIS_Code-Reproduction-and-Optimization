@@ -85,7 +85,9 @@ python tools/multi_axis/render_images.py \
 
 Release only the experiment's own verified reservation processes immediately before launch. Never terminate another user's process.
 
-Two-node, eight-H800 formal profile (effective batch 32); execute this once on each of the two Slurm tasks with the shared rendezvous variables exported by the allocation launcher:
+Two-node, eight-H800 formal profile (micro batch 6, accumulation 1,
+effective batch 48); execute this once on each of the two Slurm tasks with the
+shared rendezvous variables exported by the allocation launcher:
 
 ```bash
 torchrun --nnodes=2 --nproc_per_node=4 \
@@ -99,6 +101,12 @@ torchrun --nnodes=2 --nproc_per_node=4 \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
   --output-dir /path/to/run/training
 ```
+
+The audited memory-safe fallback is
+`formal_qwen3_vl_25epochs_8gpu_fallback_batch32.json` (micro batch 4,
+accumulation 1, effective batch 32). Use it only after preserving the failed
+batch-48 run evidence, and resume from epoch 0 in a separate experiment
+directory; never silently change batch size inside an existing run.
 
 To compare registered eight-GPU candidates, add `--benchmark-optimizer-steps N` and use a distinct output directory for each configuration. Benchmark mode writes `benchmark_summary.json` and exits without validation or formal checkpoints. To resume after an interruption, provide `--resume /path/to/run/training/last_train_state.pt`. A valid completion has `TRAINING_COMPLETE`, 25 `epochs.jsonl` records, 25 hint checkpoints, and `best_checkpoint.json` pointing to the minimum validation answer NLL.
 
