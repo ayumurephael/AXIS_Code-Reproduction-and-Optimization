@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from dataclasses import asdict, dataclass
 import os
 from pathlib import Path
@@ -684,44 +685,50 @@ class MultiAxisForConditionalGeneration(nn.Module):
             image_paths,
             answers=None,
         )
-        step, joint, fixed = self._hint_embeddings(
-            normalized_series,
-            time_mask,
-            channel_mask,
-            intervals,
-            channel_counts,
-            prototype_override,
-            timercd_override,
-        )
         device = normalized_series.device
-        model_inputs, _, hint_hook = self._model_inputs_and_hint_hook(
-            tokenized, step, joint, fixed, device
+        autocast_context = (
+            torch.autocast("cuda", dtype=getattr(torch, self.config.llm.torch_dtype))
+            if device.type == "cuda"
+            else contextlib.nullcontext()
         )
-        kwargs = asdict(self.config.generation)
-        if generation_overrides:
-            kwargs.update(dict(generation_overrides))
-        hint_bad_words = [[self.prompt_builder.token_ids[token]] for token in HINT_TOKENS]
-        supplied_bad_words = kwargs.pop("bad_words_ids", None)
-        if supplied_bad_words:
-            hint_bad_words.extend(supplied_bad_words)
-        kwargs["bad_words_ids"] = hint_bad_words
-        old_cache = getattr(self.llm.config, "use_cache", None)
-        if old_cache is not None:
-            self.llm.config.use_cache = True
-        try:
-            handle = self.llm.get_input_embeddings().register_forward_hook(hint_hook)
-            try:
-                sequences = self.llm.generate(
-                    **model_inputs,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    **kwargs,
-                )
-            finally:
-                handle.remove()
-        finally:
+        with autocast_context:
+            step, joint, fixed = self._hint_embeddings(
+                normalized_series,
+                time_mask,
+                channel_mask,
+                intervals,
+                channel_counts,
+                prototype_override,
+                timercd_override,
+            )
+            model_inputs, _, hint_hook = self._model_inputs_and_hint_hook(
+                tokenized, step, joint, fixed, device
+            )
+            kwargs = asdict(self.config.generation)
+            if generation_overrides:
+                kwargs.update(dict(generation_overrides))
+            hint_bad_words = [[self.prompt_builder.token_ids[token]] for token in HINT_TOKENS]
+            supplied_bad_words = kwargs.pop("bad_words_ids", None)
+            if supplied_bad_words:
+                hint_bad_words.extend(supplied_bad_words)
+            kwargs["bad_words_ids"] = hint_bad_words
+            old_cache = getattr(self.llm.config, "use_cache", None)
             if old_cache is not None:
-                self.llm.config.use_cache = old_cache
+                self.llm.config.use_cache = True
+            try:
+                handle = self.llm.get_input_embeddings().register_forward_hook(hint_hook)
+                try:
+                    sequences = self.llm.generate(
+                        **model_inputs,
+                        pad_token_id=self.tokenizer.pad_token_id,
+                        eos_token_id=self.tokenizer.eos_token_id,
+                        **kwargs,
+                    )
+                finally:
+                    handle.remove()
+            finally:
+                if old_cache is not None:
+                    self.llm.config.use_cache = old_cache
         prompt_width = model_inputs["input_ids"].shape[1]
         decoded = []
         for sequence in sequences:
