@@ -36,6 +36,16 @@ def main() -> None:
         choices=SUPPORTED_EVALUATION_DATASETS,
         required=True,
     )
+    parser.add_argument(
+        "--allow-complete-dataset-subset",
+        action="store_true",
+        help=(
+            "Allow merging a completed dataset before every dataset in each source "
+            "run has finished. Each requested dataset must have its own audited "
+            "<dataset>.complete.json marker; the source-wide INFERENCE_COMPLETE "
+            "marker is not required in this mode."
+        ),
+    )
     args = parser.parse_args()
     datasets = validate_datasets(args.datasets)
     manifest_dir = Path(args.manifest_dir)
@@ -48,16 +58,39 @@ def main() -> None:
     runs = []
     per_dataset_rows = {dataset: [] for dataset in datasets}
     for source in args.source:
-        for required in (source / "inference_manifest.json", source / "INFERENCE_COMPLETE"):
-            if not required.is_file():
-                raise FileNotFoundError(required)
+        manifest_path = source / "inference_manifest.json"
+        if not manifest_path.is_file():
+            raise FileNotFoundError(manifest_path)
         manifest = json.loads(
-            (source / "inference_manifest.json").read_text(encoding="utf-8")
+            manifest_path.read_text(encoding="utf-8")
         )
-        if tuple(manifest.get("datasets", ())) != datasets:
+        source_datasets = tuple(manifest.get("datasets", ()))
+        if args.allow_complete_dataset_subset:
+            missing_datasets = [
+                dataset for dataset in datasets if dataset not in source_datasets
+            ]
+            if missing_datasets:
+                raise RuntimeError(
+                    f"{source}: requested datasets are absent from source manifest: "
+                    f"{missing_datasets}"
+                )
+            for dataset in datasets:
+                dataset_complete_path = source / f"{dataset}.complete.json"
+                if not dataset_complete_path.is_file():
+                    raise FileNotFoundError(dataset_complete_path)
+                dataset_complete = json.loads(
+                    dataset_complete_path.read_text(encoding="utf-8")
+                )
+                if dataset_complete.get("dataset") != dataset:
+                    raise RuntimeError(
+                        f"{dataset_complete_path}: dataset completion marker mismatch"
+                    )
+        elif source_datasets != datasets:
             raise RuntimeError(
                 f"{source}: datasets {manifest.get('datasets')} do not match {datasets}"
             )
+        elif not (source / "INFERENCE_COMPLETE").is_file():
+            raise FileNotFoundError(source / "INFERENCE_COMPLETE")
         selected = {field: manifest.get(field) for field in COMMON_FIELDS}
         if common is None:
             common = selected
@@ -86,6 +119,8 @@ def main() -> None:
                 "inference_shard_indices": list(indices),
                 "world_size": manifest.get("world_size"),
                 "distributed_topology": manifest.get("distributed_topology"),
+                "source_datasets": list(source_datasets),
+                "source_inference_complete": (source / "INFERENCE_COMPLETE").is_file(),
             }
         )
 
@@ -132,6 +167,7 @@ def main() -> None:
         "shard_runs": runs,
         "world_size": None,
         "expected_inference_world_size": None,
+        "complete_dataset_subset_merge": args.allow_complete_dataset_subset,
     }
     (output_dir / "inference_manifest.json").write_text(
         json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8"

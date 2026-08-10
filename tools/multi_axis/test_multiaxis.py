@@ -4,6 +4,7 @@ import concurrent.futures
 import json
 import inspect
 import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -50,6 +51,7 @@ from tools.multi_axis.label_metrics import (
     parse_prediction,
 )
 from tools.multi_axis.infer import dataset_indices
+from tools.multi_axis import merge_sharded_inference_outputs
 from tools.multi_axis.train import compute_timercd_cached
 from tools.multi_axis.render_images import render_normalized_series
 
@@ -1049,3 +1051,71 @@ def test_audited_training_recovery_bundle(tmp_path):
     )
     with pytest.raises(RuntimeError, match="size"):
         load_training_recovery(tmp_path, hash_inputs=True)
+
+
+def test_merge_completed_dataset_before_source_run_finishes(tmp_path, monkeypatch):
+    manifest_dir = tmp_path / "manifests"
+    manifest_dir.mkdir()
+    references = [
+        {"sample_id": "sample-0"},
+        {"sample_id": "sample-1"},
+    ]
+    (manifest_dir / "eval_478new.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in references),
+        encoding="utf-8",
+    )
+
+    sources = []
+    for index, reference in enumerate(references):
+        source = tmp_path / f"source-{index}"
+        source.mkdir()
+        (source / "inference_manifest.json").write_text(
+            json.dumps(
+                {
+                    "datasets": ["478new", "478"],
+                    "inference_shard_count": 2,
+                    "inference_shard_indices": [index],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (source / "478new.complete.json").write_text(
+            json.dumps({"dataset": "478new", "examples": 1}),
+            encoding="utf-8",
+        )
+        (source / "478new.predictions.jsonl").write_text(
+            json.dumps({"index": index, **reference}) + "\n",
+            encoding="utf-8",
+        )
+        sources.append(source)
+
+    output_dir = tmp_path / "merged"
+    argv = ["merge_sharded_inference_outputs.py"]
+    for source in sources:
+        argv.extend(("--source", str(source)))
+    argv.extend(
+        (
+            "--manifest-dir",
+            str(manifest_dir),
+            "--output-dir",
+            str(output_dir),
+            "--datasets",
+            "478new",
+            "--allow-complete-dataset-subset",
+        )
+    )
+    monkeypatch.setattr(sys, "argv", argv)
+    merge_sharded_inference_outputs.main()
+
+    merged = [
+        json.loads(line)
+        for line in (output_dir / "478new.predictions.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert [row["index"] for row in merged] == [0, 1]
+    audit = json.loads(
+        (output_dir / "inference_manifest.json").read_text(encoding="utf-8")
+    )
+    assert audit["complete_dataset_subset_merge"] is True
+    assert all(not run["source_inference_complete"] for run in audit["shard_runs"])
