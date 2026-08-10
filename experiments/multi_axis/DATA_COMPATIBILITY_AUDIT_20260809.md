@@ -4,9 +4,10 @@
 
 - 当前 VLM 训练 manifest 与《说明文件.md》的权威配对、过滤和 grouped 90/10
   划分口径一致，没有训练/验证 `base_sample_id` 泄漏，也没有丢失图像 ID。
-- 审计时 VLM 服务器的 manifest 目录没有任何 `eval_*.jsonl`，因此当前**训练数据匹配，
-  测试数据尚未部署，不能称为完整匹配**。在正式 VLM 测试前必须部署五个
-  bias-neutralized 测试集、构建 manifest、渲染对应图像并做 PNG/字体审计。
+- VLM 服务器现已部署全部五个 bias-neutralized 正式测试集及 Teacher-Eval 478
+  措辞诊断视图；六个 `eval_*.jsonl` 的条数与题型计数均通过审计，相关图像也已使用
+  与训练集相同的 Times New Roman 字体包和 600 DPI 配置完成渲染。因此当前**训练、
+  验证和测试数据均完整匹配**。
 - 原始 Teacher-Eval 478 与 478new 是同一批 478 个样本的两种问题措辞视图，不能在
   正式五数据集 macro 中作为两个独立数据集重复计权。
 - 权威训练数据自身含 52 组重复且冲突的自然语言监督目标。现有 manifest 忠实保留了
@@ -65,7 +66,7 @@
 
 ## VLM 测试部署门槛
 
-正式 VLM 推理前必须同时满足：
+2026-08-10 的服务器部署已满足以下门槛：
 
 1. 所选测试集的 question/teacher 原文件 SHA-256 与权威源一致；
 2. manifest 数量及 MC/OE/TF 计数与 `tools/multi_axis/datasets.py` 一致；
@@ -74,3 +75,22 @@
 4. `audit_evaluation.py` 对预测、标签指标与 Judge dimension 任务全部通过；
 5. 478 与 478new 同时报表时显式标注 wording-view macro，不纳入正式五数据集 macro
    的重复权重。
+
+## 测试部署结果（2026-08-10）
+
+| Manifest | 总数 | MC | OE | TF | 状态 |
+|---|---:|---:|---:|---:|---|
+| `eval_478new.jsonl` | 478 | 176 | 139 | 163 | 通过 |
+| `eval_478.jsonl` | 478 | 176 | 139 | 163 | 通过（措辞诊断视图） |
+| `eval_SMD.jsonl` | 200 | 66 | 67 | 67 | 通过 |
+| `eval_SWaT.jsonl` | 184 | 61 | 62 | 61 | 通过 |
+| `eval_LEMMA-RCA.jsonl` | 12 | 4 | 4 | 4 | 通过 |
+| `eval_VTA.jsonl` | 200 | 67 | 67 | 66 | 通过 |
+
+图像审计共覆盖 34,351 个唯一图像，manifest SHA-256 为
+`dbd45e38d343228cf49c374f8c82308113ba7709b0d0b1cd67e1d473e3e1a4c8`。
+渲染器记录为 `multi-axis-vl-render-v1`，DPI 为 600，字体族为 Times New Roman，
+字体包聚合 SHA-256 为
+`1f53e60db60e2eb72b0e52dad9b879290998d1c58bc9510201a6d710145e1147`。
+`EVAL_DEPLOY_COMPLETE` 与结构化 `evaluation_deployment_audit.json` 均已生成；后续正式
+推理仍须逐项运行预测、标签指标和 Judge 维度审计，不能仅凭部署审计视为测评完成。
