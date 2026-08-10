@@ -168,8 +168,10 @@ python tools/multi_axis/label_metrics.py \
   --datasets 478new 478
 ```
 
-- MC：解析最终 A–F 标签并做 exact match；无法解析计错，同时单列不可解析数。
-- TF：规范化 Yes/No/True/False 后做 exact match；无法解析计错。
+- MC：从 teacher `model_answer` 解析最终 A–F 标签并做 exact match；只有 teacher
+  标签不可解析时才使用结构化 `choice_answer` 兜底。无法解析计错，同时单列不可解析数。
+- TF：从 teacher `model_answer` 解析并规范化 Yes/No/True/False 后做 exact match；
+  不能用样本的 `is_anomalous` 替代题目本身的 Yes/No 标签。无法解析计错。
 - OE：非空且非错误占位文本记为可解析；它不是开放题事实正确率。
 - 同时报告 overall、分题型、分数据集。对 478/478new 的 combined overall 只作
   两视图诊断，不解释为独立样本总体。

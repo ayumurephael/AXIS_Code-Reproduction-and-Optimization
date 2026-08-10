@@ -25,6 +25,7 @@ JUDGMENT_PATTERNS = [
     re.compile(r"(?i)\b(?:answer|final answer|judgment|label)\s*[:\-]?\s*(?:is\s*)?(yes|no|true|false)\b"),
     re.compile(r"^\s*(yes|no|true|false)\b", re.I),
 ]
+MODEL_ANSWER_MARKER = re.compile(r"(?im)^\s*model_answer\s*:\s*")
 
 
 def canonical_label(value: Any) -> Optional[str]:
@@ -52,12 +53,23 @@ def parse_prediction(text: str, question_group: str) -> Optional[str]:
     return None
 
 
+def teacher_model_answer(reference: Dict[str, Any]) -> str:
+    text = str(reference.get("teacher_short_answer") or "").strip()
+    marker = MODEL_ANSWER_MARKER.search(text)
+    return text[marker.end() :].strip() if marker else text
+
+
 def target_label(reference: Dict[str, Any], question_group: str) -> Optional[str]:
+    teacher_label = parse_prediction(
+        teacher_model_answer(reference), question_group
+    )
+    if teacher_label is not None:
+        return teacher_label
+    output = reference.get("target_output") or {}
+    fact = output.get("fact_check") or {}
     if question_group == "MC":
-        output = reference.get("target_output") or {}
-        fact = output.get("fact_check") or {}
         return canonical_label(fact.get("choice_answer") or fact.get("answer_label"))
-    return canonical_label(reference.get("teacher_short_answer"))
+    return canonical_label(fact.get("answer_label") or output.get("answer_label"))
 
 
 def open_parseable(text: str) -> bool:

@@ -49,6 +49,8 @@ from tools.multi_axis.label_metrics import (
     canonical_label,
     open_parseable,
     parse_prediction,
+    target_label,
+    teacher_model_answer,
 )
 from tools.multi_axis.infer import dataset_indices
 from tools.multi_axis import merge_sharded_inference_outputs
@@ -812,6 +814,37 @@ def test_label_parsing_contract():
     assert parse_prediction("Answer: C\nAnalysis:\n...", "MC") == "C"
     assert parse_prediction("Answer: False\nAnalysis:\n...", "TF") == "no"
     assert canonical_label("True") == "yes"
+
+
+def test_teacher_final_label_precedes_conflicting_structured_label():
+    reference = {
+        "teacher_short_answer": (
+            "Question: Which option?\nChoices:\nA. First\nB. Second\n\n"
+            "model_answer: Answer: B\n\nThe second option matches the evidence."
+        ),
+        "target_output": {"fact_check": {"choice_answer": "C"}},
+    }
+    assert teacher_model_answer(reference).startswith("Answer: B")
+    assert target_label(reference, "MC") == "B"
+
+
+def test_teacher_judgment_label_is_question_specific():
+    reference = {
+        "teacher_short_answer": (
+            "Question: Is the claim supported?\n\n"
+            "model_answer: No.\n\nThe claim is not supported."
+        ),
+        "target_output": {"fact_check": {"is_anomalous": True}},
+    }
+    assert target_label(reference, "TF") == "no"
+
+
+def test_structured_choice_is_only_a_teacher_parse_fallback():
+    reference = {
+        "teacher_short_answer": "No explicit final label is available.",
+        "target_output": {"fact_check": {"choice_answer": "D"}},
+    }
+    assert target_label(reference, "MC") == "D"
     assert open_parseable("Decision:\nThis interval is normal.")
     assert not open_parseable("  ")
 
