@@ -80,6 +80,7 @@ class TrainingConfig:
     validation_fraction: float = 0.10
     select_by: str = "validation_answer_nll"
     early_stopping: bool = False
+    normalize_teacher_targets: bool = True
 
     @property
     def effective_batch_size(self) -> int:
@@ -93,6 +94,10 @@ class TrainingConfig:
         if self.early_stopping:
             raise ValueError(
                 "The confirmed protocol runs all configured epochs without early stopping."
+            )
+        if not self.normalize_teacher_targets:
+            raise ValueError(
+                "Formal training requires canonical MC/TF/OE teacher targets."
             )
         if self.select_by != "validation_answer_nll":
             raise ValueError(

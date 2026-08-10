@@ -9,6 +9,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from .response_contracts import canonicalize_teacher_answer, response_contract_error
+
 
 TEACHER_ANSWER_FIELDS = ("model_answer", "teacher_answer_llm", "windows_0_answer", "answer")
 
@@ -78,6 +80,33 @@ def extract_interval(row: Dict[str, Any], steps: int) -> Tuple[int, int]:
     return start, end
 
 
+def extract_channel_ids(row: Dict[str, Any], channels: int) -> List[str]:
+    metadata = row.get("channels") or []
+    identifiers: List[str] = []
+    for index in range(channels):
+        item = metadata[index] if index < len(metadata) else None
+        if isinstance(item, dict):
+            value = item.get("channel_id") or item.get("name")
+        else:
+            value = item
+        identifiers.append(str(value) if value is not None else f"ch_{index}")
+    if len(set(identifiers)) != len(identifiers):
+        raise ValueError("Channel identifiers must be unique within one series")
+    return identifiers
+
+
+def structured_is_anomalous(row: Dict[str, Any]) -> bool | None:
+    candidates = [
+        row.get("is_anomalous"),
+        (row.get("target_output") or {}).get("is_anomalous"),
+        ((row.get("target_output") or {}).get("fact_check") or {}).get("is_anomalous"),
+    ]
+    for value in candidates:
+        if isinstance(value, bool):
+            return value
+    return None
+
+
 def normalize_and_serialize(
     values: np.ndarray,
     interval: Tuple[int, int],
@@ -103,11 +132,13 @@ class ManifestDataset(Dataset):
         data_root: str | Path,
         window_epsilon: float = 1e-5,
         window_scale: int = 100,
+        normalize_teacher_targets: bool = False,
     ):
         self.manifest_path = Path(manifest_path)
         self.data_root = Path(data_root)
         self.window_epsilon = window_epsilon
         self.window_scale = window_scale
+        self.normalize_teacher_targets = bool(normalize_teacher_targets)
         index_path = self.manifest_path.with_suffix(self.manifest_path.suffix + ".idx.json")
         self.offsets = json.loads(index_path.read_text(encoding="utf-8"))
         groups_path = self.manifest_path.with_suffix(self.manifest_path.suffix + ".groups.json")
@@ -159,14 +190,29 @@ class ManifestDataset(Dataset):
             epsilon=self.window_epsilon,
             scale=self.window_scale,
         )
+        channel_ids = extract_channel_ids(row, values.shape[1])
+        answer = record.get("teacher_answer")
+        answer_was_canonicalized = False
+        if self.normalize_teacher_targets and answer:
+            canonical = canonicalize_teacher_answer(
+                answer,
+                record["question_group"],
+                structured_is_anomalous=structured_is_anomalous(row),
+            )
+            answer_was_canonicalized = canonical != str(answer).strip()
+            answer = canonical
+            if response_contract_error(answer, record["question_group"]) is not None:
+                raise AssertionError("Canonicalized teacher answer violates its output contract")
         sample = {
             "normalized_series": normalized,
             "question": record["question"],
-            "answer": record.get("teacher_answer"),
+            "answer": answer,
+            "answer_was_canonicalized": answer_was_canonicalized,
             "interval": interval,
             "window_values": serialized,
             "time_count": values.shape[0],
             "channel_count": values.shape[1],
+            "channel_ids": channel_ids,
             "sample_id": record["sample_id"],
             "base_sample_id": record["base_sample_id"],
             "question_group": record["question_group"],
@@ -204,9 +250,13 @@ def collate_multiaxis(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "window_values": [sample["window_values"] for sample in samples],
         "time_counts": [sample["time_count"] for sample in samples],
         "channel_counts": [sample["channel_count"] for sample in samples],
+        "channel_ids": [sample["channel_ids"] for sample in samples],
         "sample_ids": [sample["sample_id"] for sample in samples],
         "base_sample_ids": [sample["base_sample_id"] for sample in samples],
         "question_groups": [sample["question_group"] for sample in samples],
         "datasets": [sample["dataset"] for sample in samples],
         "label_references": [sample.get("label_reference") for sample in samples],
+        "answer_was_canonicalized": [
+            sample.get("answer_was_canonicalized", False) for sample in samples
+        ],
     }

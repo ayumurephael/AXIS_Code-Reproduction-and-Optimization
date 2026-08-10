@@ -24,6 +24,11 @@ from src.models.MultiAXIS.model import (
     rms_unit,
 )
 from src.models.MultiAXIS.prompting import HINT_TOKENS, MultiAxisPromptBuilder
+from src.models.MultiAXIS.response_contracts import (
+    OUTPUT_CONTRACTS,
+    canonicalize_teacher_answer,
+    response_contract_error,
+)
 from tools.multi_axis.build_manifests import (
     align_eval_rows,
     load_training_recovery,
@@ -46,6 +51,8 @@ class FakeTokenizer:
         self.vocab = {"<pad>": 0, "<eos>": 1, "<bos>": 2}
         self.pad_token_id = 0
         self.eos_token_id = 1
+        self.padding_side = "right"
+        self.chat_template = "native-test-template"
 
     def add_special_tokens(self, payload):
         added = 0
@@ -66,6 +73,19 @@ class FakeTokenizer:
             ids.append(self.vocab[piece])
         return ids
 
+    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+        assert not tokenize
+        pieces = ["<bos>"]
+        for message in messages:
+            pieces.extend([f"<{message['role']}>", message["content"]])
+            if message["role"] != "assistant":
+                pieces.append("<end>")
+        if add_generation_prompt:
+            pieces.append("<assistant>")
+        elif messages and messages[-1]["role"] == "assistant":
+            pieces.append("<end>")
+        return "\n".join(pieces)
+
 
 def test_prompt_placeholder_counts_and_order():
     tokenizer = FakeTokenizer()
@@ -74,13 +94,22 @@ def test_prompt_placeholder_counts_and_order():
         tokenizer, fixed_tokens=30, max_context_tokens=32768
     )
     values = [[-12, -8, 15], [3, 4, 29]]
-    text = builder.build_text("Which channel changes?", 10, 13, values)
+    text = builder.build_text(
+        "Which channel changes?", 10, 13, values, "MC", ["ch_0", "ch_1"]
+    )
     assert text.index("### Question") < text.index("### Task-prior hints")
     assert text.index("### Task-prior hints") < text.index("### Channel-aligned")
     assert text.index("### Channel-aligned") < text.index("### Joint-Local")
-    assert "-12 <STEP_HINT> -8 <STEP_HINT> 15 <STEP_HINT>" in text
+    assert "t=10, value=-12 <STEP_HINT>" in text
+    assert text.count("### Output Contract") == 1
+    assert not text.endswith("Answer:")
     tokenized = builder.tokenize(
-        ["Which channel changes?"], [(10, 13)], [values], ["Answer: A"]
+        ["Which channel changes?"],
+        [(10, 13)],
+        [values],
+        [["ch_0", "ch_1"]],
+        ["MC"],
+        ["Answer: A\n\nch_0 changes most."],
     )
     assert tokenized.step_positions[0].numel() == 6
     assert tokenized.joint_positions[0].numel() == 1
@@ -391,10 +420,30 @@ def test_frozen_llm_train_mode_enables_checkpointing_but_not_dropout():
 
 def test_label_parsing_contract():
     assert parse_prediction("Answer: C\nAnalysis:\n...", "MC") == "C"
-    assert parse_prediction("Answer: False\nAnalysis:\n...", "TF") == "no"
+    assert parse_prediction("Yes.\n\nThe proposition is supported.", "TF") == "yes"
+    assert parse_prediction("Answer: False\nAnalysis:\n...", "TF") is None
+    assert parse_prediction("Reasoning first.\nAnswer: C", "MC") is None
+    assert parse_prediction(" Answer: C\n\nEvidence.", "MC") is None
+    assert parse_prediction("\nYes.\n\nEvidence.", "TF") is None
     assert canonical_label("True") == "yes"
-    assert open_parseable("Decision:\nThis interval is normal.")
+    assert open_parseable(
+        "Decision:\nThis interval is normal.\n\n"
+        "Main evidence:\nThe channels stay stable.\n\n"
+        "Interpretation:\nThe interval is consistent with context."
+    )
     assert not open_parseable("  ")
+
+
+def test_output_contracts_and_teacher_normalization():
+    assert "Answer: D" in OUTPUT_CONTRACTS["MC"]
+    assert "True/False" in OUTPUT_CONTRACTS["TF"]
+    assert OUTPUT_CONTRACTS["OE"].count("### Output Contract") == 1
+    normalized = canonicalize_teacher_answer(
+        "The second option matches.\n\nAnswer: B", "MC"
+    )
+    assert normalized.startswith("Answer: B\n\n")
+    assert response_contract_error(normalized, "MC") is None
+    assert response_contract_error("\n" + normalized, "MC") == "mc_first_line"
 
 
 def test_bounded_logprob_distribution():
@@ -446,13 +495,20 @@ def test_prompt_can_remove_joint_placeholder_for_ablation():
     tokenizer = FakeTokenizer()
     tokenizer.add_special_tokens({"additional_special_tokens": list(HINT_TOKENS)})
     builder = MultiAxisPromptBuilder(
-        tokenizer, fixed_tokens=3, max_context_tokens=256, include_joint=False
+        tokenizer, fixed_tokens=3, max_context_tokens=1024, include_joint=False
     )
     values = [[1, 2], [3, 4]]
-    text = builder.build_text("Is the interval anomalous?", 0, 2, values)
+    text = builder.build_text(
+        "Is the interval anomalous?", 0, 2, values, "TF", ["ch_0", "ch_1"]
+    )
     assert "### Joint-Local multivariate evidence" not in text
     tokenized = builder.tokenize(
-        ["Is the interval anomalous?"], [(0, 2)], [values], ["Answer: Yes"]
+        ["Is the interval anomalous?"],
+        [(0, 2)],
+        [values],
+        [["ch_0", "ch_1"]],
+        ["TF"],
+        ["Yes.\n\nThe interval contains a coordinated change."],
     )
     assert tokenized.step_positions[0].numel() == 4
     assert tokenized.joint_positions[0].numel() == 0

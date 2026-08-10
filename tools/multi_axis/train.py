@@ -112,14 +112,9 @@ def move_model_inputs(batch: Dict, device: torch.device) -> Dict:
         "intervals": batch["intervals"],
         "channel_counts": batch["channel_counts"],
         "window_values": batch["window_values"],
+        "channel_ids": batch["channel_ids"],
+        "question_groups": batch["question_groups"],
     }
-
-
-def answer_token_count(model, answers: Sequence[str]) -> int:
-    return sum(
-        len(model.tokenizer.encode(answer.strip(), add_special_tokens=False)) + 1
-        for answer in answers
-    )
 
 
 def average_trainable_gradients(
@@ -286,6 +281,7 @@ def validate(model, loader: DataLoader, device: torch.device):
     local_nll = torch.zeros((), device=device, dtype=torch.float64)
     local_tokens = torch.zeros((), device=device, dtype=torch.float64)
     local_examples = torch.zeros((), device=device, dtype=torch.float64)
+    local_canonicalized = torch.zeros((), device=device, dtype=torch.float64)
     cache: Dict = {}
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         prototype = model.build_prototype_bank()
@@ -302,20 +298,18 @@ def validate(model, loader: DataLoader, device: torch.device):
             outputs = model(
                 **inputs, prototype_override=prototype, timercd_override=encoded
             )
-            tokens = answer_token_count(model, batch["answers"])
-            if outputs.supervised_token_count != tokens:
-                raise RuntimeError(
-                    "Sparse answer target count differs from tokenizer audit count"
-                )
+            tokens = outputs.supervised_token_count
             local_nll += outputs.loss.double() * tokens
             local_tokens += tokens
             local_examples += len(batch["answers"])
-    totals = torch.stack([local_nll, local_tokens, local_examples])
+            local_canonicalized += sum(batch["answer_was_canonicalized"])
+    totals = torch.stack([local_nll, local_tokens, local_examples, local_canonicalized])
     dist.all_reduce(totals, op=dist.ReduceOp.SUM)
     return {
         "answer_nll": (totals[0] / totals[1]).item(),
         "answer_tokens": int(totals[1].item()),
         "examples": int(totals[2].item()),
+        "canonicalized_teacher_targets": int(totals[3].item()),
     }
 
 
@@ -363,6 +357,7 @@ def main():
         data_root=args.data_root,
         window_epsilon=config.hints.window_epsilon,
         window_scale=config.hints.window_scale,
+        normalize_teacher_targets=config.training.normalize_teacher_targets,
     )
     train_dataset = ManifestDataset(
         Path(args.manifest_dir) / "train.jsonl", **dataset_kwargs
@@ -465,6 +460,10 @@ def main():
                 "steps_per_epoch": steps_per_epoch,
                 "total_optimizer_steps": total_steps,
                 "warmup_steps": warmup_steps,
+                "teacher_target_normalization": {
+                    "enabled": config.training.normalize_teacher_targets,
+                    "contract": "mc-answer-a-d_tf-yes-no_oe-three-sections-v1",
+                },
             }
         )
         (output_dir / "run_manifest.json").write_text(
@@ -486,6 +485,7 @@ def main():
         epoch_loss_sum = 0.0
         epoch_tokens = 0
         epoch_examples = 0
+        epoch_canonicalized = 0
         cache: Dict = {}
         while remaining:
             group_size = min(config.training.accumulation_steps, remaining)
@@ -517,14 +517,11 @@ def main():
                         f"Non-finite training loss at epoch={epoch}, step={global_step}"
                     )
                 scaled_loss.backward()
-                tokens = answer_token_count(model, batch["answers"])
-                if outputs.supervised_token_count != tokens:
-                    raise RuntimeError(
-                        "Sparse answer target count differs from tokenizer audit count"
-                    )
+                tokens = outputs.supervised_token_count
                 epoch_loss_sum += outputs.loss.detach().item() * tokens
                 epoch_tokens += tokens
                 epoch_examples += len(batch["answers"])
+                epoch_canonicalized += sum(batch["answer_was_canonicalized"])
                 group_loss += outputs.loss.detach().item()
             if prototype_leaf.grad is None:
                 raise RuntimeError("Cached prototype bank did not receive a gradient")
@@ -616,7 +613,7 @@ def main():
                 return
 
         train_totals = torch.tensor(
-            [epoch_loss_sum, epoch_tokens, epoch_examples],
+            [epoch_loss_sum, epoch_tokens, epoch_examples, epoch_canonicalized],
             device=device,
             dtype=torch.float64,
         )
@@ -630,9 +627,15 @@ def main():
                 "train_answer_nll": train_nll,
                 "train_answer_tokens": int(train_totals[1].item()),
                 "train_examples_with_sampler_padding": int(train_totals[2].item()),
+                "train_canonicalized_teacher_targets_with_sampler_padding": int(
+                    train_totals[3].item()
+                ),
                 "validation_answer_nll": validation["answer_nll"],
                 "validation_answer_tokens": validation["answer_tokens"],
                 "validation_examples": validation["examples"],
+                "validation_canonicalized_teacher_targets": validation[
+                    "canonicalized_teacher_targets"
+                ],
                 "learning_rate": scheduler.get_last_lr()[0],
             }
             append_jsonl(output_dir / "epochs.jsonl", epoch_record)

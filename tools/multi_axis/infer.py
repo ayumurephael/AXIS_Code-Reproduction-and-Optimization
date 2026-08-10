@@ -14,6 +14,7 @@ import torch.distributed as dist
 from src.models.MultiAXIS.config import MultiAxisConfig
 from src.models.MultiAXIS.data import ManifestDataset, collate_multiaxis
 from src.models.MultiAXIS.model import MultiAxisForConditionalGeneration
+from src.models.MultiAXIS.response_contracts import response_contract_error
 
 
 DATASETS = ("478new", "SMD", "SWaT", "LEMMA-RCA", "VTA")
@@ -58,6 +59,8 @@ def model_inputs(batch, device):
         "intervals": batch["intervals"],
         "channel_counts": batch["channel_counts"],
         "window_values": batch["window_values"],
+        "channel_ids": batch["channel_ids"],
+        "question_groups": batch["question_groups"],
     }
 
 
@@ -101,6 +104,9 @@ def run_dataset(model, dataset_name: str, manifest_dir: Path, data_root: Path, o
                 "dataset": dataset_name,
                 "question_group": sample["question_group"],
                 "raw_response": response,
+                "contract_error": response_contract_error(
+                    response, sample["question_group"]
+                ),
                 "generation_seconds": time.monotonic() - started,
                 "model": model.config.llm.model_name,
             }

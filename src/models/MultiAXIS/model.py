@@ -552,12 +552,19 @@ class MultiAxisForConditionalGeneration(nn.Module):
         intervals: Sequence[Tuple[int, int]],
         channel_counts: Sequence[int],
         window_values: Sequence[Sequence[Sequence[int]]],
+        channel_ids: Sequence[Sequence[str]],
+        question_groups: Sequence[str],
         prototype_override: Optional[torch.Tensor] = None,
         timercd_override: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ):
         self.assert_freeze_contract()
         tokenized = self.prompt_builder.tokenize(
-            questions, intervals, window_values, answers=answers
+            questions,
+            intervals,
+            window_values,
+            channel_ids,
+            question_groups,
+            answers=answers,
         )
         step, joint, fixed = self._hint_embeddings(
             normalized_series,
@@ -597,13 +604,20 @@ class MultiAxisForConditionalGeneration(nn.Module):
         intervals: Sequence[Tuple[int, int]],
         channel_counts: Sequence[int],
         window_values: Sequence[Sequence[Sequence[int]]],
+        channel_ids: Sequence[Sequence[str]],
+        question_groups: Sequence[str],
         prototype_override: Optional[torch.Tensor] = None,
         timercd_override: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         generation_overrides: Optional[Mapping[str, Any]] = None,
     ) -> List[str]:
         self.eval()
         tokenized = self.prompt_builder.tokenize(
-            questions, intervals, window_values, answers=None
+            questions,
+            intervals,
+            window_values,
+            channel_ids,
+            question_groups,
+            answers=None,
         )
         step, joint, fixed = self._hint_embeddings(
             normalized_series,
@@ -621,6 +635,11 @@ class MultiAxisForConditionalGeneration(nn.Module):
         kwargs = asdict(self.config.generation)
         if generation_overrides:
             kwargs.update(dict(generation_overrides))
+        forbidden = self.prompt_builder.forbidden_reasoning_token_sequences()
+        supplied_bad_words = kwargs.pop("bad_words_ids", None)
+        if supplied_bad_words:
+            forbidden.extend(supplied_bad_words)
+        kwargs["bad_words_ids"] = forbidden
         old_cache = getattr(self.llm.config, "use_cache", None)
         if old_cache is not None:
             self.llm.config.use_cache = True
