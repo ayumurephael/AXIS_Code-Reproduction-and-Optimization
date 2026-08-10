@@ -66,8 +66,9 @@ three required headings. Do not add an "Answer:" heading.""",
 _MC_FIRST_LINE = re.compile(r"\AAnswer: ([A-D])(?:\n|\Z)")
 _TF_FIRST_LINE = re.compile(r"\A(Yes|No)\.(?:\n|\Z)")
 _MC_LABEL_ANYWHERE = re.compile(r"(?i)\bAnswer\s*:\s*([A-D])\b")
-_TF_LABEL_LINE = re.compile(
-    r"(?im)^\s*(?:Answer\s*:\s*)?(Yes|No|True|False)\.?\s*$"
+_TF_LEADING_LABEL = re.compile(
+    r"\A(?:Answer\s*:\s*)?(Yes|No|True|False)(?:\s*[.,:;]\s*|\s*[-—]\s+|\s+)",
+    re.IGNORECASE,
 )
 _OE_SECTIONS = re.compile(
     r"\ADecision:\n(?P<decision>.+?)\n\n"
@@ -189,7 +190,13 @@ def canonicalize_teacher_answer(
     if question_group == "TF":
         if response_contract_error(cleaned, "TF") is None:
             return cleaned
-        match = _TF_LABEL_LINE.match(cleaned)
+        # Historical teacher shards contain a small audited tail where the
+        # correct binary label begins the first prose sentence (for example,
+        # ``No. The claim ...`` or ``Yes, the interval ...``) instead of
+        # occupying a line by itself.  Recover only that leading label: never
+        # search the explanation, whose quoted proposition may contain the
+        # opposite Yes/No/True/False token.
+        match = _TF_LEADING_LABEL.match(cleaned)
         if match:
             raw = match.group(1).lower()
             label = "Yes." if raw in {"yes", "true"} else "No."
