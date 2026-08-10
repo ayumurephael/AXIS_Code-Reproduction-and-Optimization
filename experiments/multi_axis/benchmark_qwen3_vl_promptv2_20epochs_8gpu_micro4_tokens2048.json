@@ -1,0 +1,67 @@
+{
+  "schema_version": "multi-axis-vl-2.1-prompt-contracts",
+  "timercd": {
+    "d_model": 512,
+    "d_proj": 256,
+    "patch_size": 16,
+    "num_layers": 8,
+    "num_heads": 8,
+    "dropout": 0.1,
+    "activation": "gelu",
+    "checkpoint_num_features": 20
+  },
+  "hints": {
+    "num_prototypes": 1024,
+    "prototype_heads": 16,
+    "fixed_tokens": 30,
+    "joint_heads": 4,
+    "representation_epsilon": 1e-6,
+    "window_epsilon": 1e-5,
+    "window_scale": 100,
+    "require_flash_attention": true,
+    "ablation_phase": "D"
+  },
+  "llm": {
+    "model_name": "Qwen/Qwen3-VL-8B-Instruct",
+    "torch_dtype": "bfloat16",
+    "max_context_tokens": 131072,
+    "trust_remote_code": true,
+    "attention_implementation": "flash_attention_2",
+    "gradient_checkpointing": true,
+    "use_cache_during_training": false
+  },
+  "vision": {
+    "enabled": true,
+    "min_pixels": 65536,
+    "max_pixels": 16777216,
+    "runtime_max_pixels": 2097152,
+    "renderer_dpi": 600,
+    "renderer_version": "multi-axis-vl-render-v1",
+    "require_mm_token_type_ids": true
+  },
+  "training": {
+    "epochs": 20,
+    "seed": 42,
+    "learning_rate": 0.0001,
+    "weight_decay": 0.01,
+    "warmup_ratio": 0.05,
+    "gradient_clip_norm": 1.0,
+    "micro_batch_size": 4,
+    "accumulation_steps": 1,
+    "expected_world_size": 8,
+    "expected_nodes": 2,
+    "num_workers": 4,
+    "validation_fraction": 0.10,
+    "select_by": "validation_answer_nll",
+    "early_stopping": false,
+    "normalize_teacher_targets": true
+  },
+  "generation": {
+    "max_new_tokens": 1000,
+    "num_beams": 5,
+    "do_sample": false,
+    "repetition_penalty": 1.15,
+    "no_repeat_ngram_size": 3,
+    "length_penalty": 1.0
+  }
+}

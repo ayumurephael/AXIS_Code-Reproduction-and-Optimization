@@ -27,6 +27,11 @@ from src.models.MultiAXIS.model import (
     rms_unit,
 )
 from src.models.MultiAXIS.prompting import HINT_TOKENS, MultiAxisPromptBuilder, TokenizedPrompts
+from src.models.MultiAXIS.response_contracts import (
+    OUTPUT_CONTRACTS,
+    canonicalize_teacher_answer,
+    response_contract_error,
+)
 from tools.multi_axis.build_manifests import (
     EVAL_SPECS,
     align_eval_rows,
@@ -164,12 +169,16 @@ def test_prompt_placeholder_counts_and_order():
         processor, fixed_tokens=30, max_context_tokens=32768, use_images=False
     )
     values = [[-12, -8, 15], [3, 4, 29]]
-    text = builder.build_text("Which channel changes?", 10, 13, values)
-    assert text.index("### Question") < text.index("### Fixed Hint")
-    assert text.index("### Fixed Hint") < text.index("### Target Window")
-    assert text.index("### Target Window") < text.index("### Joint-Local Hint")
-    assert text.index("### Joint-Local Hint") < text.index("### Output Contract")
+    text = builder.build_text(
+        "Which channel changes?", 10, 13, values, ["ch_0", "ch_1"], "MC"
+    )
+    assert text.index("### Question") < text.index("### Task-prior hints")
+    assert text.index("### Task-prior hints") < text.index("### Target window")
+    assert text.index("### Target window") < text.index("### Joint-Local multivariate evidence")
+    assert text.index("### Joint-Local multivariate evidence") < text.index("### Output Contract")
     assert "t=10, value=-12 <STEP_HINT>" in text
+    assert text.count("### Output Contract") == 1
+    assert not text.endswith("Answer:")
     tokenized = builder.tokenize(
         ["Which channel changes?"],
         [(10, 13)],
@@ -177,7 +186,7 @@ def test_prompt_placeholder_counts_and_order():
         [["ch_0", "ch_1"]],
         ["MC"],
         [None],
-        ["Answer: A"],
+        ["Answer: A\n\nch_0 changes most."],
     )
     assert tokenized.step_positions[0].numel() == 6
     assert tokenized.joint_positions[0].numel() == 1
@@ -186,7 +195,7 @@ def test_prompt_placeholder_counts_and_order():
     assert (tokenized.labels[0] != -100).sum() > 0
 
 
-def test_native_vlm_image_first_prefix_mask_and_pixel_metadata(tmp_path):
+def test_native_vlm_text_image_text_order_prefix_mask_and_pixel_metadata(tmp_path):
     Image = pytest.importorskip("PIL.Image")
     image_path = tmp_path / "window.png"
     Image.new("RGB", (32, 32), "white").save(image_path)
@@ -204,13 +213,17 @@ def test_native_vlm_image_first_prefix_mask_and_pixel_metadata(tmp_path):
         ["Answer: B\n\nBecause ch_1 changes."],
     )
     user_content = processor.last_messages[1]["content"]
-    assert user_content[0]["type"] == "image"
-    assert user_content[1]["type"] == "text"
-    assert str(image_path) not in user_content[1]["text"]
+    assert [item["type"] for item in user_content] == ["text", "image", "text"]
+    assert "### Question" in user_content[0]["text"]
+    assert "### Figure note" in user_content[2]["text"]
+    assert user_content[2]["text"].count("### Output Contract") == 1
+    assert not user_content[2]["text"].endswith("Answer:")
+    assert str(image_path) not in user_content[0]["text"]
+    assert str(image_path) not in user_content[2]["text"]
     assert tokenized.visual_token_counts == [4]
     assert tokenized.original_image_sizes == [(32, 32)]
     assert processor.last_call_kwargs["min_pixels"] == 65_536
-    assert processor.last_call_kwargs["max_pixels"] == 4_194_304
+    assert processor.last_call_kwargs["max_pixels"] == 2_097_152
     assert {"pixel_values", "image_grid_thw", "mm_token_type_ids"}.issubset(
         tokenized.model_inputs
     )
@@ -238,7 +251,7 @@ def test_generation_uses_left_padding_and_image_off_has_no_visual_section():
     assert tokenized.visual_token_counts == [0, 0]
     assert isinstance(processor.last_messages[1]["content"], str)
     text = builder.build_text("Short?", 0, 2, [[1, 2]], ["ch_0"], "TF")
-    assert "### Visual Evidence" not in text
+    assert "### Visual evidence" not in text
 
 
 def test_formal_teacher_target_does_not_fall_back_to_short_label():
@@ -266,6 +279,10 @@ def test_formal_teacher_target_does_not_fall_back_to_short_label():
         (8, 2, 4, 1, 25, 32),
         (8, 2, 6, 1, 25, 48),
         (32, 4, 1, 1, 25, 32),
+        (8, 2, 2, 2, 20, 32),
+        (8, 2, 3, 1, 20, 24),
+        (8, 2, 4, 1, 20, 32),
+        (16, 4, 2, 1, 20, 32),
     ],
 )
 def test_supported_formal_distributed_profiles(
@@ -812,8 +829,23 @@ def test_eval_safe_activation_checkpointing_recomputes_without_train_mode():
 
 def test_label_parsing_contract():
     assert parse_prediction("Answer: C\nAnalysis:\n...", "MC") == "C"
-    assert parse_prediction("Answer: False\nAnalysis:\n...", "TF") == "no"
+    assert parse_prediction("No.\n\nThe proposition is unsupported.", "TF") == "no"
+    assert parse_prediction("Answer: False\nAnalysis:\n...", "TF") is None
+    assert parse_prediction("Reasoning first.\nAnswer: C", "MC") is None
+    assert parse_prediction(" Answer: C\n\nEvidence.", "MC") is None
+    assert parse_prediction("\nYes.\n\nEvidence.", "TF") is None
     assert canonical_label("True") == "yes"
+
+
+def test_output_contracts_and_teacher_normalization():
+    assert "Answer: D" in OUTPUT_CONTRACTS["MC"]
+    assert OUTPUT_CONTRACTS["OE"].count("### Output Contract") == 1
+    normalized = canonicalize_teacher_answer(
+        "The second option matches.\n\nAnswer: B", "MC"
+    )
+    assert normalized.startswith("Answer: B\n\n")
+    assert response_contract_error(normalized, "MC") is None
+    assert response_contract_error("\n" + normalized, "MC") == "mc_first_line"
 
 
 def test_teacher_final_label_precedes_conflicting_structured_label():
@@ -845,7 +877,11 @@ def test_structured_choice_is_only_a_teacher_parse_fallback():
         "target_output": {"fact_check": {"choice_answer": "D"}},
     }
     assert target_label(reference, "MC") == "D"
-    assert open_parseable("Decision:\nThis interval is normal.")
+    assert open_parseable(
+        "Decision:\nThis interval is normal.\n\n"
+        "Main evidence:\nThe channels stay stable.\n\n"
+        "Interpretation:\nThe interval is consistent with context."
+    )
     assert not open_parseable("  ")
 
 
@@ -1005,12 +1041,14 @@ def test_prompt_can_remove_joint_placeholder_for_ablation():
     builder = MultiAxisPromptBuilder(
         processor,
         fixed_tokens=3,
-        max_context_tokens=256,
+        max_context_tokens=2048,
         include_joint=False,
         use_images=False,
     )
     values = [[1, 2], [3, 4]]
-    text = builder.build_text("Is the interval anomalous?", 0, 2, values)
+    text = builder.build_text(
+        "Is the interval anomalous?", 0, 2, values, ["ch_0", "ch_1"], "TF"
+    )
     assert "### Joint-Local multivariate evidence" not in text
     tokenized = builder.tokenize(
         ["Is the interval anomalous?"],
@@ -1019,7 +1057,7 @@ def test_prompt_can_remove_joint_placeholder_for_ablation():
         [["ch_0", "ch_1"]],
         ["TF"],
         [None],
-        ["Answer: Yes"],
+        ["Yes.\n\nThe interval contains a coordinated change."],
     )
     assert tokenized.step_positions[0].numel() == 4
     assert tokenized.joint_positions[0].numel() == 0

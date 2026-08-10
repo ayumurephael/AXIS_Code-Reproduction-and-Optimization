@@ -119,13 +119,6 @@ def move_model_inputs(batch: Dict, device: torch.device) -> Dict:
     }
 
 
-def answer_token_count(model, answers: Sequence[str]) -> int:
-    return sum(
-        len(model.tokenizer.encode(answer.strip(), add_special_tokens=False)) + 1
-        for answer in answers
-    )
-
-
 def average_trainable_gradients(
     parameters: Iterable[torch.nn.Parameter], world_size: int
 ) -> None:
@@ -314,6 +307,7 @@ def validate(model, loader: DataLoader, device: torch.device):
     local_nll = torch.zeros((), device=device, dtype=torch.float64)
     local_tokens = torch.zeros((), device=device, dtype=torch.float64)
     local_examples = torch.zeros((), device=device, dtype=torch.float64)
+    local_canonicalized = torch.zeros((), device=device, dtype=torch.float64)
     cache: Dict = {}
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         prototype = model.build_prototype_bank()
@@ -334,12 +328,14 @@ def validate(model, loader: DataLoader, device: torch.device):
             local_nll += outputs.loss.double() * tokens
             local_tokens += tokens
             local_examples += len(batch["answers"])
-    totals = torch.stack([local_nll, local_tokens, local_examples])
+            local_canonicalized += sum(batch["answer_was_canonicalized"])
+    totals = torch.stack([local_nll, local_tokens, local_examples, local_canonicalized])
     dist.all_reduce(totals, op=dist.ReduceOp.SUM)
     return {
         "answer_nll": (totals[0] / totals[1]).item(),
         "answer_tokens": int(totals[1].item()),
         "examples": int(totals[2].item()),
+        "canonicalized_teacher_targets": int(totals[3].item()),
     }
 
 
@@ -360,6 +356,12 @@ def parse_args():
         default=0,
         help="Run only N optimizer steps and write throughput/memory audit artifacts.",
     )
+    parser.add_argument(
+        "--benchmark-warmup-steps",
+        type=int,
+        default=0,
+        help="Execute this many unmeasured optimizer steps before the benchmark timer.",
+    )
     return parser.parse_args()
 
 
@@ -368,6 +370,10 @@ def main():
     config = MultiAxisConfig.load_json(args.config)
     if args.benchmark_optimizer_steps < 0:
         raise ValueError("--benchmark-optimizer-steps must be non-negative")
+    if args.benchmark_warmup_steps < 0:
+        raise ValueError("--benchmark-warmup-steps must be non-negative")
+    if args.benchmark_warmup_steps and not args.benchmark_optimizer_steps:
+        raise ValueError("Benchmark warmup requires --benchmark-optimizer-steps")
     if args.benchmark_optimizer_steps and args.resume:
         raise ValueError("A benchmark run cannot resume a formal training state")
     if config.llm.model_name != QWEN3_VL_MODEL_ID:
@@ -400,6 +406,7 @@ def main():
         image_root=args.image_root,
         require_image=config.vision.enabled,
         renderer_version=config.vision.renderer_version,
+        normalize_teacher_targets=config.training.normalize_teacher_targets,
     )
     train_dataset = ManifestDataset(
         Path(args.manifest_dir) / "train.jsonl", **dataset_kwargs
@@ -503,6 +510,11 @@ def main():
                 "steps_per_epoch": steps_per_epoch,
                 "total_optimizer_steps": total_steps,
                 "warmup_steps": warmup_steps,
+                "benchmark_warmup_optimizer_steps": args.benchmark_warmup_steps,
+                "teacher_target_normalization": {
+                    "enabled": config.training.normalize_teacher_targets,
+                    "contract": "mc-answer-a-d_tf-yes-no_oe-three-sections-v1",
+                },
             }
         )
         (output_dir / "run_manifest.json").write_text(
@@ -511,10 +523,10 @@ def main():
 
     dist.barrier()
     benchmark_start = None
-    if args.benchmark_optimizer_steps:
-        torch.cuda.reset_peak_memory_stats(device)
-        dist.barrier()
-        benchmark_start = time.perf_counter()
+    benchmark_loss_sum = 0.0
+    benchmark_tokens = 0
+    benchmark_examples = 0
+    benchmark_visual_tokens = 0
 
     for epoch in range(start_epoch, config.training.epochs + 1):
         train_sampler.set_epoch(epoch)
@@ -524,8 +536,18 @@ def main():
         epoch_loss_sum = 0.0
         epoch_tokens = 0
         epoch_examples = 0
+        epoch_canonicalized = 0
+        epoch_visual_tokens = 0
         cache: Dict = {}
         while remaining:
+            if (
+                args.benchmark_optimizer_steps
+                and benchmark_start is None
+                and global_step == args.benchmark_warmup_steps
+            ):
+                torch.cuda.reset_peak_memory_stats(device)
+                dist.barrier()
+                benchmark_start = time.perf_counter()
             group_size = min(config.training.accumulation_steps, remaining)
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast("cuda", dtype=torch.bfloat16):
@@ -558,10 +580,17 @@ def main():
                 scaled_loss.backward()
                 tokens = outputs.supervised_token_count
                 group_visual_tokens += outputs.visual_token_count
+                epoch_visual_tokens += outputs.visual_token_count
                 epoch_loss_sum += outputs.loss.detach().item() * tokens
                 epoch_tokens += tokens
                 epoch_examples += len(batch["answers"])
+                epoch_canonicalized += sum(batch["answer_was_canonicalized"])
                 group_loss += outputs.loss.detach().item()
+                if benchmark_start is not None:
+                    benchmark_loss_sum += outputs.loss.detach().item() * tokens
+                    benchmark_tokens += tokens
+                    benchmark_examples += len(batch["answers"])
+                    benchmark_visual_tokens += outputs.visual_token_count
             if prototype_leaf.grad is None:
                 raise RuntimeError("Cached prototype bank did not receive a gradient")
             prototype_graph.backward(prototype_leaf.grad)
@@ -597,12 +626,13 @@ def main():
 
             if (
                 args.benchmark_optimizer_steps
-                and global_step >= args.benchmark_optimizer_steps
+                and global_step
+                >= args.benchmark_warmup_steps + args.benchmark_optimizer_steps
             ):
                 dist.barrier()
                 if benchmark_start is None:
                     raise AssertionError("Benchmark timer was not initialized")
-                local_benchmark = torch.tensor(
+                local_performance = torch.tensor(
                     [
                         time.perf_counter() - benchmark_start,
                         float(torch.cuda.max_memory_allocated(device)),
@@ -611,27 +641,47 @@ def main():
                     device=device,
                     dtype=torch.float64,
                 )
-                dist.all_reduce(local_benchmark, op=dist.ReduceOp.MAX)
-                elapsed_seconds = float(local_benchmark[0].item())
+                local_statistics = torch.tensor(
+                    [
+                        benchmark_loss_sum,
+                        benchmark_tokens,
+                        benchmark_examples,
+                        benchmark_visual_tokens,
+                    ],
+                    device=device,
+                    dtype=torch.float64,
+                )
+                dist.all_reduce(local_performance, op=dist.ReduceOp.MAX)
+                dist.all_reduce(local_statistics, op=dist.ReduceOp.SUM)
+                elapsed_seconds = float(local_performance[0].item())
+                measured_steps = args.benchmark_optimizer_steps
                 summary = {
                     "status": "complete",
-                    "optimizer_steps": global_step,
+                    "optimizer_steps": measured_steps,
+                    "warmup_optimizer_steps": args.benchmark_warmup_steps,
+                    "total_optimizer_steps_executed": global_step,
                     "micro_batch_size": config.training.micro_batch_size,
                     "accumulation_steps": config.training.accumulation_steps,
                     "world_size": world_size,
                     "effective_batch_size": config.training.effective_batch_size,
                     "elapsed_seconds_max_rank": elapsed_seconds,
-                    "optimizer_steps_per_second": global_step / elapsed_seconds,
+                    "optimizer_steps_per_second": measured_steps / elapsed_seconds,
                     "training_examples_per_second": (
-                        global_step
-                        * config.training.effective_batch_size
-                        / elapsed_seconds
+                        float(local_statistics[2].item()) / elapsed_seconds
+                    ),
+                    "measured_answer_nll": float(
+                        local_statistics[0].item() / local_statistics[1].item()
+                    ),
+                    "measured_answer_tokens": int(local_statistics[1].item()),
+                    "measured_examples": int(local_statistics[2].item()),
+                    "visual_tokens_per_example": float(
+                        local_statistics[3].item() / local_statistics[2].item()
                     ),
                     "max_memory_allocated_mib_max_rank": float(
-                        local_benchmark[1].item() / (1024**2)
+                        local_performance[1].item() / (1024**2)
                     ),
                     "max_memory_reserved_mib_max_rank": float(
-                        local_benchmark[2].item() / (1024**2)
+                        local_performance[2].item() / (1024**2)
                     ),
                     "flash_attention_audit": attention_audit,
                 }
@@ -653,7 +703,13 @@ def main():
                 return
 
         train_totals = torch.tensor(
-            [epoch_loss_sum, epoch_tokens, epoch_examples],
+            [
+                epoch_loss_sum,
+                epoch_tokens,
+                epoch_examples,
+                epoch_canonicalized,
+                epoch_visual_tokens,
+            ],
             device=device,
             dtype=torch.float64,
         )
@@ -667,9 +723,18 @@ def main():
                 "train_answer_nll": train_nll,
                 "train_answer_tokens": int(train_totals[1].item()),
                 "train_examples_with_sampler_padding": int(train_totals[2].item()),
+                "train_canonicalized_teacher_targets_with_sampler_padding": int(
+                    train_totals[3].item()
+                ),
+                "train_visual_tokens_per_example": float(
+                    train_totals[4].item() / train_totals[2].item()
+                ),
                 "validation_answer_nll": validation["answer_nll"],
                 "validation_answer_tokens": validation["answer_tokens"],
                 "validation_examples": validation["examples"],
+                "validation_canonicalized_teacher_targets": validation[
+                    "canonicalized_teacher_targets"
+                ],
                 "learning_rate": scheduler.get_last_lr()[0],
             }
             append_jsonl(output_dir / "epochs.jsonl", epoch_record)

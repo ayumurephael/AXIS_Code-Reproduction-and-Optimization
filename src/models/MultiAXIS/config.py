@@ -20,6 +20,16 @@ FORMAL_DISTRIBUTED_PROFILES = {
     (8, 4, 1, 25): 32,
     (8, 6, 1, 25): 48,
     (32, 1, 1, 25): 32,
+    (8, 2, 2, 20): 32,
+    (8, 3, 1, 20): 24,
+    (8, 3, 2, 20): 48,
+    (8, 4, 1, 20): 32,
+    (8, 6, 1, 20): 48,
+    (16, 1, 2, 20): 32,
+    (16, 2, 1, 20): 32,
+    (16, 3, 1, 20): 48,
+    (16, 4, 1, 20): 64,
+    (32, 1, 1, 20): 32,
 }
 
 
@@ -78,7 +88,7 @@ class VisionConfig:
     enabled: bool = False
     min_pixels: int = 65_536
     max_pixels: int = 16_777_216
-    runtime_max_pixels: int = 4_194_304
+    runtime_max_pixels: int = 2_097_152
     renderer_dpi: int = 600
     renderer_version: str = "multi-axis-vl-render-v1"
     require_mm_token_type_ids: bool = True
@@ -104,20 +114,21 @@ class VisionConfig:
 
 @dataclass
 class TrainingConfig:
-    epochs: int = 25
+    epochs: int = 20
     seed: int = 42
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     warmup_ratio: float = 0.05
     gradient_clip_norm: float = 1.0
-    micro_batch_size: int = 6
-    accumulation_steps: int = 1
+    micro_batch_size: int = 2
+    accumulation_steps: int = 2
     expected_world_size: int = 8
     expected_nodes: int = 1
-    num_workers: int = 2
+    num_workers: int = 4
     validation_fraction: float = 0.10
     select_by: str = "validation_answer_nll"
     early_stopping: bool = False
+    normalize_teacher_targets: bool = True
 
     @property
     def effective_batch_size(self) -> int:
@@ -131,6 +142,10 @@ class TrainingConfig:
         if self.early_stopping:
             raise ValueError(
                 "The confirmed protocol runs all configured epochs without early stopping."
+            )
+        if not self.normalize_teacher_targets:
+            raise ValueError(
+                "Formal training requires canonical MC/TF/OE teacher targets."
             )
         if self.select_by != "validation_answer_nll":
             raise ValueError(

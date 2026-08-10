@@ -14,6 +14,7 @@ import torch.distributed as dist
 from src.models.MultiAXIS.config import MultiAxisConfig
 from src.models.MultiAXIS.data import ManifestDataset, collate_multiaxis
 from src.models.MultiAXIS.model import MultiAxisForConditionalGeneration
+from src.models.MultiAXIS.response_contracts import response_contract_error
 from src.models.MultiAXIS.timercd import sha256_file
 from tools.multi_axis.datasets import (
     OFFICIAL_BIAS_NEUTRALIZED_DATASETS,
@@ -149,6 +150,9 @@ def run_dataset(
                 "dataset": dataset_name,
                 "question_group": sample["question_group"],
                 "raw_response": response,
+                "contract_error": response_contract_error(
+                    response, sample["question_group"]
+                ),
                 "generation_seconds": time.monotonic() - started,
                 "model": model.config.llm.model_name,
                 "image_id": sample["image_id"] if model.config.vision.enabled else None,

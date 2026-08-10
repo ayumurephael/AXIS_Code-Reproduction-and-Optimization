@@ -7,68 +7,92 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
+from .response_contracts import OUTPUT_CONTRACTS
+
 
 STEP_TOKEN = "<STEP_HINT>"
 JOINT_TOKEN = "<JOINT_HINT>"
 FIXED_TOKEN = "<FIXED_HINT>"
 HINT_TOKENS = (FIXED_TOKEN, STEP_TOKEN, JOINT_TOKEN)
 
-SYSTEM_TEXT = """You are a multivariate time-series analyst.
+MULTIMODAL_SYSTEM_TEXT = """You are an expert in multivariate time-series analysis. Answer the exact
+question using the visual, numeric, and learned contextual evidence supplied
+in the user message.
 
-The plotted series and the numeric Window are observable evidence.
-Step-Local and Joint-Local are learned model hints, not ground-truth labels.
-Fixed Hint provides task-level prior information.
+The figure shows the complete per-channel-normalized sequence, while the
+numeric Window lists the target-interval subset of the same normalized
+measurements. They are two representations of the same observations, not
+independent confirmations.
 
-Use the figure for global shape and cross-channel comparison.
-Use the numeric Window for exact values and exact time positions.
-If a visual impression conflicts with an exact numeric statement,
-use the numeric Window for the numeric claim.
+Use the figure to compare temporal shape, surrounding context, relative
+timing, and co-movement across channels. Use the numeric Window for explicit
+channel-aligned values and exact time indices. When a value visually estimated
+from the figure differs from a listed Window value, use the listed value for
+the numeric claim.
 
-Do not mention image files, prompt tokens, hidden embeddings,
-or the internal names of the hints in the answer.
-Follow the Output Contract exactly."""
+Treat learned contextual hints as supporting model evidence, not as
+ground-truth labels or calibrated anomaly probabilities. Treat task-prior
+hints as general task information rather than sample-specific facts.
 
-SYSTEM_TEXT_IMAGE_OFF = """You are a multivariate time-series analyst.
+Return only the visible final answer and its evidence-based explanation.
+Do not expose private chain-of-thought, scratch work, hidden-reasoning tags,
+placeholder tokens, image paths, or internal representations. Follow the
+Output Contract in the user message exactly."""
 
-The numeric Window is observable evidence.
-Step-Local and Joint-Local are learned model hints, not ground-truth labels.
-Fixed Hint provides task-level prior information.
+TEXT_SYSTEM_TEXT = """You are an expert in multivariate time-series analysis. Answer the exact
+question using the numeric and learned contextual evidence supplied in the
+user message.
 
-Use all channels jointly for the overall judgment.
-Use the numeric Window for exact values and exact time positions.
+Treat learned contextual hints as supporting model evidence, not as
+ground-truth labels or calibrated anomaly probabilities. Treat task-prior
+hints as general task information rather than sample-specific facts.
 
-Do not mention prompt tokens, hidden embeddings,
-or the internal names of the hints in the answer.
-Follow the Output Contract exactly."""
+Return only the visible final answer and its evidence-based explanation.
+Do not expose private chain-of-thought, scratch work, hidden-reasoning tags,
+placeholder tokens, or internal representations. Follow the Output Contract
+in the user message exactly."""
 
-VISUAL_EVIDENCE = """### Visual Evidence
-The attached figure shows the same per-channel normalized multivariate
-series used by TimeRCD and by the numeric Window below.
+USER_PREAMBLE = """You are solving a multivariate time-series question.
 
-Each row represents one channel. The row order is identical to the
-channel order in the Window. The horizontal axis is the global time index.
-The black curve is the surrounding sequence. The dark-blue segment
-and pale-yellow background mark exactly the target interval [{start}, {end}),
-that is, positions {start} through {last}.
+Return only the visible final response required by the Output Contract.
+Do not expose private chain-of-thought, scratch work, or hidden-reasoning tags."""
 
-The colors indicate location only; they do not indicate whether the
-interval is anomalous. The figure contains no labels, anomaly scores,
-root-cause annotations, or detector decisions.
+MULTIMODAL_PREFIX = """### Question
+{question}
 
-Use the figure to compare global patterns and multiple channels jointly.
-Use the Window below for exact values and exact locations."""
+### Visual evidence
+The following figure shows the complete per-channel-normalized multivariate
+sequence. The highlighted segment is the target interval whose explicit
+numeric values and learned contextual hints are provided after the figure.
+Inspect it specifically for evidence needed to answer the question above."""
 
-OUTPUT_CONTRACTS = {
-    "MC": (
-        "Begin with `Answer: X`, where X is exactly one option letter from the "
-        "question. Then give a concise evidence-based explanation."
-    ),
-    "TF": (
-        "Begin with exactly `Answer: True` or `Answer: False`. Then give a "
-        "concise evidence-based justification."
-    ),
-    "OE": "Give a direct natural-language answer and a concise evidence-based explanation.",
-}
+FIGURE_NOTE = """### Figure note
+Each row represents one channel, and the row label is its channel ID. Row order
+is identical to the channel order in the numeric Window. The horizontal axis is
+the global time index. The black curve shows surrounding context. The dark-blue
+segment and pale-yellow background mark exactly the half-open target interval
+[{start}, {end}), that is, positions {start} through {last}.
+
+Values are normalized independently within each channel. Plot colors indicate
+location and rendering roles only; they do not indicate anomaly status,
+severity, affected scope, root cause, or causal direction."""
+
+EVIDENCE_RULES = """### Evidence-use rules
+The numeric Window lists observed target-interval values after per-channel
+normalization, multiplication by 100, and integer rounding. Each numeric value
+is immediately followed by one Step-Local hint for the same channel and the
+same time step.
+
+Step-Local hints provide fine-grained contextual evidence.
+The Joint-Local hint combines evidence across all channels and all time steps
+in the target interval.
+Fixed hints contain task-level priors, not sample-specific facts.
+
+Use all channels jointly when making the overall judgment.
+Use the per-channel Step-Local evidence when identifying channels
+or time positions.
+Do not treat the largest deviation as automatically being the root cause.
+Do not infer a causal direction solely from anomaly magnitude."""
 
 
 @dataclass
@@ -103,7 +127,7 @@ class MultiAxisPromptBuilder:
         include_joint: bool = True,
         use_images: bool = True,
         min_pixels: int = 65_536,
-        max_pixels: int = 4_194_304,
+        max_pixels: int = 2_097_152,
     ):
         self.processor = processor
         self.tokenizer = getattr(processor, "tokenizer", processor)
@@ -162,6 +186,47 @@ class MultiAxisPromptBuilder:
         if question_group not in OUTPUT_CONTRACTS:
             raise ValueError(f"Unknown question group: {question_group}")
 
+        visual = self.use_images if include_visual is None else bool(include_visual)
+        if visual:
+            prefix, suffix = self.build_multimodal_parts(
+                question,
+                start,
+                end,
+                window_values,
+                identifiers,
+                question_group,
+            )
+            return f"{prefix}\n\n{suffix}"
+
+        fixed, channel_blocks = self._evidence_fields(
+            start, window_values, identifiers
+        )
+        sections = [
+            USER_PREAMBLE,
+            f"### Question\n{question.strip()}",
+            EVIDENCE_RULES,
+            f"### Task-prior hints\n{fixed}",
+            (
+                "### Target window\n"
+                f"Global interval: [{start}, {end})\n"
+                f"Window length: {length}\n"
+                "Each value is normalized within its own channel, multiplied by 100, "
+                "and rounded to an integer."
+            ),
+            "### Channel-aligned Window and Step-Local evidence\n"
+            + "\n\n".join(channel_blocks),
+        ]
+        if self.include_joint:
+            sections.append(f"### Joint-Local multivariate evidence\n{JOINT_TOKEN}")
+        sections.append(OUTPUT_CONTRACTS[question_group])
+        return "\n\n".join(sections)
+
+    def _evidence_fields(
+        self,
+        start: int,
+        window_values: Sequence[Sequence[int]],
+        identifiers: Sequence[str],
+    ) -> Tuple[str, List[str]]:
         fixed = " ".join([FIXED_TOKEN] * self.fixed_tokens)
         channel_blocks = []
         for identifier, values in zip(identifiers, window_values):
@@ -171,43 +236,81 @@ class MultiAxisPromptBuilder:
                 for relative, value in enumerate(values)
             )
             channel_blocks.append("\n".join(lines))
-        sections = [f"### Question\n{question.strip()}"]
-        visual = self.use_images if include_visual is None else bool(include_visual)
-        if visual:
-            sections.append(
-                VISUAL_EVIDENCE.format(start=start, end=end, last=end - 1)
-            )
-        sections.extend(
-            [
-                f"### Fixed Hint\n{fixed}",
-                (
-                    "### Target Window\n"
-                    f"Target interval: [{start}, {end})\n"
-                    "Values are per-channel normalized values multiplied by 100 and rounded "
-                    "to integers.\n\n"
-                    + "\n\n".join(channel_blocks)
-                ),
-            ]
-        )
-        if self.include_joint:
-            sections.append(f"### Joint-Local Hint\n{JOINT_TOKEN}")
-        sections.append(
-            f"### Output Contract\n{OUTPUT_CONTRACTS[question_group]}\n\nAnswer:"
-        )
-        return "\n\n".join(sections)
+        return fixed, channel_blocks
 
-    def _messages(self, user_text: str, image: Any = None) -> List[Dict[str, Any]]:
+    def build_multimodal_parts(
+        self,
+        question: str,
+        start: int,
+        end: int,
+        window_values: Sequence[Sequence[int]],
+        channel_ids: Sequence[str],
+        question_group: str,
+    ) -> Tuple[str, str]:
+        # Reuse build_text's fail-closed validation without recursively selecting
+        # the visual path.
+        if not question or not question.strip():
+            raise ValueError("Question is empty")
+        length = int(end) - int(start)
+        if length <= 0:
+            raise ValueError(f"Invalid target interval [{start}, {end})")
+        if not window_values or any(len(channel) != length for channel in window_values):
+            raise ValueError("Every channel must contain exactly end-start target-window values")
+        if len(channel_ids) != len(window_values):
+            raise ValueError("Channel id count does not match the numeric Window")
+        if question_group not in OUTPUT_CONTRACTS:
+            raise ValueError(f"Unknown question group: {question_group}")
+        fixed, channel_blocks = self._evidence_fields(
+            start, window_values, channel_ids
+        )
+        prefix = MULTIMODAL_PREFIX.format(question=question.strip())
+        suffix_sections = [
+            FIGURE_NOTE.format(start=start, end=end, last=end - 1),
+            EVIDENCE_RULES,
+            f"### Task-prior hints\n{fixed}",
+            (
+                "### Target window\n"
+                f"Global interval: [{start}, {end})\n"
+                f"Window length: {length}\n"
+                "Each value is normalized within its own channel, multiplied by 100, "
+                "and rounded to an integer."
+            ),
+            "### Channel-aligned Window and Step-Local evidence\n"
+            + "\n\n".join(channel_blocks),
+        ]
+        if self.include_joint:
+            suffix_sections.append(
+                f"### Joint-Local multivariate evidence\n{JOINT_TOKEN}"
+            )
+        # OUTPUT_CONTRACTS includes its heading, so the suffix must not add one.
+        suffix_sections.append(OUTPUT_CONTRACTS[question_group])
+        return prefix, "\n\n".join(suffix_sections)
+
+    def _messages(
+        self,
+        user_text: str,
+        image: Any = None,
+        *,
+        visual_prefix: Optional[str] = None,
+        visual_suffix: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         if image is None:
             # Text-only tokenizers such as DeepSeek/Qwen3 use chat templates that
             # concatenate message content directly and therefore require strings.
             user_content: Any = user_text
         else:
+            if visual_prefix is None or visual_suffix is None:
+                raise ValueError("Image messages require both text prefix and suffix")
             user_content = [
+                {"type": "text", "text": visual_prefix},
                 {"type": "image", "image": image},
-                {"type": "text", "text": user_text},
+                {"type": "text", "text": visual_suffix},
             ]
         return [
-            {"role": "system", "content": SYSTEM_TEXT if image is not None else SYSTEM_TEXT_IMAGE_OFF},
+            {
+                "role": "system",
+                "content": MULTIMODAL_SYSTEM_TEXT if image is not None else TEXT_SYSTEM_TEXT,
+            },
             {"role": "user", "content": user_content},
         ]
 
@@ -217,13 +320,28 @@ class MultiAxisPromptBuilder:
             renderer = getattr(self.tokenizer, "apply_chat_template", None)
         if renderer is None:
             raise TypeError("Formal prompt construction requires a native chat template")
+        template = getattr(self.processor, "chat_template", None)
+        if template is None:
+            template = getattr(self.tokenizer, "chat_template", "")
+        if isinstance(template, dict):
+            template = "\n".join(map(str, template.values()))
+        kwargs = {"enable_thinking": False} if "enable_thinking" in str(template) else {}
         return str(
             renderer(
                 messages,
                 tokenize=False,
                 add_generation_prompt=add_generation_prompt,
+                **kwargs,
             )
         )
+
+    def forbidden_reasoning_token_sequences(self) -> List[List[int]]:
+        sequences: List[List[int]] = []
+        for marker in ("<think>", "</think>"):
+            ids = list(self.tokenizer.encode(marker, add_special_tokens=False))
+            if ids and ids not in sequences:
+                sequences.append(ids)
+        return sequences
 
     def _open_images(
         self, image_paths: Sequence[Optional[str]]
@@ -332,17 +450,33 @@ class MultiAxisPromptBuilder:
         full_texts: List[str] = []
         for index, question in enumerate(questions):
             start, end = intervals[index]
-            user_text = self.build_text(
-                question,
-                start,
-                end,
-                window_values[index],
-                channel_ids[index],
-                question_groups[index],
-                include_visual=self.use_images,
-            )
             image = images[index] if images else None
-            messages = self._messages(user_text, image)
+            if image is None:
+                user_text = self.build_text(
+                    question,
+                    start,
+                    end,
+                    window_values[index],
+                    channel_ids[index],
+                    question_groups[index],
+                    include_visual=False,
+                )
+                messages = self._messages(user_text)
+            else:
+                visual_prefix, visual_suffix = self.build_multimodal_parts(
+                    question,
+                    start,
+                    end,
+                    window_values[index],
+                    channel_ids[index],
+                    question_groups[index],
+                )
+                messages = self._messages(
+                    "",
+                    image,
+                    visual_prefix=visual_prefix,
+                    visual_suffix=visual_suffix,
+                )
             prompt_text = self._render_chat(messages, add_generation_prompt=True)
             if image_paths[index] and str(image_paths[index]) in prompt_text:
                 raise RuntimeError("A local image path leaked into the textual prompt")

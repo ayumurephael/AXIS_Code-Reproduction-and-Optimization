@@ -850,6 +850,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
             if generation_overrides:
                 kwargs.update(dict(generation_overrides))
             hint_bad_words = [[self.prompt_builder.token_ids[token]] for token in HINT_TOKENS]
+            hint_bad_words.extend(
+                self.prompt_builder.forbidden_reasoning_token_sequences()
+            )
             supplied_bad_words = kwargs.pop("bad_words_ids", None)
             if supplied_bad_words:
                 hint_bad_words.extend(supplied_bad_words)

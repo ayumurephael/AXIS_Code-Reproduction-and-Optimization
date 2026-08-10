@@ -7,6 +7,12 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from src.models.MultiAXIS.response_contracts import (
+    open_response_parseable,
+    parse_response_label,
+    response_contract_error,
+)
+
 from tools.multi_axis.datasets import (
     OFFICIAL_BIAS_NEUTRALIZED_DATASETS,
     SUPPORTED_EVALUATION_DATASETS,
@@ -45,12 +51,7 @@ def canonical_label(value: Any) -> Optional[str]:
 
 
 def parse_prediction(text: str, question_group: str) -> Optional[str]:
-    patterns = CHOICE_PATTERNS if question_group == "MC" else JUDGMENT_PATTERNS
-    for pattern in patterns:
-        match = pattern.search(text or "")
-        if match:
-            return canonical_label(match.group(1))
-    return None
+    return parse_response_label(text, question_group)
 
 
 def teacher_model_answer(reference: Dict[str, Any]) -> str:
@@ -60,11 +61,16 @@ def teacher_model_answer(reference: Dict[str, Any]) -> str:
 
 
 def target_label(reference: Dict[str, Any], question_group: str) -> Optional[str]:
-    teacher_label = parse_prediction(
-        teacher_model_answer(reference), question_group
-    )
-    if teacher_label is not None:
-        return teacher_label
+    # Teacher references predate the strict new output contract, so keep their
+    # label recovery permissive while model predictions remain first-line exact.
+    teacher_answer = teacher_model_answer(reference)
+    patterns = CHOICE_PATTERNS if question_group == "MC" else JUDGMENT_PATTERNS
+    for pattern in patterns:
+        match = pattern.search(teacher_answer)
+        if match:
+            teacher_label = canonical_label(match.group(1))
+            if teacher_label is not None:
+                return teacher_label
     output = reference.get("target_output") or {}
     fact = output.get("fact_check") or {}
     if question_group == "MC":
@@ -73,12 +79,7 @@ def target_label(reference: Dict[str, Any], question_group: str) -> Optional[str
 
 
 def open_parseable(text: str) -> bool:
-    cleaned = (text or "").strip()
-    if not cleaned:
-        return False
-    lowered = cleaned.lower()
-    failure_markers = ("generation failed", "api error", "traceback", "<empty response>")
-    return not any(marker in lowered for marker in failure_markers)
+    return open_response_parseable(text)
 
 
 def read_jsonl(path: Path):
@@ -159,7 +160,7 @@ def main():
                 raise RuntimeError(f"{dataset}: missing target label at {index}")
             exact = predicted == target if group in ("MC", "TF") else None
             parseable = open_parseable(prediction["raw_response"]) if group == "OE" else None
-            rows.append({"dataset": dataset, "index": index, "sample_id": reference["sample_id"], "question_group": group, "predicted_label": predicted, "target_label": target, "exact_match": exact, "parseable": parseable, "success": exact if group in ("MC", "TF") else parseable})
+            rows.append({"dataset": dataset, "index": index, "sample_id": reference["sample_id"], "question_group": group, "predicted_label": predicted, "target_label": target, "exact_match": exact, "parseable": parseable, "contract_error": response_contract_error(prediction["raw_response"], group), "success": exact if group in ("MC", "TF") else parseable})
     with (output_dir / "label_metrics.jsonl").open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")

@@ -10,6 +10,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from .response_contracts import canonicalize_teacher_answer, response_contract_error
+
 
 TEACHER_ANSWER_FIELDS = ("model_answer", "teacher_answer_llm", "windows_0_answer", "answer")
 IMAGE_LAYOUT_VERSION = "multi-axis-vl-render-v1"
@@ -95,6 +97,18 @@ def extract_channel_ids(row: Dict[str, Any], channels: int) -> List[str]:
     return identifiers
 
 
+def structured_is_anomalous(row: Dict[str, Any]) -> bool | None:
+    candidates = [
+        row.get("is_anomalous"),
+        (row.get("target_output") or {}).get("is_anomalous"),
+        ((row.get("target_output") or {}).get("fact_check") or {}).get("is_anomalous"),
+    ]
+    for value in candidates:
+        if isinstance(value, bool):
+            return value
+    return None
+
+
 def visual_image_id(
     base_sample_id: str,
     interval: Tuple[int, int],
@@ -139,6 +153,7 @@ class ManifestDataset(Dataset):
         image_root: str | Path | None = None,
         require_image: bool = False,
         renderer_version: str = IMAGE_LAYOUT_VERSION,
+        normalize_teacher_targets: bool = False,
     ):
         self.manifest_path = Path(manifest_path)
         self.data_root = Path(data_root)
@@ -147,6 +162,7 @@ class ManifestDataset(Dataset):
         self.image_root = Path(image_root) if image_root is not None else None
         self.require_image = bool(require_image)
         self.renderer_version = str(renderer_version)
+        self.normalize_teacher_targets = bool(normalize_teacher_targets)
         index_path = self.manifest_path.with_suffix(self.manifest_path.suffix + ".idx.json")
         self.offsets = json.loads(index_path.read_text(encoding="utf-8"))
         groups_path = self.manifest_path.with_suffix(self.manifest_path.suffix + ".groups.json")
@@ -209,10 +225,23 @@ class ManifestDataset(Dataset):
             raise FileNotFoundError(
                 f"Missing pre-rendered VLM image for sample {record['sample_id']}: {image_path}"
             )
+        answer = record.get("teacher_answer")
+        answer_was_canonicalized = False
+        if self.normalize_teacher_targets and answer:
+            canonical = canonicalize_teacher_answer(
+                answer,
+                record["question_group"],
+                structured_is_anomalous=structured_is_anomalous(row),
+            )
+            answer_was_canonicalized = canonical != str(answer).strip()
+            answer = canonical
+            if response_contract_error(answer, record["question_group"]) is not None:
+                raise AssertionError("Canonicalized teacher answer violates its output contract")
         sample = {
             "normalized_series": normalized,
             "question": record["question"],
-            "answer": record.get("teacher_answer"),
+            "answer": answer,
+            "answer_was_canonicalized": answer_was_canonicalized,
             "interval": interval,
             "window_values": serialized,
             "time_count": values.shape[0],
@@ -266,4 +295,7 @@ def collate_multiaxis(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "label_references": [sample.get("label_reference") for sample in samples],
         "image_ids": [sample["image_id"] for sample in samples],
         "image_paths": [sample.get("image_path") for sample in samples],
+        "answer_was_canonicalized": [
+            sample.get("answer_was_canonicalized", False) for sample in samples
+        ],
     }
