@@ -1,33 +1,36 @@
-# Multi-AXIS implementation and formal experiment
+# Multi-AXIS-VL implementation and formal experiment
 
-This directory contains the full multivariate AXIS Phase-II pipeline specified in `多元 AXIS 架构.md`. The implementation keeps TimeRCD and the language model frozen, trains only the Hint Tuner, preserves all valid channel-by-time evidence, and never truncates a prompt.
+This branch extends the multivariate AXIS Phase-II pipeline according to `多元 AXIS 架构_VLM版.md`. It keeps TimeRCD and Qwen3-VL frozen in eval mode, trains only the Hint Tuner, preserves every channel-by-time Step hint, and never truncates a prompt. The reference vision code is used only for generic engineering patterns; the architecture and prompt contract come from the VLM method document.
 
 ## Registered formal protocol
 
-- Student LLM: `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B`.
-- Also supported by the same model interface: `Qwen/Qwen3.5-9B`.
+- Formal backbone: exactly `Qwen/Qwen3-VL-8B-Instruct`, loaded with `Qwen3VLForConditionalGeneration` and `AutoProcessor`.
+- Full-VLM and image-off controls use the same Qwen3-VL backbone and native chat template. The 25-epoch formal experiment uses Full-VLM only.
+- The official processor range is 65,536–16,777,216 pixels, as recorded by the model's [preprocessor configuration](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct/blob/main/preprocessor_config.json). The formal runtime cap is a separately audited value inside that range (4,194,304 pixels in the registered benchmark configurations), and every processor call receives it explicitly because Transformers 4.57 can otherwise recover the construction-time maximum from tokenizer init metadata. Every run records both official bounds, the runtime cap, and post-resize visual-token counts.
+- Offline images consume the exact already-normalized `normalized_series`: one channel per row, all rows with global time axes, context black, target dark blue, target background pale yellow, half-open boundaries `s-0.5/e-0.5`, Times New Roman, and 600 dpi. They contain no labels, score curve, root-cause annotation, or detector decision.
 - Frozen multivariate TimeRCD encoder and anomaly head, loaded strictly from the supplied checkpoint.
 - Full Phase D architecture: Step-Local, anomaly evidence, Joint-Local, 30 Fixed hints, 1,024 vocabulary prototypes.
 - All ordinary cross-attention uses the CUDA FlashAttention backend; CPU exists only as a unit-test fallback.
 - Teacher supervision is answer-only NLL over the natural-language `model_answer` field only. The 17 empty `model_answer` rows are filtered; short-label fields are never used as a training fallback.
 - Training alignment follows the authoritative 62-shard teacher summary: 67,773 rows are matched one-to-one by normalized question text within each shard, and the remaining 47 are supplied by a SHA-256-audited same-index recovery bundle derived from the raw teacher records.
 - Split is by `base_sample_id`, 90/10, seed 42, with zero group overlap.
-- Current four-GPU formal experiment: exactly 20 epochs, no early stopping. The preserved five-GPU profile remains exactly 40 epochs. In both cases, select the lowest validation answer-token NLL only after all configured epochs.
+- VLM formal experiment: exactly 25 epochs with a global 8×H800 world formed by two nodes and four allocated H800s per node, seed 42, grouped 90/10 manifests, no early stopping, and minimum validation answer-token NLL selected only after epoch 25.
 - Formal inference covers 478new, SMD, SWaT, LEMMA-RCA, and VTA.
 - MC and TF use final-label exact match; OE uses parseability. Results are emitted overall, by question type, and by dataset.
 - Five Judges score every test set. GPT-5.4 is the only Judge used for baseline deltas; the other four are used for cross-Judge robustness.
 
-The checked-in formal configuration records the actual world size and effective batch size. Do not change accumulation or world size after launch; a resumed run must use the same configuration.
+The checked-in formal configuration records the actual world size and effective batch size. Registered 8-GPU candidates are micro/accumulation 1/4, 2/2, and 4/1, all with global batch 32. Benchmark each in a separate directory and use the fastest candidate that fits all eight H800s; do not change the selected configuration after formal launch.
 
-The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. The preserved five-process/40-epoch profile uses micro-batch 1 and six-step accumulation for effective batch size 30. The four-process/20-epoch profile keeps effective batch size 32 and supports the registered benchmark candidates micro-batch/accumulation 1/8, 2/4, and 4/2. Formal launch uses the fastest candidate that fits all four selected GPUs. Model construction audits the resolved LLM backend, every identified LLM attention module, both FlashAttention kernel imports, and all Hint Tuner cross-attention modules; any eager fallback terminates the run.
+The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. The 8-process/25-epoch profile keeps effective batch size 32 and registers micro-batch/accumulation candidates 1/4, 2/2, and 4/1. Model construction audits the resolved text and vision attention backends, every identified VLM attention module, both FlashAttention kernel imports, and all Hint Tuner cross-attention modules; any eager fallback terminates the run.
 
 ## Components
 
-- `src/models/MultiAXIS/`: configuration, prompt construction, frozen TimeRCD wrapper, Flash cross-attention, Hint Tuner, and dual-LLM model wrapper.
+- `src/models/MultiAXIS/`: configuration, native Qwen3-VL chat/processor construction, frozen TimeRCD wrapper, Flash cross-attention, embedding-hook Hint injection, and Full-VLM/image-off model paths.
 - `tools/multi_axis/build_training_recovery.py`: reproducibly derives the 47-row, SHA-256-audited recovery bundle from the registered raw teacher records.
 - `tools/multi_axis/build_manifests.py`: deterministic pairing, filtering, grouped split, source hashes, random-access indices, and the five evaluation manifests.
-- tools/multi_axis/train.py: registered four- or five-process manual data parallelism, bounded batch-aware frozen-encoder cache, exact answer NLL, configured-epoch checkpoints, throughput/memory benchmark mode, FlashAttention runtime audit, and crash resume.
-- `tools/multi_axis/infer.py`: configured four- or five-GPU, group-preserving, crash-resumable generation and deterministic merge.
+- `tools/multi_axis/render_images.py`: deterministic, resumable, SHA-256-audited offline rendering from the exact normalized model array.
+- `tools/multi_axis/train.py`: registered eight-process manual data parallelism, bounded frozen-encoder cache, native multimodal forward with sparse exact answer NLL, eval-safe non-reentrant activation recomputation for the frozen 36-layer language decoder, 25-epoch checkpoints, profile benchmark mode, FlashAttention audit, and crash resume.
+- `tools/multi_axis/infer.py`: configured eight-GPU, group-preserving, crash-resumable native multimodal generation and deterministic merge.
 - `tools/multi_axis/label_metrics.py`: exact MC/TF label metrics and OE parse rate.
 - `tools/multi_axis/geval_runner.py`: crash-resilient five-Judge scoring with provider-specific probability handling.
 - `tools/multi_axis/aggregate_geval.py`: ten metrics for every dataset × Judge plus micro/macro and cross-Judge statistics.
@@ -36,14 +39,14 @@ The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=25
 
 ## Environment
 
-Use Linux, four or five visible NVIDIA H100 GPUs as selected by the formal configuration, BF16, PyTorch 2.5 or newer, Transformers 4.57 or newer, and FlashAttention compatible with the installed Torch/CUDA ABI. On a preconfigured server, preserve its PyTorch build and install the additional packages selectively instead of allowing pip to replace Torch.
+Use a single Slurm allocation spanning the confirmed H800 nodes (`g40` and `g44` for this formal run), with four NVIDIA H800s per node, BF16, PyTorch compatible with that cluster driver, Transformers 4.57 or newer, and FlashAttention compatible with the installed Torch/CUDA ABI. The two `torchrun` agents must join one rendezvous and one eight-rank NCCL process group; two unrelated four-rank jobs are not an eight-GPU experiment. Never install or run training on the login node.
 
 ```bash
-python -m pip install --upgrade "transformers>=4.57,<5" "openai>=1.99" "google-genai>=1.30" "httpx>=0.28" packaging psutil ninja
+python -m pip install --upgrade "transformers>=4.57,<5" "Pillow>=11" "matplotlib>=3.10" "openai>=1.99" "google-genai>=1.30" "httpx>=0.28" packaging psutil ninja
 python -m pip install --no-build-isolation --no-deps "flash-attn==2.7.4.post1"
 ```
 
-Before any formal work, verify that `torch.cuda.device_count()` equals the configuration's `expected_world_size`, that all visible devices are H100, BF16 is supported, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. Export `PYTHONPATH` to the repository root and put Hugging Face caches on a filesystem with enough space. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in the configuration and checkpoint metadata.
+Before any formal work, verify on every node that `torch.cuda.device_count()` equals `expected_world_size / expected_nodes` (four for the formal 2×4 topology), that the global process-group size equals `expected_world_size`, that all visible devices are H800, BF16 is supported, Times New Roman is discoverable by Matplotlib, `flash_attn` imports, and PyTorch Flash SDPA dispatch succeeds. Training and inference all-gather every rank's hostname, local rank, visible-device count, GPU name, memory and compute capability, then fail closed unless the topology is exactly two nodes by four distinct H800 ranks. When the cluster does not install Times New Roman system-wide, place the four authorized files `times.ttf`, `timesbd.ttf`, `timesi.ttf`, and `timesbi.ttf` in a private experiment asset directory and set `MULTI_AXIS_TIMES_FONT_DIR` to that directory. The renderer registers that exact bundle and records its per-file and aggregate SHA-256 provenance; an incomplete or incorrectly named bundle fails closed. Export `PYTHONPATH` to the repository root and put Hugging Face caches on WORK storage. For an audited offline snapshot, set `MULTI_AXIS_MODEL_PATH` to its local directory; the registered model ID remains unchanged in configuration and checkpoint metadata.
 
 ## Rebuild the audited recovery bundle
 
@@ -70,41 +73,56 @@ This must report 62 authoritative shards, 67,773 direct text matches, 47 audited
 
 ## Benchmark and run the registered formal epoch count
 
+First render every unique train/validation/evaluation window offline. This command never overwrites an audited image and resumes from its progress manifest:
+
+```bash
+python tools/multi_axis/render_images.py \
+  --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
+  --data-root /path/to/multi-axis-assets \
+  --manifest-dir /path/to/run/manifests \
+  --output-root /path/to/run/visuals
+```
+
 Release only the experiment's own verified reservation processes immediately before launch. Never terminate another user's process.
 
-Four-GPU profile (effective batch 32):
+Two-node, eight-H800 formal profile (micro batch 6, accumulation 1,
+effective batch 48); execute this once on each of the two Slurm tasks with the
+shared rendezvous variables exported by the allocation launcher:
 
 ```bash
-torchrun --standalone --nproc_per_node=4 tools/multi_axis/train.py \
-  --config experiments/multi_axis/formal_deepseek_20epochs_4gpu.json \
+torchrun --nnodes=2 --nproc_per_node=4 \
+  --node_rank="$SLURM_NODEID" \
+  --rdzv_backend=c10d --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+  tools/multi_axis/train.py \
+  --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
+  --image-root /path/to/run/visuals \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
   --output-dir /path/to/run/training
 ```
 
-Preserved five-GPU profile (effective batch 30):
+The audited memory-safe fallback is
+`formal_qwen3_vl_25epochs_8gpu_fallback_batch32.json` (micro batch 4,
+accumulation 1, effective batch 32). Use it only after preserving the failed
+batch-48 run evidence, and resume from epoch 0 in a separate experiment
+directory; never silently change batch size inside an existing run.
+
+To compare registered eight-GPU candidates, add `--benchmark-optimizer-steps N` and use a distinct output directory for each configuration. Benchmark mode writes `benchmark_summary.json` and exits without validation or formal checkpoints. To resume after an interruption, provide `--resume /path/to/run/training/last_train_state.pt`. A valid completion has `TRAINING_COMPLETE`, 25 `epochs.jsonl` records, 25 hint checkpoints, and `best_checkpoint.json` pointing to the minimum validation answer NLL.
+
+## Eight-GPU inference
+
+Read the selected checkpoint filename from `best_checkpoint.json`; do not select by test or Judge scores. Inference uses the same registered distributed profile as its training run:
 
 ```bash
-torchrun --standalone --nproc_per_node=5 tools/multi_axis/train.py \
-  --config experiments/multi_axis/formal_deepseek_40epochs.json \
+torchrun --nnodes=2 --nproc_per_node=4 \
+  --node_rank="$SLURM_NODEID" \
+  --rdzv_backend=c10d --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+  tools/multi_axis/infer.py \
+  --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
-  --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
-  --output-dir /path/to/run/training
-```
-
-To compare registered four-GPU candidates, add --benchmark-optimizer-steps N and use a distinct output directory for each configuration. Benchmark mode writes benchmark_summary.json and exits without validation or formal checkpoints. To resume a formal run after an interruption, provide --resume /path/to/run/training/last_train_state.pt. A valid completion has TRAINING_COMPLETE, one epochs.jsonl record and one hint checkpoint per configured epoch (20 for the current four-GPU experiment; 40 for the preserved five-GPU profile), and best_checkpoint.json pointing to the minimum validation answer NLL.
-
-## Four- or five-GPU inference
-
-Read the selected checkpoint filename from `best_checkpoint.json`; do not select by test or Judge scores. Inference uses the same registered distributed profile as its training run. The current four-GPU formal run uses:
-
-```bash
-torchrun --standalone --nproc_per_node=4 tools/multi_axis/infer.py \
-  --config experiments/multi_axis/formal_deepseek_20epochs_4gpu.json \
-  --data-root /path/to/multi-axis-assets \
-  --manifest-dir /path/to/run/manifests \
+  --image-root /path/to/run/visuals \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
   --hint-checkpoint /path/to/run/training/hint_epoch_XX.pt \
   --output-dir /path/to/run/predictions
@@ -152,8 +170,9 @@ python tools/multi_axis/aggregate_geval.py \
   --output-dir /path/to/run/aggregate
 
 python tools/multi_axis/audit_experiment.py \
-  --config experiments/multi_axis/formal_deepseek_20epochs_4gpu.json \
+  --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
   --manifest-dir /path/to/run/manifests \
+  --image-root /path/to/run/visuals \
   --run-dir /path/to/run/training \
   --predictions-dir /path/to/run/predictions \
   --judge-input-dir /path/to/run/judge_inputs \

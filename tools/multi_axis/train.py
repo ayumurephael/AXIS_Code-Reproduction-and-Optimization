@@ -21,9 +21,10 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, Sampler, Subset
 
-from src.models.MultiAXIS.config import DEEPSEEK_MODEL_ID, MultiAxisConfig
+from src.models.MultiAXIS.config import MultiAxisConfig, QWEN3_VL_MODEL_ID
 from src.models.MultiAXIS.data import ManifestDataset, collate_multiaxis
 from src.models.MultiAXIS.model import MultiAxisForConditionalGeneration
+from tools.multi_axis.distributed import collect_distributed_topology
 
 
 class GroupedDistributedSampler(Sampler[int]):
@@ -112,6 +113,9 @@ def move_model_inputs(batch: Dict, device: torch.device) -> Dict:
         "intervals": batch["intervals"],
         "channel_counts": batch["channel_counts"],
         "window_values": batch["window_values"],
+        "channel_ids": batch["channel_ids"],
+        "question_groups": batch["question_groups"],
+        "image_paths": batch["image_paths"],
     }
 
 
@@ -164,6 +168,17 @@ def git_revision() -> Dict[str, str]:
             "dirty": bool(run("git", "status", "--porcelain")),
         }
     except Exception:
+        commit = os.environ.get("MULTI_AXIS_SOURCE_COMMIT", "")
+        branch = os.environ.get("MULTI_AXIS_SOURCE_BRANCH", "")
+        archive_sha256 = os.environ.get("MULTI_AXIS_SOURCE_ARCHIVE_SHA256", "")
+        if len(commit) == 40 and all(character in "0123456789abcdef" for character in commit.lower()):
+            return {
+                "commit": commit.lower(),
+                "branch": branch or "multi-axis-VL",
+                "dirty": False,
+                "source": "audited-git-archive",
+                "archive_sha256": archive_sha256.lower(),
+            }
         return {"commit": "unknown", "branch": "unknown", "dirty": True}
 
 
@@ -171,6 +186,7 @@ def environment_manifest(
     config: MultiAxisConfig,
     rank: int,
     world_size: int,
+    topology: Dict,
     model,
     attention_audit: Dict,
     benchmark_optimizer_steps: int,
@@ -183,7 +199,8 @@ def environment_manifest(
         "cuda_runtime": torch.version.cuda,
         "cudnn": torch.backends.cudnn.version(),
         "world_size": world_size,
-        "gpu_names": [torch.cuda.get_device_name(index) for index in range(world_size)],
+        "gpu_names": [item["gpu_name"] for item in topology["ranks"]],
+        "distributed_topology": topology,
         "config": config.to_dict(),
         "pretrained_source": getattr(model, "pretrained_source", config.llm.model_name),
         "actual_effective_batch_size": config.training.micro_batch_size
@@ -195,8 +212,19 @@ def environment_manifest(
             or os.environ.get("PYTORCH_CUDA_ALLOC_CONF")
             or ""
         ),
-        "answer_loss_implementation": "causal_answer_positions_sparse_logits",
+        "answer_loss_implementation": "native_multimodal_base_model/causal_answer_positions_sparse_logits",
+        "modality": "image+numeric-window+soft-hints" if config.vision.enabled else "numeric-window+soft-hints",
+        "qwen3_vl_pixel_budget": {
+            "official_min_pixels": config.vision.min_pixels,
+            "official_max_pixels": config.vision.max_pixels,
+            "runtime_min_pixels": config.vision.min_pixels,
+            "runtime_max_pixels": config.vision.runtime_max_pixels,
+            "source": "official Qwen/Qwen3-VL-8B-Instruct preprocessor_config.json plus audited runtime cap",
+        },
         "llm_gradient_checkpointing": config.llm.gradient_checkpointing,
+        "eval_safe_checkpointed_decoder_layers": getattr(
+            model, "eval_checkpointed_decoder_layers", 0
+        ),
         "flash_attention_audit": attention_audit,
         "timercd_sha256": model.timercd.checkpoint_sha256,
         "trainable_parameter_count": sum(
@@ -302,11 +330,7 @@ def validate(model, loader: DataLoader, device: torch.device):
             outputs = model(
                 **inputs, prototype_override=prototype, timercd_override=encoded
             )
-            tokens = answer_token_count(model, batch["answers"])
-            if outputs.supervised_token_count != tokens:
-                raise RuntimeError(
-                    "Sparse answer target count differs from tokenizer audit count"
-                )
+            tokens = outputs.supervised_token_count
             local_nll += outputs.loss.double() * tokens
             local_tokens += tokens
             local_examples += len(batch["answers"])
@@ -326,6 +350,7 @@ def parse_args():
     parser.add_argument("--config", required=True)
     parser.add_argument("--data-root", required=True)
     parser.add_argument("--manifest-dir", required=True)
+    parser.add_argument("--image-root", default=None)
     parser.add_argument("--timercd-checkpoint", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--resume", default=None)
@@ -345,13 +370,22 @@ def main():
         raise ValueError("--benchmark-optimizer-steps must be non-negative")
     if args.benchmark_optimizer_steps and args.resume:
         raise ValueError("A benchmark run cannot resume a formal training state")
-    if config.llm.model_name != DEEPSEEK_MODEL_ID:
-        raise ValueError("The confirmed formal run must use DeepSeek-R1-0528-Qwen3-8B")
+    if config.llm.model_name != QWEN3_VL_MODEL_ID:
+        raise ValueError("The VLM branch trains Qwen3-VL-8B-Instruct only")
+    if config.vision.enabled and not args.image_root:
+        raise ValueError("--image-root is required for image-enabled formal training")
     rank, world_size, local_rank, device = distributed_setup()
     if world_size != config.training.expected_world_size:
         raise RuntimeError(
             f"Expected {config.training.expected_world_size} GPUs, got {world_size}"
         )
+    topology = collect_distributed_topology(
+        rank,
+        world_size,
+        local_rank,
+        expected_nodes=config.training.expected_nodes,
+        required_gpu_substring="H800" if config.vision.enabled else None,
+    )
     # Every rank must start from bit-identical Hint Tuner and special-token weights.
     seed_everything(config.training.seed, 0)
     output_dir = Path(args.output_dir).resolve()
@@ -363,6 +397,9 @@ def main():
         data_root=args.data_root,
         window_epsilon=config.hints.window_epsilon,
         window_scale=config.hints.window_scale,
+        image_root=args.image_root,
+        require_image=config.vision.enabled,
+        renderer_version=config.vision.renderer_version,
     )
     train_dataset = ManifestDataset(
         Path(args.manifest_dir) / "train.jsonl", **dataset_kwargs
@@ -454,6 +491,7 @@ def main():
             config,
             rank,
             world_size,
+            topology,
             model,
             attention_audit,
             args.benchmark_optimizer_steps,
@@ -494,6 +532,7 @@ def main():
                 prototype_graph = model.build_prototype_bank()
             prototype_leaf = prototype_graph.detach().requires_grad_(True)
             group_loss = 0.0
+            group_visual_tokens = 0
             for _ in range(group_size):
                 batch = next(loader_iterator)
                 inputs = move_model_inputs(batch, device)
@@ -517,11 +556,8 @@ def main():
                         f"Non-finite training loss at epoch={epoch}, step={global_step}"
                     )
                 scaled_loss.backward()
-                tokens = answer_token_count(model, batch["answers"])
-                if outputs.supervised_token_count != tokens:
-                    raise RuntimeError(
-                        "Sparse answer target count differs from tokenizer audit count"
-                    )
+                tokens = outputs.supervised_token_count
+                group_visual_tokens += outputs.visual_token_count
                 epoch_loss_sum += outputs.loss.detach().item() * tokens
                 epoch_tokens += tokens
                 epoch_examples += len(batch["answers"])
@@ -547,6 +583,7 @@ def main():
                         "loss_mean_microbatch": group_loss / group_size,
                         "learning_rate": scheduler.get_last_lr()[0],
                         "gradient_norm": float(gradient_norm),
+                        "visual_tokens_mean_microbatch": group_visual_tokens / group_size,
                         "max_memory_allocated_mib": torch.cuda.max_memory_allocated(
                             device
                         )

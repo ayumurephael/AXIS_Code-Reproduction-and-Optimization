@@ -8,12 +8,18 @@ from typing import Any, Dict
 
 DEEPSEEK_MODEL_ID = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
 QWEN35_MODEL_ID = "Qwen/Qwen3.5-9B"
-SUPPORTED_LLM_IDS = (DEEPSEEK_MODEL_ID, QWEN35_MODEL_ID)
+QWEN3_VL_MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+SUPPORTED_LLM_IDS = (DEEPSEEK_MODEL_ID, QWEN35_MODEL_ID, QWEN3_VL_MODEL_ID)
 FORMAL_DISTRIBUTED_PROFILES = {
     (4, 1, 8, 20): 32,
     (4, 2, 4, 20): 32,
     (4, 4, 2, 20): 32,
     (5, 1, 6, 40): 30,
+    (8, 1, 4, 25): 32,
+    (8, 2, 2, 25): 32,
+    (8, 4, 1, 25): 32,
+    (8, 6, 1, 25): 48,
+    (32, 1, 1, 25): 32,
 }
 
 
@@ -66,16 +72,48 @@ class LLMConfig:
 
 
 @dataclass
+class VisionConfig:
+    """Native Qwen3-VL image path and the official processor pixel budget."""
+
+    enabled: bool = False
+    min_pixels: int = 65_536
+    max_pixels: int = 16_777_216
+    runtime_max_pixels: int = 4_194_304
+    renderer_dpi: int = 600
+    renderer_version: str = "multi-axis-vl-render-v1"
+    require_mm_token_type_ids: bool = True
+
+    def validate(self, model_name: str) -> None:
+        if self.enabled and model_name != QWEN3_VL_MODEL_ID:
+            raise ValueError(
+                "Image-enabled Multi-AXIS requires Qwen/Qwen3-VL-8B-Instruct."
+            )
+        if self.min_pixels != 65_536 or self.max_pixels != 16_777_216:
+            raise ValueError(
+                "The formal VLM run uses the official Qwen3-VL processor budget: "
+                "65,536 through 16,777,216 pixels."
+            )
+        if not self.min_pixels <= self.runtime_max_pixels <= self.max_pixels:
+            raise ValueError(
+                "runtime_max_pixels must stay inside the official Qwen3-VL "
+                "processor range."
+            )
+        if self.renderer_dpi != 600:
+            raise ValueError("The specified VLM renderer requires dpi=600.")
+
+
+@dataclass
 class TrainingConfig:
-    epochs: int = 40
+    epochs: int = 25
     seed: int = 42
     learning_rate: float = 1e-4
     weight_decay: float = 0.01
     warmup_ratio: float = 0.05
     gradient_clip_norm: float = 1.0
-    micro_batch_size: int = 1
-    accumulation_steps: int = 6
-    expected_world_size: int = 5
+    micro_batch_size: int = 6
+    accumulation_steps: int = 1
+    expected_world_size: int = 8
+    expected_nodes: int = 1
     num_workers: int = 2
     validation_fraction: float = 0.10
     select_by: str = "validation_answer_nll"
@@ -97,6 +135,10 @@ class TrainingConfig:
         if self.select_by != "validation_answer_nll":
             raise ValueError(
                 "Checkpoint selection must use validation answer-token NLL only."
+            )
+        if self.expected_nodes <= 0 or self.expected_world_size % self.expected_nodes:
+            raise ValueError(
+                "expected_world_size must be divisible by a positive expected_nodes."
             )
         profile = (
             self.expected_world_size,
@@ -139,12 +181,14 @@ class MultiAxisConfig:
     timercd: TimeRCDConfig = field(default_factory=TimeRCDConfig)
     hints: HintConfig = field(default_factory=HintConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    vision: VisionConfig = field(default_factory=VisionConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     schema_version: str = "multi-axis-1.0"
 
     def validate(self) -> None:
         self.llm.validate()
+        self.vision.validate(self.llm.model_name)
         self.training.validate()
         if self.timercd.d_proj % self.hints.joint_heads:
             raise ValueError("TimeRCD d_proj must be divisible by joint_heads.")
@@ -170,6 +214,7 @@ class MultiAxisConfig:
             timercd=TimeRCDConfig(**raw.get("timercd", {})),
             hints=HintConfig(**raw.get("hints", {})),
             llm=LLMConfig(**raw.get("llm", {})),
+            vision=VisionConfig(**raw.get("vision", {})),
             training=TrainingConfig(**raw.get("training", {})),
             generation=GenerationConfig(**raw.get("generation", {})),
             schema_version=raw.get("schema_version", "multi-axis-1.0"),

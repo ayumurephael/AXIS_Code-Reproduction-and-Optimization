@@ -1,0 +1,40 @@
+{
+  "schema": "multi-axis-text-eval-recovery-plan-v1",
+  "parent_plan": "epoch10_eval_worker_plan_20260809.json",
+  "inference_shard_count": 216,
+  "failed_worker": "a10080_gpu2",
+  "failed_worker_completed_rows_478new": 8,
+  "failed_worker_completed_groups": [3, 4],
+  "failed_worker_used_in_final_merge": false,
+  "reason": "A pre-existing process grew to 23.08 GiB; group 8 then OOMed while the evaluator needed another 4.21 GiB.",
+  "recovery_workers": {
+    "a10080_gpu2_recovery_safe24k": {
+      "memory_gib": 80,
+      "maximum_planned_prompt_tokens": 26268,
+      "note": "Groups 3 and 4 are deliberately recomputed so the failed partial source can be excluded as a whole.",
+      "group_indices": [
+        3, 4, 13, 31, 61, 67, 83, 87, 94, 98, 109, 113, 133, 135,
+        157, 161, 175, 176, 177, 188, 195, 199
+      ]
+    },
+    "a10080_port2226_gpu2_recovery_long_after_primary": {
+      "memory_gib": 80,
+      "maximum_planned_prompt_tokens": 36753,
+      "launch_condition": "a10080_port2226_gpu2 complete and GPU2 memory.used < 18000 MiB",
+      "group_indices": [8, 45, 50, 53, 66, 77, 100, 118, 147, 151, 190]
+    }
+  },
+  "failed_recovery_attempts": [
+    {
+      "worker": "a10080_port2226_gpu1_recovery_long",
+      "completed_rows": 0,
+      "used_in_final_merge": false,
+      "reason": "The pre-existing 18.88 GiB allocation left less than the 4.21 GiB required by the first long group."
+    }
+  ],
+  "partition_audit": {
+    "recovery_groups": 33,
+    "duplicate_groups": 0,
+    "missing_groups_from_failed_assignment": 0
+  }
+}

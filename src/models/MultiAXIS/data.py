@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
@@ -11,6 +12,7 @@ from torch.utils.data import Dataset
 
 
 TEACHER_ANSWER_FIELDS = ("model_answer", "teacher_answer_llm", "windows_0_answer", "answer")
+IMAGE_LAYOUT_VERSION = "multi-axis-vl-render-v1"
 
 
 def teacher_model_answer(row: Dict[str, Any]) -> str:
@@ -78,6 +80,37 @@ def extract_interval(row: Dict[str, Any], steps: int) -> Tuple[int, int]:
     return start, end
 
 
+def extract_channel_ids(row: Dict[str, Any], channels: int) -> List[str]:
+    metadata = row.get("channels") or []
+    identifiers: List[str] = []
+    for index in range(channels):
+        item = metadata[index] if index < len(metadata) else None
+        if isinstance(item, dict):
+            value = item.get("channel_id") or item.get("name")
+        else:
+            value = item
+        identifiers.append(str(value) if value is not None else f"ch_{index}")
+    if len(set(identifiers)) != len(identifiers):
+        raise ValueError("Channel identifiers must be unique within one series")
+    return identifiers
+
+
+def visual_image_id(
+    base_sample_id: str,
+    interval: Tuple[int, int],
+    renderer_version: str = IMAGE_LAYOUT_VERSION,
+) -> str:
+    start, end = interval
+    payload = f"{renderer_version}\0{base_sample_id}\0{start}\0{end}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def visual_image_relpath(image_id: str) -> str:
+    if len(image_id) != 64 or any(char not in "0123456789abcdef" for char in image_id):
+        raise ValueError("Visual image id must be a lowercase SHA-256 digest")
+    return f"images/{image_id[:2]}/{image_id}.png"
+
+
 def normalize_and_serialize(
     values: np.ndarray,
     interval: Tuple[int, int],
@@ -103,11 +136,17 @@ class ManifestDataset(Dataset):
         data_root: str | Path,
         window_epsilon: float = 1e-5,
         window_scale: int = 100,
+        image_root: str | Path | None = None,
+        require_image: bool = False,
+        renderer_version: str = IMAGE_LAYOUT_VERSION,
     ):
         self.manifest_path = Path(manifest_path)
         self.data_root = Path(data_root)
         self.window_epsilon = window_epsilon
         self.window_scale = window_scale
+        self.image_root = Path(image_root) if image_root is not None else None
+        self.require_image = bool(require_image)
+        self.renderer_version = str(renderer_version)
         index_path = self.manifest_path.with_suffix(self.manifest_path.suffix + ".idx.json")
         self.offsets = json.loads(index_path.read_text(encoding="utf-8"))
         groups_path = self.manifest_path.with_suffix(self.manifest_path.suffix + ".groups.json")
@@ -159,6 +198,17 @@ class ManifestDataset(Dataset):
             epsilon=self.window_epsilon,
             scale=self.window_scale,
         )
+        channel_ids = extract_channel_ids(row, values.shape[1])
+        image_id = str(
+            record.get("image_id")
+            or visual_image_id(record["base_sample_id"], interval, self.renderer_version)
+        )
+        image_relpath = str(record.get("image_relpath") or visual_image_relpath(image_id))
+        image_path = self.image_root / Path(image_relpath) if self.image_root is not None else None
+        if self.require_image and (image_path is None or not image_path.is_file()):
+            raise FileNotFoundError(
+                f"Missing pre-rendered VLM image for sample {record['sample_id']}: {image_path}"
+            )
         sample = {
             "normalized_series": normalized,
             "question": record["question"],
@@ -167,10 +217,14 @@ class ManifestDataset(Dataset):
             "window_values": serialized,
             "time_count": values.shape[0],
             "channel_count": values.shape[1],
+            "channel_ids": channel_ids,
             "sample_id": record["sample_id"],
             "base_sample_id": record["base_sample_id"],
             "question_group": record["question_group"],
             "dataset": record.get("dataset", "train"),
+            "image_id": image_id,
+            "image_relpath": image_relpath,
+            "image_path": str(image_path) if image_path is not None else None,
         }
         if "label_reference" in record:
             sample["label_reference"] = record["label_reference"]
@@ -204,9 +258,12 @@ def collate_multiaxis(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "window_values": [sample["window_values"] for sample in samples],
         "time_counts": [sample["time_count"] for sample in samples],
         "channel_counts": [sample["channel_count"] for sample in samples],
+        "channel_ids": [sample["channel_ids"] for sample in samples],
         "sample_ids": [sample["sample_id"] for sample in samples],
         "base_sample_ids": [sample["base_sample_id"] for sample in samples],
         "question_groups": [sample["question_group"] for sample in samples],
         "datasets": [sample["dataset"] for sample in samples],
         "label_references": [sample.get("label_reference") for sample in samples],
+        "image_ids": [sample["image_id"] for sample in samples],
+        "image_paths": [sample.get("image_path") for sample in samples],
     }
