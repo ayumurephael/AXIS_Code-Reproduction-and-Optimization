@@ -44,6 +44,7 @@ from tools.multi_axis.label_metrics import (
     open_parseable,
     parse_prediction,
     summarize as summarize_label_metrics,
+    target_label as metric_target_label,
 )
 from tools.multi_axis.train import compute_timercd_cached
 
@@ -511,6 +512,17 @@ def test_label_metric_summary_respects_selected_datasets():
     summary = summarize_label_metrics(rows, ("478new",))
     assert set(summary["by_dataset"]) == {"478new"}
     assert summary["by_dataset"]["478new"]["mc_exact_match_accuracy"] == 1.0
+
+
+def test_label_metric_tf_target_uses_embedded_model_answer_only():
+    reference = {
+        "teacher_short_answer": (
+            "Question: Is the claim true?\n\n"
+            "model_answer: No.\n\n"
+            "The explanation mentions Yes only as a rejected alternative."
+        )
+    }
+    assert metric_target_label(reference, "TF") == "no"
 
 
 def test_bounded_logprob_distribution():

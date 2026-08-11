@@ -26,6 +26,7 @@ JUDGMENT_PATTERNS = [
     re.compile(r"(?i)\b(?:answer|final answer|judgment|label)\s*[:\-]?\s*(?:is\s*)?(yes|no|true|false)\b"),
     re.compile(r"^\s*(yes|no|true|false)\b", re.I),
 ]
+MODEL_ANSWER_MARKER = re.compile(r"(?im)^\s*model_answer\s*:\s*")
 
 
 def canonical_label(value: Any) -> Optional[str]:
@@ -48,12 +49,24 @@ def parse_prediction(text: str, question_group: str) -> Optional[str]:
     return parse_response_label(text, question_group)
 
 
+def teacher_model_answer(reference: Dict[str, Any]) -> str:
+    """Return only the audited model_answer segment from a teacher reference."""
+    text = str(reference.get("teacher_short_answer") or "").strip()
+    marker = MODEL_ANSWER_MARKER.search(text)
+    return text[marker.end() :].strip() if marker else text
+
+
 def target_label(reference: Dict[str, Any], question_group: str) -> Optional[str]:
     if question_group == "MC":
         output = reference.get("target_output") or {}
         fact = output.get("fact_check") or {}
         return canonical_label(fact.get("choice_answer") or fact.get("answer_label"))
-    return canonical_label(reference.get("teacher_short_answer"))
+    # TF labels in the authoritative 478New manifest live at the beginning of
+    # the embedded ``model_answer:`` segment. Do not search the later evidence,
+    # which can quote the opposite polarity while explaining the decision.
+    answer = teacher_model_answer(reference)
+    first_line = answer.splitlines()[0] if answer else ""
+    return canonical_label(first_line)
 
 
 def open_parseable(text: str) -> bool:
