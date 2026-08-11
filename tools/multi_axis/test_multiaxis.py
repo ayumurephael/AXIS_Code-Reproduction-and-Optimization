@@ -27,6 +27,7 @@ from src.models.MultiAXIS.prompting import HINT_TOKENS, MultiAxisPromptBuilder
 from src.models.MultiAXIS.response_contracts import (
     OUTPUT_CONTRACTS,
     canonicalize_teacher_answer,
+    parse_response_label,
     response_contract_error,
 )
 from tools.multi_axis.build_manifests import (
@@ -444,6 +445,9 @@ def test_output_contracts_and_teacher_normalization():
     assert normalized.startswith("Answer: B\n\n")
     assert response_contract_error(normalized, "MC") is None
     assert response_contract_error("\n" + normalized, "MC") == "mc_first_line"
+    assert parse_response_label("Answer: B  \n\nEvidence.", "MC") == "B"
+    assert parse_response_label("No. \n\nEvidence.", "TF") == "no"
+    assert parse_response_label("No. explanation", "TF") is None
 
     inline_no = canonicalize_teacher_answer(
         "No. The proposition is not supported by the interval.", "TF"

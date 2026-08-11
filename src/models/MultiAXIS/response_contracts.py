@@ -63,8 +63,8 @@ Do not put any preamble, analysis, scratch work, Markdown heading, or
 three required headings. Do not add an "Answer:" heading.""",
 }
 
-_MC_FIRST_LINE = re.compile(r"\AAnswer: ([A-D])(?:\n|\Z)")
-_TF_FIRST_LINE = re.compile(r"\A(Yes|No)\.(?:\n|\Z)")
+_MC_FIRST_LINE = re.compile(r"\AAnswer: ([A-D])[ \t]*(?:\n|\Z)")
+_TF_FIRST_LINE = re.compile(r"\A(Yes|No)\.[ \t]*(?:\n|\Z)")
 _MC_LABEL_ANYWHERE = re.compile(r"(?i)\bAnswer\s*:\s*([A-D])\b")
 _TF_LEADING_LABEL = re.compile(
     r"\A(?:Answer\s*:\s*)?(Yes|No|True|False)(?:\s*[.,:;]\s*|\s*[-—]\s+|\s+)",
