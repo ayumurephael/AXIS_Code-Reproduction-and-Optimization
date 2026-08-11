@@ -43,6 +43,7 @@ from tools.multi_axis.label_metrics import (
     canonical_label,
     open_parseable,
     parse_prediction,
+    summarize as summarize_label_metrics,
 )
 from tools.multi_axis.train import compute_timercd_cached
 
@@ -493,6 +494,23 @@ def test_inference_group_shards_are_disjoint_and_complete():
     rank_one = dataset_indices(dataset, 1, 2, shard_count=1, shard_indices=(0,))
     assert set(rank_zero).isdisjoint(rank_one)
     assert sorted(rank_zero + rank_one) == list(range(10))
+
+
+def test_label_metric_summary_respects_selected_datasets():
+    rows = [
+        {
+            "dataset": "478new",
+            "question_group": "MC",
+            "predicted_label": "A",
+            "target_label": "A",
+            "exact_match": True,
+            "parseable": None,
+            "success": True,
+        }
+    ]
+    summary = summarize_label_metrics(rows, ("478new",))
+    assert set(summary["by_dataset"]) == {"478new"}
+    assert summary["by_dataset"]["478new"]["mc_exact_match_accuracy"] == 1.0
 
 
 def test_bounded_logprob_distribution():

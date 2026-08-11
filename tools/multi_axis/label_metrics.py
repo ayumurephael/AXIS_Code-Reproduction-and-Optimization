@@ -67,7 +67,9 @@ def read_jsonl(path: Path):
                 yield json.loads(line)
 
 
-def summarize(rows: Sequence[Dict[str, Any]]):
+def summarize(
+    rows: Sequence[Dict[str, Any]], datasets: Sequence[str] = DATASETS
+):
     def bucket(items):
         counts = collections.Counter(item["question_group"] for item in items)
         mc = [item for item in items if item["question_group"] == "MC"]
@@ -89,13 +91,20 @@ def summarize(rows: Sequence[Dict[str, Any]]):
     return {
         "overall": bucket(rows),
         "by_question_type": {group: bucket([row for row in rows if row["question_group"] == group]) for group in ("MC", "OE", "TF")},
-        "by_dataset": {dataset: bucket([row for row in rows if row["dataset"] == dataset]) for dataset in DATASETS},
+        "by_dataset": {
+            dataset: bucket([row for row in rows if row["dataset"] == dataset])
+            for dataset in datasets
+        },
     }
 
 
-def markdown(summary: Dict[str, Any]) -> str:
+def markdown(
+    summary: Dict[str, Any], datasets: Sequence[str] = DATASETS
+) -> str:
     lines = ["# Label metrics", "", "| Scope | N | MC exact | TF exact | OE parse | Combined |", "|---|---:|---:|---:|---:|---:|"]
-    entries = [("Overall", summary["overall"])] + [(dataset, summary["by_dataset"][dataset]) for dataset in DATASETS]
+    entries = [("Overall", summary["overall"])] + [
+        (dataset, summary["by_dataset"][dataset]) for dataset in datasets
+    ]
     def fmt(value):
         return "?" if value is None else f"{100 * value:.2f}%"
     for name, item in entries:
@@ -108,6 +117,9 @@ def parse_args():
     parser.add_argument("--manifest-dir", required=True)
     parser.add_argument("--predictions-dir", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--datasets", nargs="+", choices=DATASETS, default=list(DATASETS)
+    )
     return parser.parse_args()
 
 
@@ -115,8 +127,9 @@ def main():
     args = parse_args()
     manifest_dir, predictions_dir, output_dir = map(Path, (args.manifest_dir, args.predictions_dir, args.output_dir))
     output_dir.mkdir(parents=True, exist_ok=True)
+    datasets = tuple(dict.fromkeys(args.datasets))
     rows = []
-    for dataset in DATASETS:
+    for dataset in datasets:
         references = list(read_jsonl(manifest_dir / f"eval_{dataset}.jsonl"))
         predictions = list(read_jsonl(predictions_dir / f"{dataset}.predictions.jsonl"))
         if len(references) != len(predictions):
@@ -135,9 +148,11 @@ def main():
     with (output_dir / "label_metrics.jsonl").open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    summary = summarize(rows)
+    summary = summarize(rows, datasets)
     (output_dir / "label_metrics_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    (output_dir / "label_metrics.md").write_text(markdown(summary), encoding="utf-8")
+    (output_dir / "label_metrics.md").write_text(
+        markdown(summary, datasets), encoding="utf-8"
+    )
     print(json.dumps(summary, ensure_ascii=False))
 
 
