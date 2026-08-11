@@ -47,6 +47,7 @@ from tools.multi_axis.label_metrics import (
     target_label as metric_target_label,
 )
 from tools.multi_axis.train import compute_timercd_cached
+from tools.multi_axis.audit_teacher_targets import audit_split
 
 
 class FakeTokenizer:
@@ -523,6 +524,56 @@ def test_label_metric_tf_target_uses_embedded_model_answer_only():
         )
     }
     assert metric_target_label(reference, "TF") == "no"
+
+
+def test_teacher_target_audit_reads_question_offsets_and_normalizes(tmp_path):
+    data_root = tmp_path / "data"
+    question_path = data_root / "question.jsonl"
+    question_path.parent.mkdir(parents=True)
+    rows = [
+        {
+            "sample_id": "mc-1",
+            "question": "Which option?",
+            "is_anomalous": True,
+        },
+        {
+            "sample_id": "tf-1",
+            "question": "Is the claim true?",
+            "is_anomalous": False,
+        },
+    ]
+    encoded = [
+        (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8") for row in rows
+    ]
+    question_path.write_bytes(b"".join(encoded))
+    manifest = tmp_path / "train.jsonl"
+    offset = 0
+    records = []
+    for row, raw, group, teacher in zip(
+        rows,
+        encoded,
+        ("MC", "TF"),
+        ("Answer: B Supporting evidence.", "No. The claim is contradicted."),
+    ):
+        records.append(
+            {
+                "question_path": "question.jsonl",
+                "question_offset": offset,
+                "question_length": len(raw),
+                "sample_id": row["sample_id"],
+                "question": row["question"],
+                "question_group": group,
+                "teacher_answer": teacher,
+            }
+        )
+        offset += len(raw)
+    manifest.write_text(
+        "".join(json.dumps(record) + "\n" for record in records), encoding="utf-8"
+    )
+    result = audit_split(manifest, data_root)
+    assert result["passed"] is True, json.dumps(result, ensure_ascii=False)
+    assert result["examples"] == 2
+    assert result["canonicalized_total"] == 2
 
 
 def test_bounded_logprob_distribution():
