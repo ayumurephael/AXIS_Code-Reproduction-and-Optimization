@@ -445,6 +445,30 @@ def test_output_contracts_and_teacher_normalization():
     assert response_contract_error(normalized, "MC") is None
     assert response_contract_error("\n" + normalized, "MC") == "mc_first_line"
 
+    inline_no = canonicalize_teacher_answer(
+        "No. The proposition is not supported by the interval.", "TF"
+    )
+    assert inline_no == "No.\n\nThe proposition is not supported by the interval."
+    inline_yes = canonicalize_teacher_answer(
+        "Yes, the interval is anomalous, but spike is not the best label.\n\n"
+        "The evidence instead supports an outlier.",
+        "TF",
+    )
+    assert inline_yes.startswith("Yes.\n\nthe interval is anomalous")
+    assert response_contract_error(inline_yes, "TF") is None
+
+
+def test_teacher_tf_normalization_uses_only_the_leading_label():
+    normalized = canonicalize_teacher_answer(
+        "Yes. The evidence rejects the broad claim. Answer: False", "TF"
+    )
+    assert normalized.startswith("Yes.\n\n")
+    assert "Answer: False" in normalized
+    with pytest.raises(ValueError, match="no recoverable Yes/No label"):
+        canonicalize_teacher_answer(
+            "The evidence is inconclusive. Answer: True", "TF"
+        )
+
 
 def test_bounded_logprob_distribution():
     entry = {
