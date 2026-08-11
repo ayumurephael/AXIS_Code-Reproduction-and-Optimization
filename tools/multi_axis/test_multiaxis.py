@@ -470,6 +470,27 @@ def test_teacher_tf_normalization_uses_only_the_leading_label():
         )
 
 
+def test_inference_group_shards_are_disjoint_and_complete():
+    from tools.multi_axis.infer import dataset_indices
+
+    dataset = type(
+        "GroupedDataset",
+        (),
+        {"groups": [[0, 1], [2], [3, 4, 5], [6], [7, 8], [9]]},
+    )()
+    shard_zero = dataset_indices(dataset, 0, 1, shard_count=2, shard_indices=(0,))
+    shard_one = dataset_indices(dataset, 0, 1, shard_count=2, shard_indices=(1,))
+    assert shard_zero == [0, 1, 3, 4, 5, 7, 8]
+    assert shard_one == [2, 6, 9]
+    assert set(shard_zero).isdisjoint(shard_one)
+    assert sorted(shard_zero + shard_one) == list(range(10))
+
+    rank_zero = dataset_indices(dataset, 0, 2, shard_count=1, shard_indices=(0,))
+    rank_one = dataset_indices(dataset, 1, 2, shard_count=1, shard_indices=(0,))
+    assert set(rank_zero).isdisjoint(rank_one)
+    assert sorted(rank_zero + rank_one) == list(range(10))
+
+
 def test_bounded_logprob_distribution():
     entry = {
         "top_logprobs": [
