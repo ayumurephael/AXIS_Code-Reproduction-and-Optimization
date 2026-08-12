@@ -152,14 +152,12 @@ class MultiAxisPromptBuilder:
             raise ValueError("Channel id count does not match the numeric Window")
 
         fixed = " ".join([FIXED_TOKEN] * self.fixed_tokens)
-        channel_blocks = []
+        channel_lines = []
         for identifier, values in zip(identifiers, window_values):
-            lines = [f"Channel {identifier}:"]
-            lines.extend(
-                f"t={start + relative}, value={int(value)} {STEP_TOKEN}"
-                for relative, value in enumerate(values)
+            evidence = " ".join(
+                f"{int(value)} {STEP_TOKEN}" for value in values
             )
-            channel_blocks.append("\n".join(lines))
+            channel_lines.append(f"Channel {identifier}: {evidence}")
         sections = [
             USER_PREAMBLE,
             f"### Question\n{question.strip()}",
@@ -172,8 +170,13 @@ class MultiAxisPromptBuilder:
                 "Each value is normalized within its own channel, multiplied by 100, "
                 "and rounded to an integer."
             ),
-            "### Channel-aligned Window and Step-Local evidence\n"
-            + "\n\n".join(channel_blocks),
+            (
+                "### Channel-aligned Window and Step-Local evidence\n"
+                f"Within every channel, value/hint pairs are ordered by global time "
+                f"from t={start} through t={end - 1}; pair offset k corresponds exactly "
+                f"to t={start}+k.\n"
+                + "\n".join(channel_lines)
+            ),
         ]
         if self.include_joint:
             sections.append(f"### Joint-Local multivariate evidence\n{JOINT_TOKEN}")

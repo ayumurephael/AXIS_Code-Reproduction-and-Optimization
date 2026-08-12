@@ -15,12 +15,19 @@ The unconstrained-memory decision remains `micro_batch_size=2` and
 `accumulation_steps=4`: it keeps the effective batch at 32 and is the fastest
 registered candidate that completed on four otherwise-free GPUs.
 
-For the prompt-v2 restart on the currently available Port 2229 allocation, one
-selected H100 must coexist with a pre-existing process owned by another account.
-The formal fallback is therefore `micro_batch_size=1` and
-`accumulation_steps=8`. It preserves the exact effective batch of 32
-(`world_size * micro_batch_size * accumulation_steps`) while reducing the
-per-rank activation-memory peak. No process owned by another account may be
-stopped to recover the faster setting. The launcher enables expandable allocator
-segments to reduce fragmentation, and the run manifest records the allocator
-setting. The original five-GPU, 40-epoch configuration is unchanged.
+The first prompt-v2 attempt had to fall back to `micro_batch_size=1` and
+`accumulation_steps=8` while one selected H100 coexisted with a pre-existing
+process owned by another account. That run measured a median 41.8 seconds per
+optimizer step (about 22.17 hours per epoch), compared with 15.0 seconds and
+about 7.95 hours per epoch for the previous `micro=2, accumulation=4` run.
+
+The main prompt-v2 regression was redundant serialization: every value/hint
+pair repeated its global index, `t=`, `value=`, punctuation, and a line break.
+The compact representation retains the exact half-open interval, channel IDs,
+ordered value/hint pairs, and a lossless offset-to-global-time mapping while
+removing those repeated tokens. The formal candidate is restored to
+`micro_batch_size=2` and `accumulation_steps=4`, preserving global batch 32.
+It must pass a four-GPU memory and throughput benchmark on the actual shared
+allocation before a new formal run is launched. No process owned by another
+account may be stopped. The original five-GPU, 40-epoch configuration is
+unchanged.
