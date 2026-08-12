@@ -11,4 +11,16 @@ Fixed controls: DeepSeek-R1-0528-Qwen3-8B, seed 42, the same grouped 90/10 train
 
 The runtime audit resolved all 36 Qwen3Attention modules to flash_attention_2, imported both dense and variable-length FlashAttention kernels from flash-attn 2.7.4.post1, found two fail-closed Hint Tuner FlashCrossAttention modules, and recorded fallback_allowed=false.
 
-Decision: use micro_batch_size=2 and accumulation_steps=4 for the formal four-GPU, 20-epoch run. This keeps the effective batch at 32 and is the fastest registered candidate that completed on all four selected GPUs. The launcher enables expandable allocator segments to reduce fragmentation, and the run manifest records the allocator setting. The original five-GPU, 40-epoch configuration is unchanged.
+The unconstrained-memory decision remains `micro_batch_size=2` and
+`accumulation_steps=4`: it keeps the effective batch at 32 and is the fastest
+registered candidate that completed on four otherwise-free GPUs.
+
+For the prompt-v2 restart on the currently available Port 2229 allocation, one
+selected H100 must coexist with a pre-existing process owned by another account.
+The formal fallback is therefore `micro_batch_size=1` and
+`accumulation_steps=8`. It preserves the exact effective batch of 32
+(`world_size * micro_batch_size * accumulation_steps`) while reducing the
+per-rank activation-memory peak. No process owned by another account may be
+stopped to recover the faster setting. The launcher enables expandable allocator
+segments to reduce fragmentation, and the run manifest records the allocator
+setting. The original five-GPU, 40-epoch configuration is unchanged.

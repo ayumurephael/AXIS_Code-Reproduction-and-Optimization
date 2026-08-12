@@ -196,7 +196,7 @@ def test_checked_in_four_and_five_gpu_configs():
         four_gpu.training.micro_batch_size,
         four_gpu.training.accumulation_steps,
         four_gpu.training.effective_batch_size,
-    ) == (20, 4, 2, 4, 32)
+    ) == (20, 4, 1, 8, 32)
     assert four_gpu.llm.max_context_tokens == 131072
     assert (
         four_gpu_micro4.training.epochs,
