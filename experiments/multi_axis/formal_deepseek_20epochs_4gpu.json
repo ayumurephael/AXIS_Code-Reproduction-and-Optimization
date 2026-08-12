@@ -24,7 +24,7 @@
   "llm": {
     "model_name": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
     "torch_dtype": "bfloat16",
-    "max_context_tokens": 32768,
+    "max_context_tokens": 131072,
     "trust_remote_code": true,
     "attention_implementation": "flash_attention_2",
     "gradient_checkpointing": true,
