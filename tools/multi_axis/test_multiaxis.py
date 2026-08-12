@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -38,7 +39,8 @@ from tools.multi_axis.build_manifests import (
     sha256_file,
     teacher_reference_answer,
 )
-from tools.multi_axis.geval_runner import bounded_distribution
+from tools.multi_axis.geval_runner import JudgeClient, bounded_distribution
+from tools.multi_axis.enrich_geval_tls_metadata import enrich as enrich_geval_tls
 from tools.multi_axis.label_metrics import (
     canonical_label,
     open_parseable,
@@ -590,6 +592,55 @@ def test_bounded_logprob_distribution():
     assert 1 <= score <= 5
     assert abs(sum(probabilities.values()) - 1.0) < 1e-8
     assert metadata["missing_mass_upper_bound"] == 0.0
+
+
+def test_judge_client_records_explicit_ca_bundle(monkeypatch, tmp_path):
+    ca_bundle = tmp_path / "ca.pem"
+    ca_bundle.write_bytes(b"audited-ca-bundle")
+    monkeypatch.setenv("TEST_ENDPOINT", "https://judge.example.test/v1")
+    monkeypatch.setenv("TEST_KEY", "secret")
+    monkeypatch.setenv("TEST_CA", str(ca_bundle))
+    marker = object()
+    monkeypatch.setattr(
+        "tools.multi_axis.geval_runner.ssl.create_default_context",
+        lambda *, cafile: marker if cafile == str(ca_bundle.resolve()) else None,
+    )
+    client = JudgeClient(
+        "gpt-5.4",
+        {
+            "endpoint_env": "TEST_ENDPOINT",
+            "api_key_env": "TEST_KEY",
+            "ca_bundle_env": "TEST_CA",
+        },
+    )
+    assert client.ssl_context is marker
+    assert client.tls_ca_bundle_sha256 == hashlib.sha256(
+        ca_bundle.read_bytes()
+    ).hexdigest()
+
+
+def test_tls_metadata_enrichment_changes_only_provenance(tmp_path):
+    source = tmp_path / "scores.jsonl"
+    row = {
+        "record_id": "sample:correctness",
+        "provider_profile": "gpt-5.4",
+        "endpoint_host_sha256": "a" * 64,
+        "score": 4.0,
+    }
+    source.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    ca_bundle = tmp_path / "ca.pem"
+    ca_bundle.write_bytes(b"audited-ca")
+    output = tmp_path / "scores.enriched.jsonl"
+    audit = enrich_geval_tls(
+        source, ca_bundle, output, tmp_path / "enrichment.json"
+    )
+    enriched = json.loads(output.read_text(encoding="utf-8"))
+    assert enriched.pop("tls_ca_bundle_sha256") == hashlib.sha256(
+        ca_bundle.read_bytes()
+    ).hexdigest()
+    assert enriched == row
+    assert audit["scores_changed"] is False
+    assert audit["passed"] is True
 
 
 def test_phase_a_disables_anomaly_and_joint_paths():
