@@ -135,7 +135,11 @@ def main():
         flash_audit.get("requested") == "flash_attention_2"
         and flash_audit.get("fallback_allowed") is False
         and flash_audit.get("llm_attention_module_count", 0) > 0
-        and flash_audit.get("hint_cross_attention_module_count", 0) > 0
+        and flash_audit.get("hint_cross_attention_module_count") == 3
+        and flash_audit.get("hint_cross_attention_modules")
+        == ["channel_pool", "joint_pool", "prototype_attention"]
+        and flash_audit.get("hint_cross_attention_backend")
+        == "flash-attn-v2-package"
         and resolved_configs
         and all(
             (value.get("resolved") or value.get("internal")) == "flash_attention_2"

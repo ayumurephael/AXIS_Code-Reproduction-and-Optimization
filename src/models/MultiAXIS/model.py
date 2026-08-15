@@ -505,16 +505,37 @@ class MultiAxisForConditionalGeneration(nn.Module):
                 "FlashAttention dense/varlen kernel entry points are unavailable"
             )
 
-        cross_attention_modules = [
-            module
-            for module in self.hint_tuner.modules()
+        named_cross_attention_modules = {
+            name: module
+            for name, module in self.hint_tuner.named_modules()
             if isinstance(module, FlashCrossAttention)
-        ]
-        if not cross_attention_modules or any(
-            not module.require_flash for module in cross_attention_modules
+        }
+        expected_cross_attention_modules = {
+            "prototype_attention",
+            "channel_pool",
+            "joint_pool",
+        }
+        if set(named_cross_attention_modules) != expected_cross_attention_modules:
+            raise RuntimeError(
+                "Hint Tuner cross-attention inventory is incomplete or unexpected: "
+                f"{sorted(named_cross_attention_modules)}"
+            )
+        if any(
+            not module.require_flash
+            for module in named_cross_attention_modules.values()
         ):
             raise RuntimeError(
                 "Hint Tuner cross-attention is not fail-closed on FlashAttention"
+            )
+        eager_cross_attention = [
+            name
+            for name, module in self.hint_tuner.named_modules()
+            if isinstance(module, nn.MultiheadAttention)
+        ]
+        if eager_cross_attention:
+            raise RuntimeError(
+                "Ordinary MultiheadAttention remains in the Hint Tuner: "
+                f"{eager_cross_attention}"
             )
 
         return {
@@ -524,7 +545,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
             "llm_attention_module_classes": sorted(
                 {item["class"] for item in attention_modules}
             ),
-            "hint_cross_attention_module_count": len(cross_attention_modules),
+            "hint_cross_attention_module_count": len(named_cross_attention_modules),
+            "hint_cross_attention_modules": sorted(named_cross_attention_modules),
+            "hint_cross_attention_backend": "flash-attn-v2-package",
             "flash_attn_version": getattr(flash_attn, "__version__", "unknown"),
             "dense_kernel_importable": True,
             "varlen_kernel_importable": True,

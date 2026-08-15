@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
+from .channel_ids import canonical_channel_ids
 from .response_contracts import OUTPUT_CONTRACTS
 
 
@@ -38,23 +39,33 @@ Do not expose private chain-of-thought, scratch work, or hidden-reasoning tags."
 EVIDENCE_RULES = """### Evidence-use rules
 For every channel, mean and std are computed from the full valid series. Each
 listed integer is approximately 100 * (raw_value - mean) / (std + epsilon),
-where epsilon is stated below. Use normalized integers for deviations relative
-to the channel's own history. Use mean and std for raw-scale, absolute-amplitude,
-or cross-channel magnitude comparisons.
+where epsilon is stated below. Use normalized integers to assess deviations
+relative to each channel's own historical scale.
+
+When the question requires raw levels, absolute changes, or cross-channel
+magnitude comparisons, interpret the integers together with that channel's
+mean, std, and epsilon using the reconstruction relation stated below.
+
+Do not compare normalized integer magnitudes across different channels as
+if they were raw-scale amplitudes.
 
 Each numeric value is immediately followed by one Step-Local hint
 for the same channel and the same time step.
 
 Step-Local hints provide fine-grained contextual evidence.
-Each Channel-Local hint summarizes one channel across the complete target
-window after multivariate TimeRCD contextualization. The question-conditioned
-Joint-Local hint summarizes evidence across all channels and all steps for the
-specific question.
+Each Channel-Local hint is a question-independent, channel-anchored summary
+of the complete target window. It may reflect temporal context and information
+from other channels. The Joint-Local hint is a question-conditioned summary
+derived from all channels and all target-window steps.
 Fixed hints contain task-level priors, not sample-specific facts.
 
 Use all channels jointly when making the overall judgment.
-Use the per-channel Step-Local evidence when identifying channels
-or time positions.
+Use Channel-Local hints for channel-level behavior and comparisons.
+Use Window values and Step-Local hints for precise numeric, channel-aligned,
+and time-local evidence.
+Use the question-conditioned Joint-Local hint for the overall multivariate
+interpretation relevant to the current question.
+Use Fixed hints only as task-level guidance.
 Do not treat the largest deviation as automatically being the root cause.
 Do not infer a causal direction solely from anomaly magnitude."""
 
@@ -161,11 +172,7 @@ class MultiAxisPromptBuilder:
             raise ValueError("Every channel must contain exactly end-start target-window values")
         if question_group not in OUTPUT_CONTRACTS:
             raise ValueError(f"Unknown question group: {question_group!r}")
-        identifiers = list(
-            channel_ids or [f"ch_{index}" for index in range(len(window_values))]
-        )
-        if len(identifiers) != len(window_values):
-            raise ValueError("Channel id count does not match the numeric Window")
+        identifiers = canonical_channel_ids(channel_ids, len(window_values))
         if len(channel_means) != len(window_values) or len(channel_stds) != len(
             window_values
         ):
@@ -173,11 +180,7 @@ class MultiAxisPromptBuilder:
 
         fixed = " ".join([FIXED_TOKEN] * self.fixed_tokens)
         overview_lines = [
-            f"Channel {identifier} [mean={self._format_stat(mean)}, "
-            f"std={self._format_stat(std)}]: {CHANNEL_TOKEN}"
-            for identifier, mean, std in zip(
-                identifiers, channel_means, channel_stds
-            )
+            f"{identifier}: {CHANNEL_TOKEN}" for identifier in identifiers
         ]
         channel_lines = []
         for identifier, mean, std, values in zip(
@@ -187,7 +190,7 @@ class MultiAxisPromptBuilder:
                 f"{int(value)} {STEP_TOKEN}" for value in values
             )
             channel_lines.append(
-                f"Channel {identifier} [mean={self._format_stat(mean)}, "
+                f"{identifier} [mean={self._format_stat(mean)}, "
                 f"std={self._format_stat(std)}]: {evidence}"
             )
         sections = [
@@ -198,7 +201,7 @@ class MultiAxisPromptBuilder:
             (
                 "### All-channel overview\n"
                 "Each channel appears once at overview resolution. Channel-Local "
-                "hints are factual, question-independent summaries of the complete "
+                "hints are question-independent summaries of the complete "
                 "target window.\n"
                 + "\n".join(overview_lines)
             ),
