@@ -23,7 +23,7 @@ This branch extends the multivariate AXIS Phase-II pipeline according to `多元
 
 The checked-in current formal configuration records world 8, micro batch 2, accumulation 2, and effective batch 32. Benchmark alternatives in separate directories; do not silently change the selected configuration inside an existing run.
 
-The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. Model construction audits the resolved text and vision attention backends, every identified VLM attention module, both FlashAttention kernel imports, and all Hint Tuner cross-attention modules; any eager fallback terminates the run.
+The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. The prototype projection, Channel-Local pool, and Joint-Local pool are exactly three fail-closed `FlashCrossAttention` modules; no ordinary `nn.MultiheadAttention` is permitted in the Hint Tuner. Model construction audits the resolved text and vision attention backends, every identified VLM attention module, both FlashAttention kernel imports, and the exact three-module Hint Tuner cross-attention inventory; any eager fallback terminates the run.
 
 ## Components
 
@@ -105,7 +105,7 @@ torchrun --nnodes=2 --nproc_per_node=4 \
   --output-dir /path/to/run/training
 ```
 
-To compare registered eight-GPU candidates, add `--benchmark-optimizer-steps N` and use a distinct output directory for each configuration. Benchmark mode writes `benchmark_summary.json` and exits without validation or formal checkpoints. To resume a checkpoint produced by this architecture, provide `--resume /path/to/run/training/last_train_state.pt`. To migrate the completed Epoch-4 legacy checkpoint, also pass `--migrate-legacy-architecture --new-module-warmup-epochs 1`; Epoch 5 then updates only Channel/A_q modules and Epoch 6 restores the full Hint Tuner while retaining old module weights, Adam moments, scheduler state, and global step. A valid completion has `TRAINING_COMPLETE`, 20 `epochs.jsonl` records, 20 hint checkpoints, and `best_checkpoint.json` pointing to the minimum validation answer NLL.
+To compare registered eight-GPU candidates, add `--benchmark-optimizer-steps N` and use a distinct output directory for each configuration. Benchmark mode writes `benchmark_summary.json` and exits without validation or formal checkpoints. To resume a checkpoint produced by this architecture, provide `--resume /path/to/run/training/last_train_state.pt`. To migrate the completed Epoch-4 legacy checkpoint, also pass `--migrate-legacy-architecture --new-module-warmup-epochs 1 --stop-after-epoch 6`; Epoch 5 then updates only Channel/A_q modules and Epoch 6 restores the full Hint Tuner while retaining old module weights, Adam moments, scheduler state, global step, and the original 20-epoch scheduler horizon. The audit pause writes `TRAINING_PAUSED_AFTER_EPOCH_06.json` only after the Epoch-6 checkpoint and `last_train_state.pt` are durable, and intentionally does not write `TRAINING_COMPLETE`. A valid full completion has `TRAINING_COMPLETE`, 20 `epochs.jsonl` records, 20 hint checkpoints, and `best_checkpoint.json` pointing to the minimum validation answer NLL.
 
 ## Eight-GPU inference
 

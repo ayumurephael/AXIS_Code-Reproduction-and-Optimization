@@ -514,6 +514,15 @@ def parse_args():
         help="After legacy migration, train only new Channel/Question modules first.",
     )
     parser.add_argument(
+        "--stop-after-epoch",
+        type=int,
+        default=None,
+        help=(
+            "Audit pause after atomically saving this complete epoch. The configured "
+            "total epoch count and learning-rate schedule remain unchanged."
+        ),
+    )
+    parser.add_argument(
         "--benchmark-optimizer-steps",
         type=int,
         default=0,
@@ -545,6 +554,11 @@ def main():
         raise ValueError("--new-module-warmup-epochs must be non-negative")
     if args.new_module_warmup_epochs and not args.migrate_legacy_architecture:
         raise ValueError("New-module warm-up is only valid for a legacy migration")
+    if args.stop_after_epoch is not None:
+        if not 1 <= args.stop_after_epoch <= config.training.epochs:
+            raise ValueError("--stop-after-epoch must be within configured epochs")
+        if args.benchmark_optimizer_steps:
+            raise ValueError("Benchmark mode cannot use --stop-after-epoch")
     if config.llm.model_name != QWEN3_VL_MODEL_ID:
         raise ValueError("The VLM branch trains Qwen3-VL-8B-Instruct only")
     if config.vision.enabled and not args.image_root:
@@ -686,6 +700,11 @@ def main():
                     json.dumps(migration_audit, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
+
+    if args.stop_after_epoch is not None and args.stop_after_epoch < start_epoch:
+        raise ValueError(
+            "--stop-after-epoch precedes the first epoch that would be trained"
+        )
 
     if rank == 0:
         manifest = environment_manifest(
@@ -980,6 +999,26 @@ def main():
             }
             atomic_torch_save(train_state, output_dir / "last_train_state.pt")
         dist.barrier()
+        if args.stop_after_epoch == epoch:
+            if rank == 0:
+                pause_path = output_dir / f"TRAINING_PAUSED_AFTER_EPOCH_{epoch:02d}.json"
+                pause_path.write_text(
+                    json.dumps(
+                        {
+                            "completed_epoch": epoch,
+                            "global_step": global_step,
+                            "best_epoch": best_epoch,
+                            "best_validation_answer_nll": best_nll,
+                            "configured_epochs": config.training.epochs,
+                            "resume_state": "last_train_state.pt",
+                        },
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
+            dist.barrier()
+            dist.destroy_process_group()
+            return
 
     if rank == 0:
         (output_dir / "TRAINING_COMPLETE").write_text(

@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from .channel_ids import canonical_channel_ids
 from .response_contracts import canonicalize_teacher_answer, response_contract_error
 
 
@@ -84,17 +85,15 @@ def extract_interval(row: Dict[str, Any], steps: int) -> Tuple[int, int]:
 
 def extract_channel_ids(row: Dict[str, Any], channels: int) -> List[str]:
     metadata = row.get("channels") or []
-    identifiers: List[str] = []
+    raw_identifiers: List[Any] = []
     for index in range(channels):
         item = metadata[index] if index < len(metadata) else None
         if isinstance(item, dict):
             value = item.get("channel_id") or item.get("name")
         else:
             value = item
-        identifiers.append(str(value) if value is not None else f"ch_{index}")
-    if len(set(identifiers)) != len(identifiers):
-        raise ValueError("Channel identifiers must be unique within one series")
-    return identifiers
+        raw_identifiers.append(value)
+    return canonical_channel_ids(raw_identifiers, channels)
 
 
 def structured_is_anomalous(row: Dict[str, Any]) -> bool | None:

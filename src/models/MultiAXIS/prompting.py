@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
+from .channel_ids import canonical_channel_ids
 from .response_contracts import OUTPUT_CONTRACTS
 
 
@@ -71,8 +72,9 @@ numeric values and learned contextual hints are provided after the figure.
 Inspect it specifically for evidence needed to answer the question above."""
 
 FIGURE_NOTE = """### Figure note
-Each row represents one channel, and the row label is its channel ID. Row order
-is identical to the channel order in the numeric Window. The horizontal axis is
+Each row represents one channel, and every row label uses the exact ch_<index>
+identifier used by the question and numeric Window. Row order is identical to
+the channel order in the numeric Window. The horizontal axis is
 the global time index. The black curve shows surrounding context. The dark-blue
 segment and pale-yellow background mark exactly the half-open target interval
 [{start}, {end}), that is, positions {start} through {last}.
@@ -84,23 +86,35 @@ severity, affected scope, root cause, or causal direction."""
 EVIDENCE_RULES = """### Evidence-use rules
 For every channel, mean and std are computed from the full valid series. Each
 listed integer is approximately 100 * (raw_value - mean) / (std + epsilon),
-where epsilon is stated below. Use normalized integers for deviations relative
-to the channel's own history. Use mean and std for raw-scale, absolute-amplitude,
-or cross-channel magnitude comparisons.
+where epsilon is stated below. Use normalized integers to assess deviations
+relative to each channel's own historical scale.
+
+When the question requires raw levels, absolute changes, or cross-channel
+magnitude comparisons, interpret the integers together with that channel's
+mean, std, and epsilon using the reconstruction relation stated below.
+
+Do not compare normalized integer magnitudes across different channels as
+if they were raw-scale amplitudes. Use normalized integers for deviations
+relative to the channel's own history. Use mean and std for raw-scale,
+absolute-amplitude, or cross-channel magnitude comparisons.
 
 Each numeric value is immediately followed by one Step-Local hint for the same
 channel and the same time step.
 
 Step-Local hints provide fine-grained contextual evidence.
-Each Channel-Local hint summarizes one channel across the complete target
-window after multivariate TimeRCD contextualization. The question-conditioned
-Joint-Local hint summarizes evidence across all channels and all steps for the
-specific question.
+Each Channel-Local hint is a question-independent, channel-anchored summary
+of the complete target window. It may reflect temporal context and information
+from other channels. The Joint-Local hint is a question-conditioned summary
+derived from all channels and all target-window steps.
 Fixed hints contain task-level priors, not sample-specific facts.
 
 Use all channels jointly when making the overall judgment.
-Use the per-channel Step-Local evidence when identifying channels
-or time positions.
+Use Channel-Local hints for channel-level behavior and comparisons.
+Use Window values and Step-Local hints for precise numeric, channel-aligned,
+and time-local evidence.
+Use the question-conditioned Joint-Local hint for the overall multivariate
+interpretation relevant to the current question.
+Use Fixed hints only as task-level guidance.
 Do not treat the largest deviation as automatically being the root cause.
 Do not infer a causal direction solely from anomaly magnitude."""
 
@@ -197,9 +211,7 @@ class MultiAxisPromptBuilder:
             raise ValueError("At least one channel is required")
         if any(len(channel) != length for channel in window_values):
             raise ValueError("Every channel must contain exactly end-start target-window values")
-        identifiers = list(channel_ids or [f"ch_{index}" for index in range(len(window_values))])
-        if len(identifiers) != len(window_values):
-            raise ValueError("Channel id count does not match the numeric Window")
+        identifiers = canonical_channel_ids(channel_ids, len(window_values))
         if len(channel_means) != len(window_values) or len(channel_stds) != len(
             window_values
         ):
@@ -232,7 +244,7 @@ class MultiAxisPromptBuilder:
             (
                 "### All-channel overview\n"
                 "Each channel appears once at overview resolution. Channel-Local "
-                "hints are factual, question-independent summaries of the complete "
+                "hints are question-independent summaries of the complete "
                 "target window.\n"
                 + "\n".join(overview_lines)
             ),
@@ -264,19 +276,14 @@ class MultiAxisPromptBuilder:
         identifiers: Sequence[str],
     ) -> Tuple[str, List[str], List[str]]:
         fixed = " ".join([FIXED_TOKEN] * self.fixed_tokens)
-        overview_lines = [
-            f"Channel {identifier} [mean={self._format_stat(mean)}, "
-            f"std={self._format_stat(std)}]: {CHANNEL_TOKEN}"
-            for identifier, mean, std in zip(
-                identifiers, channel_means, channel_stds
-            )
-        ]
+        identifiers = canonical_channel_ids(identifiers, len(window_values))
+        overview_lines = [f"{identifier}: {CHANNEL_TOKEN}" for identifier in identifiers]
         channel_blocks = []
         for identifier, mean, std, values in zip(
             identifiers, channel_means, channel_stds, window_values
         ):
             lines = [
-                f"Channel {identifier} [mean={self._format_stat(mean)}, "
+                f"{identifier} [mean={self._format_stat(mean)}, "
                 f"std={self._format_stat(std)}]:"
             ]
             lines.extend(
@@ -313,8 +320,7 @@ class MultiAxisPromptBuilder:
             raise ValueError(f"Invalid target interval [{start}, {end})")
         if not window_values or any(len(channel) != length for channel in window_values):
             raise ValueError("Every channel must contain exactly end-start target-window values")
-        if len(channel_ids) != len(window_values):
-            raise ValueError("Channel id count does not match the numeric Window")
+        channel_ids = canonical_channel_ids(channel_ids, len(window_values))
         if len(channel_means) != len(window_values) or len(channel_stds) != len(
             window_values
         ):
@@ -332,7 +338,7 @@ class MultiAxisPromptBuilder:
             (
                 "### All-channel overview\n"
                 "Each channel appears once at overview resolution. Channel-Local "
-                "hints are factual, question-independent summaries of the complete "
+                "hints are question-independent summaries of the complete "
                 "target window.\n"
                 + "\n".join(overview_lines)
             ),

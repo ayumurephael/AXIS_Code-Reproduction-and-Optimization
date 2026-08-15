@@ -17,6 +17,7 @@ from src.models.AXIS.ts_encoder_bi_bias import TimeSeriesEncoder
 from src.models.MultiAXIS.attention import FlashCrossAttention
 from src.models.MultiAXIS.config import MultiAxisConfig, TrainingConfig
 from src.models.MultiAXIS.data import (
+    extract_channel_ids,
     normalize_and_serialize,
     teacher_answer,
     teacher_model_answer,
@@ -189,6 +190,17 @@ def test_prompt_placeholder_counts_and_order():
     )
     assert text.index("### Question-conditioned full-window Joint-Local evidence") < text.index("### Output Contract")
     assert "t=10, value=-12 <STEP_HINT>" in text
+    assert "ch_0: <CHANNEL_HINT>" in text
+    assert "ch_1: <CHANNEL_HINT>" in text
+    overview = text.split("### All-channel overview", 1)[1].split("### Target window", 1)[0]
+    assert "mean=" not in overview and "std=" not in overview
+    assert "ch_0 [mean=0.25, std=0.5]:" in text
+    assert "Channel ch_0" not in text
+    assert "all target-window steps" in text
+    assert "Use Channel-Local hints for channel-level behavior and comparisons." in text
+    assert "mean, std, and epsilon using the reconstruction relation" in text
+    assert "Use normalized integers for deviations\nrelative to the channel's own history." in text
+    assert "Use Fixed hints only as task-level guidance." in text
     assert text.count("### Output Contract") == 1
     assert not text.endswith("Answer:")
     tokenized = builder.tokenize(
@@ -208,6 +220,20 @@ def test_prompt_placeholder_counts_and_order():
     assert tokenized.fixed_positions[0].numel() == 30
     assert torch.all(tokenized.labels[0, : tokenized.prompt_lengths[0]] == -100)
     assert (tokenized.labels[0] != -100).sum() > 0
+
+
+def test_channel_identifier_protocol_normalizes_aliases_and_rejects_names():
+    row = {
+        "channels": [
+            {"channel_id": "Channel 8"},
+            {"name": "ch9"},
+            "Channel_10",
+            "ch_11",
+        ]
+    }
+    assert extract_channel_ids(row, 4) == ["ch_8", "ch_9", "ch_10", "ch_11"]
+    with pytest.raises(ValueError, match="expected ch_<non-negative integer>"):
+        extract_channel_ids({"channels": ["temperature"]}, 1)
 
 
 def test_native_vlm_text_image_text_order_prefix_mask_and_pixel_metadata(tmp_path):
@@ -233,6 +259,8 @@ def test_native_vlm_text_image_text_order_prefix_mask_and_pixel_metadata(tmp_pat
     assert [item["type"] for item in user_content] == ["text", "image", "text"]
     assert "### Question" in user_content[0]["text"]
     assert "### Figure note" in user_content[2]["text"]
+    assert "every row label uses the exact ch_<index>" in user_content[2]["text"]
+    assert "They are two views of the same evidence, not\nindependent confirmations." in processor.last_messages[0]["content"]
     assert user_content[2]["text"].count("### Output Contract") == 1
     assert not user_content[2]["text"].endswith("Answer:")
     assert str(image_path) not in user_content[0]["text"]
@@ -612,6 +640,18 @@ def test_hint_tuner_shapes_and_zero_initialized_anomaly_gate():
     tuner = MultiAxisHintTuner(
         vocab_size=13, llm_hidden_size=16, d_proj=8, config=config
     )
+    cross_attention = {
+        name: module
+        for name, module in tuner.named_modules()
+        if isinstance(module, FlashCrossAttention)
+    }
+    assert set(cross_attention) == {
+        "prototype_attention",
+        "channel_pool",
+        "joint_pool",
+    }
+    assert all(module.require_flash for module in cross_attention.values())
+    assert not any(isinstance(module, torch.nn.MultiheadAttention) for module in tuner.modules())
     local = torch.randn(2, 5, 3, 8)
     logits_a = torch.randn(2, 5, 3, 2)
     logits_b = logits_a * 10
@@ -875,7 +915,9 @@ def test_label_parsing_contract():
     assert parse_prediction("Answer: False\nAnalysis:\n...", "TF") is None
     assert parse_prediction("Reasoning first.\nAnswer: C", "MC") is None
     assert parse_prediction(" Answer: C\n\nEvidence.", "MC") is None
+    assert parse_prediction("Answer: C \n\nEvidence.", "MC") is None
     assert parse_prediction("\nYes.\n\nEvidence.", "TF") is None
+    assert parse_prediction("Yes. \n\nEvidence.", "TF") is None
     assert canonical_label("True") == "yes"
 
 
