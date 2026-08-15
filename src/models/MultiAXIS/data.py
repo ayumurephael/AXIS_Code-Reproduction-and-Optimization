@@ -112,7 +112,7 @@ def normalize_and_serialize(
     interval: Tuple[int, int],
     epsilon: float = 1e-5,
     scale: int = 100,
-) -> Tuple[np.ndarray, List[List[int]]]:
+) -> Tuple[np.ndarray, List[List[int]], List[float], List[float]]:
     mean = values.mean(axis=0, keepdims=True, dtype=np.float64)
     std = values.std(axis=0, keepdims=True, dtype=np.float64)
     normalized = ((values.astype(np.float64) - mean) / (std + epsilon)).astype(np.float32)
@@ -120,7 +120,12 @@ def normalize_and_serialize(
     serialized = np.rint(normalized[start:end].T * scale).astype(np.int64).tolist()
     if len(serialized) != values.shape[1] or any(len(x) != end - start for x in serialized):
         raise AssertionError("Channel-major serialized window shape is inconsistent")
-    return normalized, serialized
+    return (
+        normalized,
+        serialized,
+        mean.reshape(-1).astype(np.float64).tolist(),
+        std.reshape(-1).astype(np.float64).tolist(),
+    )
 
 
 class ManifestDataset(Dataset):
@@ -184,7 +189,7 @@ class ManifestDataset(Dataset):
         interval = extract_interval(row, values.shape[0])
         if list(interval) != record["interval"]:
             raise RuntimeError("Manifest/question interval mismatch; source data changed")
-        normalized, serialized = normalize_and_serialize(
+        normalized, serialized, channel_means, channel_stds = normalize_and_serialize(
             values,
             interval,
             epsilon=self.window_epsilon,
@@ -210,6 +215,8 @@ class ManifestDataset(Dataset):
             "answer_was_canonicalized": answer_was_canonicalized,
             "interval": interval,
             "window_values": serialized,
+            "channel_means": channel_means,
+            "channel_stds": channel_stds,
             "time_count": values.shape[0],
             "channel_count": values.shape[1],
             "channel_ids": channel_ids,
@@ -248,6 +255,8 @@ def collate_multiaxis(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "answers": [sample.get("answer") for sample in samples],
         "intervals": [sample["interval"] for sample in samples],
         "window_values": [sample["window_values"] for sample in samples],
+        "channel_means": [sample["channel_means"] for sample in samples],
+        "channel_stds": [sample["channel_stds"] for sample in samples],
         "time_counts": [sample["time_count"] for sample in samples],
         "channel_counts": [sample["channel_count"] for sample in samples],
         "channel_ids": [sample["channel_ids"] for sample in samples],

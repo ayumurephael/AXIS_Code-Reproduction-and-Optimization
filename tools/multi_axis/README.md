@@ -7,7 +7,9 @@ This directory contains the full multivariate AXIS Phase-II pipeline specified i
 - Student LLM: `deepseek-ai/DeepSeek-R1-0528-Qwen3-8B`.
 - Also supported by the same model interface: `Qwen/Qwen3.5-9B`.
 - Frozen multivariate TimeRCD encoder and anomaly head, loaded strictly from the supplied checkpoint.
-- Full Phase D architecture: Step-Local, anomaly evidence, Joint-Local, 30 Fixed hints, 1,024 vocabulary prototypes.
+- Full Phase D architecture: Step-Local, one Channel-Local overview token per channel, question-conditioned Joint-Local, anomaly evidence, 30 Fixed hints, and 1,024 vocabulary prototypes. The complete Window + Step evidence remains present; Channel Routing is not implemented.
+- Numeric windows are approximately reversible: every channel header carries the full-valid-series mean and standard deviation plus the exact normalization epsilon.
+- Frozen-LLM question states are detached and disk-cached by model, tokenizer, and exact question text; only the zero-initialized bias-free `A_q` is trainable on the question-semantic path.
 - All ordinary cross-attention uses the CUDA FlashAttention backend; CPU exists only as a unit-test fallback.
 - Teacher supervision is answer-only NLL over the natural-language `model_answer` field only. The 17 empty `model_answer` rows are filtered; short-label fields are never used as a training fallback.
 - Training alignment follows the authoritative 62-shard teacher summary: 67,773 rows are matched one-to-one by normalized question text within each shard, and the remaining 47 are supplied by a SHA-256-audited same-index recovery bundle derived from the raw teacher records.
@@ -80,6 +82,7 @@ torchrun --standalone --nproc_per_node=4 tools/multi_axis/train.py \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
+  --question-semantic-cache-dir /path/to/run/question_semantics \
   --output-dir /path/to/run/training
 ```
 
@@ -91,10 +94,11 @@ torchrun --standalone --nproc_per_node=5 tools/multi_axis/train.py \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
+  --question-semantic-cache-dir /path/to/run/question_semantics \
   --output-dir /path/to/run/training
 ```
 
-To compare registered four-GPU candidates, add --benchmark-optimizer-steps N and use a distinct output directory for each configuration. Benchmark mode writes benchmark_summary.json and exits without validation or formal checkpoints. To resume a formal run after an interruption, provide --resume /path/to/run/training/last_train_state.pt. A valid completion has TRAINING_COMPLETE, one epochs.jsonl record and one hint checkpoint per configured epoch (20 for the current four-GPU experiment; 40 for the preserved five-GPU profile), and best_checkpoint.json pointing to the minimum validation answer NLL.
+To compare registered four-GPU candidates, add --benchmark-optimizer-steps N and use a distinct output directory for each configuration. Benchmark mode writes benchmark_summary.json and exits without validation or formal checkpoints. To resume a checkpoint produced by this architecture, provide `--resume /path/to/run/training/last_train_state.pt`. To migrate a pre-Channel-Local checkpoint, additionally pass `--migrate-legacy-architecture`; `--new-module-warmup-epochs 1` trains only Channel/A_q modules during the first resumed epoch while preserving the existing optimizer/scheduler/global step by name. A valid completion has TRAINING_COMPLETE, one epochs.jsonl record and one hint checkpoint per configured epoch (20 for the current four-GPU experiment; 40 for the preserved five-GPU profile), and best_checkpoint.json pointing to the minimum validation answer NLL.
 
 ## Four- or five-GPU inference
 
@@ -107,6 +111,7 @@ torchrun --standalone --nproc_per_node=4 tools/multi_axis/infer.py \
   --manifest-dir /path/to/run/manifests \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
   --hint-checkpoint /path/to/run/training/hint_epoch_XX.pt \
+  --question-semantic-cache-dir /path/to/run/question_semantics \
   --output-dir /path/to/run/predictions
 ```
 

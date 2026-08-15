@@ -34,6 +34,7 @@ class HintConfig:
     num_prototypes: int = 1024
     prototype_heads: int = 16
     fixed_tokens: int = 30
+    channel_heads: int = 4
     joint_heads: int = 4
     representation_epsilon: float = 1e-6
     window_epsilon: float = 1e-5
@@ -153,6 +154,10 @@ class MultiAxisConfig:
         self.training.validate()
         if self.timercd.d_proj % self.hints.joint_heads:
             raise ValueError("TimeRCD d_proj must be divisible by joint_heads.")
+        if self.timercd.d_proj % self.hints.channel_heads:
+            raise ValueError("TimeRCD d_proj must be divisible by channel_heads.")
+        if self.hints.channel_heads != 4:
+            raise ValueError("The specified Channel-Local pooling uses exactly 4 heads.")
         if self.hints.fixed_tokens != 30 or self.hints.num_prototypes != 1024:
             raise ValueError(
                 "The specified architecture fixes K_F=30 and N_proto=1024."

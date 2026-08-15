@@ -10,15 +10,17 @@ from .response_contracts import OUTPUT_CONTRACTS
 
 
 STEP_TOKEN = "<STEP_HINT>"
+CHANNEL_TOKEN = "<CHANNEL_HINT>"
 JOINT_TOKEN = "<JOINT_HINT>"
 FIXED_TOKEN = "<FIXED_HINT>"
-HINT_TOKENS = (STEP_TOKEN, JOINT_TOKEN, FIXED_TOKEN)
+HINT_TOKENS = (STEP_TOKEN, CHANNEL_TOKEN, JOINT_TOKEN, FIXED_TOKEN)
 
 SYSTEM_TEXT = """You are an expert in multivariate time-series analysis. Answer the exact
 question using the numeric and learned contextual evidence supplied in the
 user message.
 
-The numeric Window contains observed values from the target interval. Treat
+The numeric Window is a compact, approximately reversible representation of
+observed values from the target interval. Treat
 learned contextual hints as supporting model evidence, not as ground-truth
 labels or calibrated anomaly probabilities. Treat task-prior hints as general
 task information rather than sample-specific facts.
@@ -34,13 +36,20 @@ Return only the visible final response required by the Output Contract.
 Do not expose private chain-of-thought, scratch work, or hidden-reasoning tags."""
 
 EVIDENCE_RULES = """### Evidence-use rules
-The numeric Window contains observed values from the target interval.
+For every channel, mean and std are computed from the full valid series. Each
+listed integer is approximately 100 * (raw_value - mean) / (std + epsilon),
+where epsilon is stated below. Use normalized integers for deviations relative
+to the channel's own history. Use mean and std for raw-scale, absolute-amplitude,
+or cross-channel magnitude comparisons.
+
 Each numeric value is immediately followed by one Step-Local hint
 for the same channel and the same time step.
 
 Step-Local hints provide fine-grained contextual evidence.
-The Joint-Local hint summarizes evidence across all channels and
-all steps in the target window.
+Each Channel-Local hint summarizes one channel across the complete target
+window after multivariate TimeRCD contextualization. The question-conditioned
+Joint-Local hint summarizes evidence across all channels and all steps for the
+specific question.
 Fixed hints contain task-level priors, not sample-specific facts.
 
 Use all channels jointly when making the overall judgment.
@@ -57,6 +66,7 @@ class TokenizedPrompts:
     labels: Optional[torch.Tensor]
     prompt_lengths: List[int]
     step_positions: List[torch.Tensor]
+    channel_positions: List[torch.Tensor]
     joint_positions: List[torch.Tensor]
     fixed_positions: List[torch.Tensor]
     padding_side: str
@@ -71,10 +81,14 @@ class MultiAxisPromptBuilder:
         fixed_tokens: int = 30,
         max_context_tokens: int = 32768,
         include_joint: bool = True,
+        window_epsilon: float = 1e-5,
     ):
         self.tokenizer = tokenizer
         self.fixed_tokens = int(fixed_tokens)
         self.include_joint = bool(include_joint)
+        self.window_epsilon = float(window_epsilon)
+        if self.window_epsilon <= 0:
+            raise ValueError("window_epsilon must be positive")
         self.max_context_tokens = int(max_context_tokens)
         self.token_ids: Dict[str, int] = {}
         for token in HINT_TOKENS:
@@ -131,6 +145,8 @@ class MultiAxisPromptBuilder:
         start: int,
         end: int,
         window_values: Sequence[Sequence[int]],
+        channel_means: Sequence[float],
+        channel_stds: Sequence[float],
         question_group: str,
         channel_ids: Optional[Sequence[str]] = None,
     ) -> str:
@@ -150,25 +166,50 @@ class MultiAxisPromptBuilder:
         )
         if len(identifiers) != len(window_values):
             raise ValueError("Channel id count does not match the numeric Window")
+        if len(channel_means) != len(window_values) or len(channel_stds) != len(
+            window_values
+        ):
+            raise ValueError("Channel statistic count does not match the numeric Window")
 
         fixed = " ".join([FIXED_TOKEN] * self.fixed_tokens)
+        overview_lines = [
+            f"Channel {identifier} [mean={self._format_stat(mean)}, "
+            f"std={self._format_stat(std)}]: {CHANNEL_TOKEN}"
+            for identifier, mean, std in zip(
+                identifiers, channel_means, channel_stds
+            )
+        ]
         channel_lines = []
-        for identifier, values in zip(identifiers, window_values):
+        for identifier, mean, std, values in zip(
+            identifiers, channel_means, channel_stds, window_values
+        ):
             evidence = " ".join(
                 f"{int(value)} {STEP_TOKEN}" for value in values
             )
-            channel_lines.append(f"Channel {identifier}: {evidence}")
+            channel_lines.append(
+                f"Channel {identifier} [mean={self._format_stat(mean)}, "
+                f"std={self._format_stat(std)}]: {evidence}"
+            )
         sections = [
             USER_PREAMBLE,
             f"### Question\n{question.strip()}",
             EVIDENCE_RULES,
             f"### Task-prior hints\n{fixed}",
             (
+                "### All-channel overview\n"
+                "Each channel appears once at overview resolution. Channel-Local "
+                "hints are factual, question-independent summaries of the complete "
+                "target window.\n"
+                + "\n".join(overview_lines)
+            ),
+            (
                 "### Target window\n"
                 f"Global interval: [{start}, {end})\n"
                 f"Window length: {length}\n"
-                "Each value is normalized within its own channel, multiplied by 100, "
-                "and rounded to an integer."
+                f"Normalization epsilon: {self._format_stat(self.window_epsilon)}\n"
+                "Each integer is rounded from 100 * (raw_value - mean) / "
+                "(std + epsilon). Therefore raw_value is approximately mean + "
+                "(std + epsilon) * integer / 100."
             ),
             (
                 "### Channel-aligned Window and Step-Local evidence\n"
@@ -179,10 +220,20 @@ class MultiAxisPromptBuilder:
             ),
         ]
         if self.include_joint:
-            sections.append(f"### Joint-Local multivariate evidence\n{JOINT_TOKEN}")
+            sections.append(
+                "### Question-conditioned full-window Joint-Local evidence\n"
+                f"{JOINT_TOKEN}"
+            )
         # Each contract already owns its single heading. Never append an answer prefill.
         sections.append(OUTPUT_CONTRACTS[question_group])
         return "\n\n".join(sections)
+
+    @staticmethod
+    def _format_stat(value: float) -> str:
+        number = float(value)
+        if not torch.isfinite(torch.tensor(number)):
+            raise ValueError("Channel statistics must be finite")
+        return format(number, ".10g")
 
     def forbidden_reasoning_token_sequences(self) -> List[List[int]]:
         sequences: List[List[int]] = []
@@ -197,12 +248,21 @@ class MultiAxisPromptBuilder:
         questions: Sequence[str],
         intervals: Sequence[Tuple[int, int]],
         window_values: Sequence[Sequence[Sequence[int]]],
+        channel_means: Sequence[Sequence[float]],
+        channel_stds: Sequence[Sequence[float]],
         channel_ids: Sequence[Sequence[str]],
         question_groups: Sequence[str],
         answers: Optional[Sequence[str]] = None,
     ) -> TokenizedPrompts:
         batch = len(questions)
-        related = (intervals, window_values, channel_ids, question_groups)
+        related = (
+            intervals,
+            window_values,
+            channel_means,
+            channel_stds,
+            channel_ids,
+            question_groups,
+        )
         if any(len(values) != batch for values in related):
             raise ValueError("Prompt batch fields must have identical lengths")
         if answers is not None and len(answers) != batch:
@@ -217,6 +277,8 @@ class MultiAxisPromptBuilder:
                 start,
                 end,
                 window_values[index],
+                channel_means[index],
+                channel_stds[index],
                 question_groups[index],
                 channel_ids[index],
             )
@@ -262,6 +324,7 @@ class MultiAxisPromptBuilder:
         attention_mask = torch.zeros(batch, max_len, dtype=torch.long)
         labels = torch.full((batch, max_len), -100, dtype=torch.long) if answers is not None else None
         step_positions: List[torch.Tensor] = []
+        channel_positions: List[torch.Tensor] = []
         joint_positions: List[torch.Tensor] = []
         fixed_positions: List[torch.Tensor] = []
         prompt_lengths: List[int] = []
@@ -281,6 +344,9 @@ class MultiAxisPromptBuilder:
                 valid = attention_mask[index].bool()
                 row_ids = input_ids[index]
                 step = torch.where((row_ids == self.token_ids[STEP_TOKEN]) & valid)[0]
+                channel = torch.where(
+                    (row_ids == self.token_ids[CHANNEL_TOKEN]) & valid
+                )[0]
                 joint = torch.where((row_ids == self.token_ids[JOINT_TOKEN]) & valid)[0]
                 fixed = torch.where((row_ids == self.token_ids[FIXED_TOKEN]) & valid)[0]
                 expected_steps = len(window_values[index]) * (
@@ -289,6 +355,12 @@ class MultiAxisPromptBuilder:
                 if step.numel() != expected_steps:
                     raise AssertionError(
                         f"STEP placeholder mismatch: {step.numel()} != {expected_steps}"
+                    )
+                expected_channels = len(window_values[index])
+                if channel.numel() != expected_channels:
+                    raise AssertionError(
+                        f"CHANNEL placeholder mismatch: {channel.numel()} != "
+                        f"{expected_channels}"
                     )
                 expected_joint = 1 if self.include_joint else 0
                 if joint.numel() != expected_joint:
@@ -300,6 +372,7 @@ class MultiAxisPromptBuilder:
                         f"FIXED placeholder mismatch: {fixed.numel()} != {self.fixed_tokens}"
                     )
                 step_positions.append(step)
+                channel_positions.append(channel)
                 joint_positions.append(joint)
                 fixed_positions.append(fixed)
         if labels is not None and int(labels.ne(-100).sum().item()) == 0:
@@ -310,6 +383,7 @@ class MultiAxisPromptBuilder:
             labels=labels,
             prompt_lengths=prompt_lengths,
             step_positions=step_positions,
+            channel_positions=channel_positions,
             joint_positions=joint_positions,
             fixed_positions=fixed_positions,
             padding_side=padding_side,

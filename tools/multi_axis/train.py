@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import contextlib
 import json
 import math
@@ -24,6 +25,152 @@ from torch.utils.data import DataLoader, Sampler, Subset
 from src.models.MultiAXIS.config import DEEPSEEK_MODEL_ID, MultiAxisConfig
 from src.models.MultiAXIS.data import ManifestDataset, collate_multiaxis
 from src.models.MultiAXIS.model import MultiAxisForConditionalGeneration
+
+
+NEW_ARCHITECTURE_PARAMETER_PREFIXES = (
+    "channel_query",
+    "channel_pool.",
+    "question_projection.",
+)
+
+
+def is_new_architecture_parameter(name: str) -> bool:
+    return any(
+        name == prefix or name.startswith(prefix)
+        for prefix in NEW_ARCHITECTURE_PARAMETER_PREFIXES
+    )
+
+
+def set_new_module_warmup(
+    model: MultiAxisForConditionalGeneration,
+    enabled: bool,
+    formal_trainable_names: Sequence[str],
+) -> List[torch.nn.Parameter]:
+    allowed = set(formal_trainable_names)
+    active: List[torch.nn.Parameter] = []
+    for name, parameter in model.hint_tuner.named_parameters():
+        requires_grad = name in allowed and (
+            not enabled or is_new_architecture_parameter(name)
+        )
+        parameter.requires_grad_(requires_grad)
+        if requires_grad:
+            active.append(parameter)
+    if enabled and not active:
+        raise RuntimeError("New-module warm-up selected no trainable parameters")
+    return active
+
+
+def migrate_legacy_training_state(
+    model: MultiAxisForConditionalGeneration,
+    optimizer: AdamW,
+    scheduler: LambdaLR,
+    resume: Dict,
+) -> Dict:
+    legacy_state = resume["hint_tuner_state_dict"]
+    current_module_state = model.hint_tuner.state_dict()
+    loadable_state = dict(legacy_state)
+    expanded_parameters = {}
+    for name, old_value in legacy_state.items():
+        current_value = current_module_state.get(name)
+        if current_value is None or tuple(old_value.shape) == tuple(current_value.shape):
+            continue
+        if (
+            name == "prototype_mapping"
+            and old_value.ndim == 2
+            and current_value.shape[0] == old_value.shape[0]
+            and current_value.shape[1] == old_value.shape[1] + 1
+        ):
+            expanded = current_value.detach().clone()
+            expanded[:, : old_value.shape[1]].copy_(old_value)
+            loadable_state[name] = expanded
+            expanded_parameters[name] = {
+                "old_shape": list(old_value.shape),
+                "new_shape": list(current_value.shape),
+                "new_columns_initialized": 1,
+            }
+            continue
+        raise RuntimeError(
+            f"Unsupported legacy parameter shape migration for {name}: "
+            f"{tuple(old_value.shape)} -> {tuple(current_value.shape)}"
+        )
+    incompatibility = model.hint_tuner.load_state_dict(loadable_state, strict=False)
+    expected_missing = {
+        "channel_query",
+        "channel_pool.q_proj.weight",
+        "channel_pool.k_proj.weight",
+        "channel_pool.v_proj.weight",
+        "channel_pool.out_proj.weight",
+        "question_projection.weight",
+    }
+    missing = set(incompatibility.missing_keys)
+    unexpected = set(incompatibility.unexpected_keys)
+    if missing != expected_missing or unexpected:
+        raise RuntimeError(
+            "Legacy architecture state mismatch: "
+            f"missing={sorted(missing)}, unexpected={sorted(unexpected)}"
+        )
+    if int(torch.count_nonzero(model.hint_tuner.question_projection.weight)) != 0:
+        raise AssertionError("A_q must remain exactly zero after legacy migration")
+
+    old_optimizer = resume["optimizer_state_dict"]
+    if len(old_optimizer.get("param_groups", [])) != 1:
+        raise RuntimeError("Legacy optimizer must contain exactly one parameter group")
+    old_ids = list(old_optimizer["param_groups"][0]["params"])
+    old_names = list(legacy_state.keys())
+    if len(old_ids) != len(old_names):
+        raise RuntimeError(
+            "Cannot map legacy optimizer by name: parameter/state counts differ"
+        )
+    old_id_by_name = dict(zip(old_names, old_ids))
+
+    current = optimizer.state_dict()
+    if len(current["param_groups"]) != 1:
+        raise RuntimeError("Current optimizer must contain exactly one parameter group")
+    current_names = [
+        name
+        for name, parameter in model.hint_tuner.named_parameters()
+        if parameter.requires_grad
+    ]
+    current_ids = list(current["param_groups"][0]["params"])
+    if len(current_names) != len(current_ids):
+        raise RuntimeError("Current optimizer parameter-name mapping is inconsistent")
+    migrated_state = {}
+    restored_names = []
+    fresh_names = []
+    for name, current_id in zip(current_names, current_ids):
+        old_id = old_id_by_name.get(name)
+        if old_id is None:
+            fresh_names.append(name)
+            continue
+        if old_id in old_optimizer["state"]:
+            migrated_entry = copy.deepcopy(old_optimizer["state"][old_id])
+            old_parameter = legacy_state[name]
+            current_parameter = dict(model.hint_tuner.named_parameters())[name]
+            if tuple(old_parameter.shape) != tuple(current_parameter.shape):
+                for field, value in list(migrated_entry.items()):
+                    if not torch.is_tensor(value) or tuple(value.shape) != tuple(
+                        old_parameter.shape
+                    ):
+                        continue
+                    expanded = value.new_zeros(current_parameter.shape, device="cpu")
+                    expanded[:, : old_parameter.shape[1]].copy_(value)
+                    migrated_entry[field] = expanded
+            migrated_state[current_id] = migrated_entry
+        restored_names.append(name)
+    migrated_group = copy.deepcopy(old_optimizer["param_groups"][0])
+    migrated_group["params"] = current_ids
+    optimizer.load_state_dict(
+        {"state": migrated_state, "param_groups": [migrated_group]}
+    )
+    scheduler.load_state_dict(resume["scheduler_state_dict"])
+    return {
+        "schema": "multi-axis-legacy-architecture-migration-v1",
+        "missing_initialized_parameters": sorted(missing),
+        "restored_optimizer_parameter_names": restored_names,
+        "fresh_optimizer_parameter_names": fresh_names,
+        "question_projection_nonzero_count": 0,
+        "expanded_legacy_parameters": expanded_parameters,
+    }
 
 
 class GroupedDistributedSampler(Sampler[int]):
@@ -112,6 +259,8 @@ def move_model_inputs(batch: Dict, device: torch.device) -> Dict:
         "intervals": batch["intervals"],
         "channel_counts": batch["channel_counts"],
         "window_values": batch["window_values"],
+        "channel_means": batch["channel_means"],
+        "channel_stds": batch["channel_stds"],
         "channel_ids": batch["channel_ids"],
         "question_groups": batch["question_groups"],
     }
@@ -198,6 +347,7 @@ def environment_manifest(
             p.numel() for p in model.parameters() if p.requires_grad
         ),
         "trainable_parameter_names": model.trainable_parameter_names(),
+        "question_semantic_cache": model.question_semantic_cache_manifest(),
     }
 
 
@@ -321,8 +471,20 @@ def parse_args():
     parser.add_argument("--data-root", required=True)
     parser.add_argument("--manifest-dir", required=True)
     parser.add_argument("--timercd-checkpoint", required=True)
+    parser.add_argument("--question-semantic-cache-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--resume", default=None)
+    parser.add_argument(
+        "--migrate-legacy-architecture",
+        action="store_true",
+        help="Migrate a pre-Channel-Local training state by name with zero A_q.",
+    )
+    parser.add_argument(
+        "--new-module-warmup-epochs",
+        type=int,
+        default=0,
+        help="After a legacy migration, train only new Channel/Question modules first.",
+    )
     parser.add_argument(
         "--benchmark-optimizer-steps",
         type=int,
@@ -339,6 +501,12 @@ def main():
         raise ValueError("--benchmark-optimizer-steps must be non-negative")
     if args.benchmark_optimizer_steps and args.resume:
         raise ValueError("A benchmark run cannot resume a formal training state")
+    if args.migrate_legacy_architecture and not args.resume:
+        raise ValueError("Legacy architecture migration requires --resume")
+    if args.new_module_warmup_epochs < 0:
+        raise ValueError("--new-module-warmup-epochs must be non-negative")
+    if args.new_module_warmup_epochs and not args.migrate_legacy_architecture:
+        raise ValueError("New-module warm-up is only valid for a legacy migration")
     if config.llm.model_name != DEEPSEEK_MODEL_ID:
         raise ValueError("The confirmed formal run must use DeepSeek-R1-0528-Qwen3-8B")
     rank, world_size, local_rank, device = distributed_setup()
@@ -398,6 +566,7 @@ def main():
     model = MultiAxisForConditionalGeneration.from_pretrained(
         config, token=hf_token, device=device
     )
+    model.configure_question_semantic_cache(args.question_semantic_cache_dir)
     model.load_timercd_checkpoint(args.timercd_checkpoint)
     model.timercd.to(device)
     model.hint_tuner.to(device)
@@ -412,11 +581,13 @@ def main():
         )
     dist.barrier()
 
-    trainable = [
-        parameter
-        for parameter in model.hint_tuner.parameters()
+    formal_trainable = [
+        (name, parameter)
+        for name, parameter in model.hint_tuner.named_parameters()
         if parameter.requires_grad
     ]
+    formal_trainable_names = [name for name, _ in formal_trainable]
+    trainable = [parameter for _, parameter in formal_trainable]
     for parameter in trainable:
         dist.broadcast(parameter.data, src=0)
     optimizer = AdamW(
@@ -434,15 +605,37 @@ def main():
     global_step = 0
     best_nll = float("inf")
     best_epoch = None
+    migration_audit = None
     if args.resume:
         resume = torch.load(args.resume, map_location="cpu", weights_only=False)
-        model.hint_tuner.load_state_dict(resume["hint_tuner_state_dict"], strict=True)
-        optimizer.load_state_dict(resume["optimizer_state_dict"])
-        scheduler.load_state_dict(resume["scheduler_state_dict"])
+        if args.migrate_legacy_architecture:
+            migration_audit = migrate_legacy_training_state(
+                model, optimizer, scheduler, resume
+            )
+        else:
+            model.hint_tuner.load_state_dict(
+                resume["hint_tuner_state_dict"], strict=True
+            )
+            optimizer.load_state_dict(resume["optimizer_state_dict"])
+            scheduler.load_state_dict(resume["scheduler_state_dict"])
         start_epoch = int(resume["completed_epoch"]) + 1
         global_step = int(resume["global_step"])
         best_nll = float(resume["best_nll"])
         best_epoch = resume.get("best_epoch")
+        if migration_audit is not None:
+            migration_audit.update(
+                {
+                    "source": str(Path(args.resume).resolve()),
+                    "completed_epoch": int(resume["completed_epoch"]),
+                    "global_step": global_step,
+                    "new_module_warmup_epochs": args.new_module_warmup_epochs,
+                }
+            )
+            if rank == 0:
+                (output_dir / "architecture_transition.json").write_text(
+                    json.dumps(migration_audit, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
 
     if rank == 0:
         manifest = environment_manifest(
@@ -478,6 +671,13 @@ def main():
         benchmark_start = time.perf_counter()
 
     for epoch in range(start_epoch, config.training.epochs + 1):
+        warmup_active = bool(
+            args.migrate_legacy_architecture
+            and epoch < start_epoch + args.new_module_warmup_epochs
+        )
+        active_trainable = set_new_module_warmup(
+            model, warmup_active, formal_trainable_names
+        )
         train_sampler.set_epoch(epoch)
         model.train()
         loader_iterator = iter(train_loader)
@@ -490,9 +690,14 @@ def main():
         while remaining:
             group_size = min(config.training.accumulation_steps, remaining)
             optimizer.zero_grad(set_to_none=True)
-            with torch.autocast("cuda", dtype=torch.bfloat16):
-                prototype_graph = model.build_prototype_bank()
-            prototype_leaf = prototype_graph.detach().requires_grad_(True)
+            if model.hint_tuner.prototype_mapping.requires_grad:
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    prototype_graph = model.build_prototype_bank()
+                prototype_leaf = prototype_graph.detach().requires_grad_(True)
+            else:
+                with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+                    prototype_graph = model.build_prototype_bank()
+                prototype_leaf = prototype_graph.detach()
             group_loss = 0.0
             for _ in range(group_size):
                 batch = next(loader_iterator)
@@ -523,12 +728,13 @@ def main():
                 epoch_examples += len(batch["answers"])
                 epoch_canonicalized += sum(batch["answer_was_canonicalized"])
                 group_loss += outputs.loss.detach().item()
-            if prototype_leaf.grad is None:
-                raise RuntimeError("Cached prototype bank did not receive a gradient")
-            prototype_graph.backward(prototype_leaf.grad)
-            average_trainable_gradients(trainable, world_size)
+            if prototype_graph.requires_grad:
+                if prototype_leaf.grad is None:
+                    raise RuntimeError("Cached prototype bank did not receive a gradient")
+                prototype_graph.backward(prototype_leaf.grad)
+            average_trainable_gradients(active_trainable, world_size)
             gradient_norm = torch.nn.utils.clip_grad_norm_(
-                trainable, config.training.gradient_clip_norm
+                active_trainable, config.training.gradient_clip_norm
             )
             optimizer.step()
             scheduler.step()
@@ -637,6 +843,7 @@ def main():
                     "canonicalized_teacher_targets"
                 ],
                 "learning_rate": scheduler.get_last_lr()[0],
+                "new_module_warmup_active": warmup_active,
             }
             append_jsonl(output_dir / "epochs.jsonl", epoch_record)
             checkpoint_path = output_dir / f"hint_epoch_{epoch:02d}.pt"
@@ -665,7 +872,8 @@ def main():
                 json.dumps(best_record, indent=2), encoding="utf-8"
             )
             train_state = {
-                "format": "multi-axis-training-state-v1",
+                "format": "multi-axis-training-state-v2-channel-question",
+                "architecture": "step-channel-question-conditioned-joint-v1",
                 "completed_epoch": epoch,
                 "global_step": global_step,
                 "best_nll": best_nll,

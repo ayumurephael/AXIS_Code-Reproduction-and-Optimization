@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -25,6 +26,7 @@ from src.models.MultiAXIS.model import (
     rms_unit,
 )
 from src.models.MultiAXIS.prompting import HINT_TOKENS, MultiAxisPromptBuilder
+from src.models.MultiAXIS.question_semantics import QuestionSemanticDiskCache
 from src.models.MultiAXIS.response_contracts import (
     OUTPUT_CONTRACTS,
     canonicalize_teacher_answer,
@@ -48,7 +50,7 @@ from tools.multi_axis.label_metrics import (
     summarize as summarize_label_metrics,
     target_label as metric_target_label,
 )
-from tools.multi_axis.train import compute_timercd_cached
+from tools.multi_axis.train import compute_timercd_cached, migrate_legacy_training_state
 from tools.multi_axis.audit_teacher_targets import audit_split
 
 
@@ -67,6 +69,9 @@ class FakeTokenizer:
                 self.vocab[token] = len(self.vocab)
                 added += 1
         return added
+
+    def __len__(self):
+        return len(self.vocab)
 
     def encode(self, text, add_special_tokens=True):
         pieces = re.findall(r"<[^>]+>|\S+", text)
@@ -101,25 +106,38 @@ def test_prompt_placeholder_counts_and_order():
     )
     values = [[-12, -8, 15], [3, 4, 29]]
     text = builder.build_text(
-        "Which channel changes?", 10, 13, values, "MC", ["ch_0", "ch_1"]
+        "Which channel changes?",
+        10,
+        13,
+        values,
+        [1.25, 10.0],
+        [0.5, 0.01],
+        "MC",
+        ["ch_0", "ch_1"],
     )
     assert text.index("### Question") < text.index("### Task-prior hints")
-    assert text.index("### Task-prior hints") < text.index("### Channel-aligned")
-    assert text.index("### Channel-aligned") < text.index("### Joint-Local")
+    assert text.index("### Task-prior hints") < text.index("### All-channel overview")
+    assert text.index("### All-channel overview") < text.index("### Channel-aligned")
+    assert text.index("### Channel-aligned") < text.index("### Question-conditioned")
     assert "from t=10 through t=12" in text
     assert "pair offset k corresponds exactly to t=10+k" in text
-    assert "Channel ch_0: -12 <STEP_HINT> -8 <STEP_HINT> 15 <STEP_HINT>" in text
+    assert "Channel ch_0 [mean=1.25, std=0.5]: <CHANNEL_HINT>" in text
+    assert "Channel ch_0 [mean=1.25, std=0.5]: -12 <STEP_HINT>" in text
+    assert "raw_value is approximately mean" in text
     assert text.count("### Output Contract") == 1
     assert not text.endswith("Answer:")
     tokenized = builder.tokenize(
         ["Which channel changes?"],
         [(10, 13)],
         [values],
+        [[1.25, 10.0]],
+        [[0.5, 0.01]],
         [["ch_0", "ch_1"]],
         ["MC"],
         ["Answer: A\n\nch_0 changes most."],
     )
     assert tokenized.step_positions[0].numel() == 6
+    assert tokenized.channel_positions[0].numel() == 2
     assert tokenized.joint_positions[0].numel() == 1
     assert tokenized.fixed_positions[0].numel() == 30
     assert torch.all(tokenized.labels[0, : tokenized.prompt_lengths[0]] == -100)
@@ -280,13 +298,15 @@ def test_attention_backend_audit_rejects_eager_resolution():
 
 def test_channelwise_normalization_and_serialization():
     values = np.asarray([[1.0, 10.0], [2.0, 10.0], [3.0, 10.0]], dtype=np.float32)
-    normalized, window = normalize_and_serialize(
+    normalized, window, means, stds = normalize_and_serialize(
         values, (0, 3), epsilon=1e-5, scale=100
     )
     assert normalized.shape == values.shape
     assert abs(float(normalized[:, 0].mean())) < 1e-6
     assert window[1] == [0, 0, 0]
     assert window[0][0] < 0 < window[0][-1]
+    assert means == pytest.approx([2.0, 10.0])
+    assert stds[0] > 0 and stds[1] == 0
 
 
 def test_dynamic_timercd_encoder_accepts_runtime_channel_count():
@@ -361,6 +381,7 @@ def test_hint_tuner_shapes_and_zero_initialized_anomaly_gate():
         num_prototypes=7,
         prototype_heads=4,
         fixed_tokens=5,
+        channel_heads=4,
         joint_heads=2,
         representation_epsilon=1e-6,
         require_flash_attention=True,
@@ -372,16 +393,21 @@ def test_hint_tuner_shapes_and_zero_initialized_anomaly_gate():
     logits_a = torch.randn(2, 5, 3, 2)
     logits_b = logits_a * 10
     words = torch.randn(13, 16)
-    first = tuner(local, logits_a, [(1, 4), (0, 2)], [3, 2], words)
-    second = tuner(local, logits_b, [(1, 4), (0, 2)], [3, 2], words)
+    questions_a = torch.randn(2, 16)
+    questions_b = torch.randn(2, 16)
+    first = tuner(local, logits_a, [(1, 4), (0, 2)], [3, 2], questions_a, words)
+    second = tuner(local, logits_b, [(1, 4), (0, 2)], [3, 2], questions_b, words)
     assert [item.shape for item in first[0]] == [(9, 16), (4, 16)]
-    assert first[1].shape == (2, 1, 16)
-    assert first[2].shape == (2, 5, 16)
+    assert [item.shape for item in first[1]] == [(3, 16), (2, 16)]
+    assert first[2].shape == (2, 1, 16)
+    assert first[3].shape == (2, 5, 16)
+    assert torch.count_nonzero(tuner.question_projection.weight) == 0
+    assert torch.allclose(first[2], second[2], atol=1e-5)
     for left, right in zip(first[0], second[0]):
         assert torch.allclose(left, right, atol=1e-5)
     with torch.no_grad():
         tuner.anomaly_direction.fill_(0.25)
-    third = tuner(local, logits_b, [(1, 4), (0, 2)], [3, 2], words)
+    third = tuner(local, logits_b, [(1, 4), (0, 2)], [3, 2], questions_b, words)
     assert not torch.allclose(first[0][0], third[0][0])
 
 
@@ -651,6 +677,7 @@ def test_phase_a_disables_anomaly_and_joint_paths():
         num_prototypes=7,
         prototype_heads=4,
         fixed_tokens=5,
+        channel_heads=4,
         joint_heads=2,
         representation_epsilon=1e-6,
         require_flash_attention=True,
@@ -664,14 +691,15 @@ def test_phase_a_disables_anomaly_and_joint_paths():
     assert all(
         not parameter.requires_grad for parameter in tuner.joint_pool.parameters()
     )
+    assert not tuner.question_projection.weight.requires_grad
 
     local = torch.randn(1, 4, 2, 8)
     words = torch.randn(13, 16)
     with torch.no_grad():
         tuner.anomaly_direction.fill_(10.0)
-    low = tuner(local, torch.zeros(1, 4, 2, 2), [(0, 3)], [2], words)
-    high = tuner(local, torch.randn(1, 4, 2, 2) * 100, [(0, 3)], [2], words)
-    assert low[1] is None and high[1] is None
+    low = tuner(local, torch.zeros(1, 4, 2, 2), [(0, 3)], [2], None, words)
+    high = tuner(local, torch.randn(1, 4, 2, 2) * 100, [(0, 3)], [2], None, words)
+    assert low[2] is None and high[2] is None
     assert torch.allclose(low[0][0], high[0][0], atol=1e-5)
 
 
@@ -683,20 +711,111 @@ def test_prompt_can_remove_joint_placeholder_for_ablation():
     )
     values = [[1, 2], [3, 4]]
     text = builder.build_text(
-        "Is the interval anomalous?", 0, 2, values, "TF", ["ch_0", "ch_1"]
+        "Is the interval anomalous?",
+        0,
+        2,
+        values,
+        [0.0, 0.0],
+        [1.0, 1.0],
+        "TF",
+        ["ch_0", "ch_1"],
     )
-    assert "### Joint-Local multivariate evidence" not in text
+    assert "### Question-conditioned full-window Joint-Local evidence" not in text
     tokenized = builder.tokenize(
         ["Is the interval anomalous?"],
         [(0, 2)],
         [values],
+        [[0.0, 0.0]],
+        [[1.0, 1.0]],
         [["ch_0", "ch_1"]],
         ["TF"],
         ["Yes.\n\nThe interval contains a coordinated change."],
     )
     assert tokenized.step_positions[0].numel() == 4
+    assert tokenized.channel_positions[0].numel() == 2
     assert tokenized.joint_positions[0].numel() == 0
     assert tokenized.fixed_positions[0].numel() == 3
+
+
+
+
+def test_question_semantic_disk_cache_uses_exact_text_and_detaches(tmp_path):
+    tokenizer = FakeTokenizer()
+    tokenizer.add_special_tokens({"additional_special_tokens": list(HINT_TOKENS)})
+    cache = QuestionSemanticDiskCache(
+        tmp_path / "question-cache",
+        model_id="frozen-model-a",
+        tokenizer=tokenizer,
+        hidden_size=16,
+    )
+    source = torch.randn(16, requires_grad=True)
+    stored = cache.store("Exact question?", source)
+    loaded = cache.load("Exact question?")
+    assert loaded is not None and not loaded.requires_grad
+    assert stored.dtype == torch.bfloat16 and torch.equal(stored, loaded)
+    assert cache.key("Exact question?") != cache.key("exact question?")
+    assert cache.key("Exact question?") != cache.key(" Exact question?")
+
+
+def test_legacy_migration_expands_prototype_and_adam_state_with_zero_aq():
+    config = SimpleNamespace(
+        num_prototypes=7,
+        prototype_heads=4,
+        fixed_tokens=5,
+        channel_heads=4,
+        joint_heads=2,
+        representation_epsilon=1e-6,
+        require_flash_attention=True,
+        ablation_phase="D",
+    )
+    tuner = MultiAxisHintTuner(
+        vocab_size=14, llm_hidden_size=16, d_proj=8, config=config
+    )
+    legacy = {
+        name: value.detach().clone()
+        for name, value in tuner.state_dict().items()
+        if not (
+            name == "channel_query"
+            or name.startswith("channel_pool.")
+            or name.startswith("question_projection.")
+        )
+    }
+    legacy["prototype_mapping"] = legacy["prototype_mapping"][:, :-1].clone()
+    optimizer = torch.optim.AdamW(tuner.parameters(), lr=1e-4)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda _: 1.0)
+    old_ids = list(range(len(legacy)))
+    old_group = copy.deepcopy(optimizer.state_dict()["param_groups"][0])
+    old_group["params"] = old_ids
+    old_optimizer_state = {
+        old_id: {
+            "step": torch.tensor(3.0),
+            "exp_avg": torch.zeros_like(value),
+            "exp_avg_sq": torch.zeros_like(value),
+        }
+        for old_id, value in zip(old_ids, legacy.values())
+    }
+    resume = {
+        "hint_tuner_state_dict": legacy,
+        "optimizer_state_dict": {
+            "state": old_optimizer_state,
+            "param_groups": [old_group],
+        },
+        "scheduler_state_dict": scheduler.state_dict(),
+    }
+    audit = migrate_legacy_training_state(
+        SimpleNamespace(hint_tuner=tuner), optimizer, scheduler, resume
+    )
+    assert torch.count_nonzero(tuner.question_projection.weight) == 0
+    assert audit["expanded_legacy_parameters"]["prototype_mapping"] == {
+        "old_shape": [7, 13],
+        "new_shape": [7, 14],
+        "new_columns_initialized": 1,
+    }
+    prototype_id = optimizer.state_dict()["param_groups"][0]["params"][0]
+    assert optimizer.state_dict()["state"][prototype_id]["exp_avg"].shape == (
+        7,
+        14,
+    )
 
 
 def test_eval_index_alignment_handles_bias_neutralized_question_rewrite():

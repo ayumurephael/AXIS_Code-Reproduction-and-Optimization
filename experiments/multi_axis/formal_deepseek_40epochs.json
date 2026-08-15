@@ -14,6 +14,7 @@
     "num_prototypes": 1024,
     "prototype_heads": 16,
     "fixed_tokens": 30,
+    "channel_heads": 4,
     "joint_heads": 4,
     "representation_epsilon": 1e-6,
     "window_epsilon": 1e-5,
