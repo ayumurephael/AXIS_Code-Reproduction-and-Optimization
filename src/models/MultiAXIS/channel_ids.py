@@ -8,6 +8,10 @@ _CANONICAL = re.compile(r"\Ach_(0|[1-9]\d*)\Z", re.IGNORECASE)
 _LEGACY_ALIAS = re.compile(
     r"\A(?:ch|channel)[ _-]?(0|[1-9]\d*)\Z", re.IGNORECASE
 )
+_QUESTION_REFERENCE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:ch|channel)[ _-]?(0|[1-9]\d*)(?![A-Za-z0-9_])",
+    re.IGNORECASE,
+)
 
 
 def canonical_channel_id(value: Any, *, fallback_index: Optional[int] = None) -> str:
@@ -44,3 +48,15 @@ def canonical_channel_ids(
     if len(set(identifiers)) != len(identifiers):
         raise ValueError("Channel identifiers must be unique within one series")
     return identifiers
+
+
+def canonicalize_question_channel_references(question: str) -> str:
+    """Use the exact ``ch_<id>`` protocol in the question seen by both LLM paths.
+
+    Source JSONL integrity is checked before this transform. It intentionally
+    rewrites only numeric channel anchors, leaving all other question text byte
+    for byte unchanged.
+    """
+
+    text = str(question)
+    return _QUESTION_REFERENCE.sub(lambda match: f"ch_{int(match.group(1))}", text)
