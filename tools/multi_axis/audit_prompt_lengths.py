@@ -48,6 +48,7 @@ def main() -> None:
         max_context_tokens=config.llm.max_context_tokens,
         include_joint=True,
         use_images=False,
+        window_epsilon=config.hints.window_epsilon,
     )
     result = {
         "max_context_tokens": config.llm.max_context_tokens,
@@ -73,6 +74,8 @@ def main() -> None:
                 [sample["question"]],
                 [sample["interval"]],
                 [sample["window_values"]],
+                [sample["channel_means"]],
+                [sample["channel_stds"]],
                 [sample["channel_ids"]],
                 [sample["question_group"]],
                 [None],

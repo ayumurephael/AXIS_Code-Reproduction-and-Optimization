@@ -66,6 +66,8 @@ def model_inputs(batch, device):
         "intervals": batch["intervals"],
         "channel_counts": batch["channel_counts"],
         "window_values": batch["window_values"],
+        "channel_means": batch["channel_means"],
+        "channel_stds": batch["channel_stds"],
         "channel_ids": batch["channel_ids"],
         "question_groups": batch["question_groups"],
         "image_paths": batch["image_paths"],
@@ -220,6 +222,7 @@ def parse_args():
     parser.add_argument("--image-root", default=None)
     parser.add_argument("--timercd-checkpoint", required=True)
     parser.add_argument("--hint-checkpoint", required=True)
+    parser.add_argument("--question-semantic-cache-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument(
         "--datasets",
@@ -278,6 +281,7 @@ def main():
         output_dir.mkdir(parents=True, exist_ok=True)
     dist.barrier()
     model = MultiAxisForConditionalGeneration.from_pretrained(config, token=os.environ.get("HF_TOKEN") or None, device=device)
+    model.configure_question_semantic_cache(args.question_semantic_cache_dir)
     model.load_timercd_checkpoint(args.timercd_checkpoint)
     model.timercd.to(device)
     model.hint_tuner.to(device)

@@ -15,6 +15,7 @@ from torch.utils.checkpoint import checkpoint
 from .attention import FlashCrossAttention
 from .config import MultiAxisConfig, QWEN3_VL_MODEL_ID
 from .prompting import HINT_TOKENS, MultiAxisPromptBuilder, TokenizedPrompts
+from .question_semantics import QuestionSemanticDiskCache, question_semantic_text
 from .timercd import FrozenTimeRCD
 
 
@@ -87,12 +88,19 @@ class MultiAxisHintTuner(nn.Module):
             config.prototype_heads,
             require_flash=config.require_flash_attention,
         )
+        self.channel_query = nn.Parameter(torch.empty(1, 1, d_proj))
+        self.channel_pool = FlashCrossAttention(
+            d_proj,
+            config.channel_heads,
+            require_flash=config.require_flash_attention,
+        )
         self.joint_query = nn.Parameter(torch.empty(1, 1, d_proj))
         self.joint_pool = FlashCrossAttention(
             d_proj,
             config.joint_heads,
             require_flash=config.require_flash_attention,
         )
+        self.question_projection = nn.Linear(llm_hidden_size, d_proj, bias=False)
         self.fixed_queries = nn.Parameter(
             torch.empty(1, config.fixed_tokens, llm_hidden_size)
         )
@@ -103,13 +111,17 @@ class MultiAxisHintTuner(nn.Module):
             self.joint_query.requires_grad_(False)
             for parameter in self.joint_pool.parameters():
                 parameter.requires_grad_(False)
+            for parameter in self.question_projection.parameters():
+                parameter.requires_grad_(False)
 
     def reset_parameters(self) -> None:
         nn.init.xavier_uniform_(self.prototype_mapping)
         nn.init.zeros_(self.anomaly_direction)
         nn.init.xavier_uniform_(self.step_projection.weight)
         nn.init.zeros_(self.step_projection.bias)
+        nn.init.normal_(self.channel_query, mean=0.0, std=0.02)
         nn.init.normal_(self.joint_query, mean=0.0, std=0.02)
+        nn.init.zeros_(self.question_projection.weight)
         nn.init.normal_(self.fixed_queries, mean=0.0, std=0.02)
 
     def build_prototype_bank(self, word_embeddings: torch.Tensor) -> torch.Tensor:
@@ -126,9 +138,12 @@ class MultiAxisHintTuner(nn.Module):
         anomaly_logits: torch.Tensor,
         intervals: Sequence[Tuple[int, int]],
         channel_counts: Sequence[int],
+        question_semantics: Optional[torch.Tensor],
         word_embeddings: torch.Tensor,
         prototype_override: Optional[torch.Tensor] = None,
-    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
+    ) -> Tuple[
+        List[torch.Tensor], List[torch.Tensor], Optional[torch.Tensor], torch.Tensor
+    ]:
         batch, total_steps, max_channels, d_proj = local_embeddings.shape
         if d_proj != self.d_proj or anomaly_logits.shape != (
             batch,
@@ -146,6 +161,7 @@ class MultiAxisHintTuner(nn.Module):
             (anomaly_logits[..., 1] - anomaly_logits[..., 0]) / 2.0
         )
         enhanced_samples: List[torch.Tensor] = []
+        enhanced_channels: List[torch.Tensor] = []
         for index, ((start, end), channels) in enumerate(
             zip(intervals, channel_counts)
         ):
@@ -178,6 +194,7 @@ class MultiAxisHintTuner(nn.Module):
                 self.config.representation_epsilon,
             )
             enhanced_samples.append(enhanced)
+            enhanced_channels.append(enhanced.view(channels, end - start, d_proj))
 
         max_step_hints = max(sample.shape[0] for sample in enhanced_samples)
         enhanced_padded = local_embeddings.new_zeros(batch, max_step_hints, self.d_proj)
@@ -205,9 +222,64 @@ class MultiAxisHintTuner(nn.Module):
         step_padded = self.prototype_attention(step_queries, prototypes, prototypes)
         step_hints = [step_padded[i, step_mask[i]] for i in range(batch)]
 
+        # Pool each channel independently over its complete target-window
+        # timeline with one query shared across all channels and samples.
+        total_channels = sum(channel_counts)
+        max_window_length = max(memory.shape[1] for memory in enhanced_channels)
+        channel_memory = local_embeddings.new_zeros(
+            total_channels, max_window_length, self.d_proj
+        )
+        channel_mask = torch.zeros(
+            total_channels,
+            max_window_length,
+            dtype=torch.bool,
+            device=local_embeddings.device,
+        )
+        channel_slices: List[Tuple[int, int]] = []
+        cursor = 0
+        for memory in enhanced_channels:
+            channels, length, _ = memory.shape
+            channel_memory[cursor : cursor + channels, :length] = memory
+            channel_mask[cursor : cursor + channels, :length] = True
+            channel_slices.append((cursor, cursor + channels))
+            cursor += channels
+        channel_query = self.channel_query.expand(total_channels, -1, -1)
+        # Deliberately no residual from the sample-independent shared query.
+        channel_repr = self.channel_pool(
+            channel_query,
+            channel_memory,
+            channel_memory,
+            key_padding_mask=channel_mask,
+        )
+        channel_queries = self.step_projection(
+            rms_unit(channel_repr, self.config.representation_epsilon)
+        )
+        channel_prototypes = prototype_bank.unsqueeze(0).expand(
+            total_channels, -1, -1
+        )
+        channel_pooled = self.prototype_attention(
+            channel_queries, channel_prototypes, channel_prototypes
+        )
+        channel_hints = [
+            channel_pooled[start:end, 0] for start, end in channel_slices
+        ]
+
         joint_hint = None
         if self.use_joint_hint:
-            joint_query = self.joint_query.expand(batch, -1, -1)
+            if question_semantics is None:
+                raise ValueError(
+                    "Question-conditioned Joint-Local pooling requires question semantics"
+                )
+            expected_question_shape = (batch, self.llm_hidden_size)
+            if tuple(question_semantics.shape) != expected_question_shape:
+                raise ValueError(
+                    f"Question semantics shape {tuple(question_semantics.shape)} != "
+                    f"{expected_question_shape}"
+                )
+            semantic_delta = self.question_projection(
+                rms_unit(question_semantics, self.config.representation_epsilon)
+            )
+            joint_query = self.joint_query.expand(batch, -1, -1) + semantic_delta[:, None]
             # Deliberately no residual connection from the sample-independent query.
             joint_repr = self.joint_pool(
                 joint_query,
@@ -222,7 +294,7 @@ class MultiAxisHintTuner(nn.Module):
 
         fixed_queries = self.fixed_queries.expand(batch, -1, -1)
         fixed_hints = self.prototype_attention(fixed_queries, prototypes, prototypes)
-        return step_hints, joint_hint, fixed_hints
+        return step_hints, channel_hints, joint_hint, fixed_hints
 
 
 class MultiAxisForConditionalGeneration(nn.Module):
@@ -252,7 +324,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
             use_images=config.vision.enabled,
             min_pixels=config.vision.min_pixels,
             max_pixels=config.vision.runtime_max_pixels,
+            window_epsilon=config.hints.window_epsilon,
         )
+        self.question_semantic_cache: Optional[QuestionSemanticDiskCache] = None
         self.eval_checkpointed_decoder_layers = 0
         if config.vision.enabled and config.llm.gradient_checkpointing:
             self.eval_checkpointed_decoder_layers = (
@@ -581,6 +655,95 @@ class MultiAxisForConditionalGeneration(nn.Module):
             self.llm.get_input_embeddings().weight
         )
 
+    def configure_question_semantic_cache(self, cache_dir: str | Path) -> None:
+        self.question_semantic_cache = QuestionSemanticDiskCache(
+            cache_dir,
+            model_id=self.config.llm.model_name,
+            tokenizer=self.tokenizer,
+            hidden_size=self._hidden_size(),
+        )
+
+    def question_semantic_cache_manifest(self) -> Dict[str, object]:
+        if self.question_semantic_cache is None:
+            return {"configured": False}
+        return {"configured": True, **self.question_semantic_cache.manifest()}
+
+    def _question_text_backbone(self) -> nn.Module:
+        if self.config.vision.enabled:
+            model = getattr(self.llm, "model", None)
+            language_model = getattr(model, "language_model", None)
+            if language_model is None:
+                raise AttributeError(
+                    "Could not locate the frozen Qwen3-VL language model for h_q"
+                )
+            return language_model
+        return self._llm_backbone()
+
+    def _compute_question_semantics(
+        self, questions: Sequence[str], device: torch.device
+    ) -> torch.Tensor:
+        texts = [question_semantic_text(question) for question in questions]
+        previous_padding = getattr(self.tokenizer, "padding_side", "right")
+        self.tokenizer.padding_side = "right"
+        try:
+            encoded = self.tokenizer(
+                texts,
+                padding=True,
+                add_special_tokens=True,
+                return_tensors="pt",
+            )
+        finally:
+            self.tokenizer.padding_side = previous_padding
+        input_ids = encoded["input_ids"].to(device, non_blocking=True)
+        attention_mask = encoded["attention_mask"].to(device, non_blocking=True)
+        last_indices = attention_mask.sum(dim=-1) - 1
+        if bool((last_indices < 0).any()):
+            raise ValueError("Question tokenization produced an empty sequence")
+        self.llm.eval()
+        autocast = (
+            torch.autocast("cuda", dtype=getattr(torch, self.config.llm.torch_dtype))
+            if device.type == "cuda"
+            else torch.autocast("cpu", enabled=False)
+        )
+        try:
+            with torch.no_grad(), autocast:
+                outputs = self._question_text_backbone()(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    use_cache=False,
+                    return_dict=True,
+                )
+                result = outputs.last_hidden_state[
+                    torch.arange(len(texts), device=device), last_indices
+                ]
+        finally:
+            self._set_llm_runtime_mode(self.training)
+        return result.detach()
+
+    def _question_semantics(
+        self, questions: Sequence[str], device: torch.device
+    ) -> torch.Tensor:
+        if self.question_semantic_cache is None:
+            raise RuntimeError(
+                "Question-conditioned Joint-Local requires a configured disk cache"
+            )
+        values: List[Optional[torch.Tensor]] = [
+            self.question_semantic_cache.load(question) for question in questions
+        ]
+        missing = [index for index, value in enumerate(values) if value is None]
+        if missing:
+            computed = self._compute_question_semantics(
+                [questions[index] for index in missing], device
+            )
+            for row, index in enumerate(missing):
+                values[index] = self.question_semantic_cache.store(
+                    questions[index], computed[row]
+                )
+        if any(value is None for value in values):
+            raise AssertionError("Question semantic cache fill was incomplete")
+        stacked = torch.stack([value for value in values if value is not None])
+        return stacked.to(device=device, non_blocking=True).detach()
+
     def _hint_embeddings(
         self,
         normalized_series: torch.Tensor,
@@ -588,20 +751,29 @@ class MultiAxisForConditionalGeneration(nn.Module):
         channel_mask: torch.Tensor,
         intervals: Sequence[Tuple[int, int]],
         channel_counts: Sequence[int],
+        questions: Sequence[str],
         prototype_override: Optional[torch.Tensor],
         timercd_override: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-    ) -> Tuple[List[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
+    ) -> Tuple[
+        List[torch.Tensor], List[torch.Tensor], Optional[torch.Tensor], torch.Tensor
+    ]:
         if timercd_override is None:
             local, anomaly_logits = self.timercd(
                 normalized_series, time_mask, channel_mask
             )
         else:
             local, anomaly_logits = timercd_override
+        question_semantics = (
+            self._question_semantics(questions, normalized_series.device)
+            if self.hint_tuner.use_joint_hint
+            else None
+        )
         return self.hint_tuner(
             local,
             anomaly_logits,
             intervals,
             channel_counts,
+            question_semantics,
             self.llm.get_input_embeddings().weight,
             prototype_override=prototype_override,
         )
@@ -610,6 +782,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
         self,
         tokenized: TokenizedPrompts,
         step_hints: Sequence[torch.Tensor],
+        channel_hints: Sequence[torch.Tensor],
         joint_hints: Optional[torch.Tensor],
         fixed_hints: torch.Tensor,
         device: torch.device,
@@ -629,11 +802,16 @@ class MultiAxisForConditionalGeneration(nn.Module):
             raise RuntimeError("Image-off control unexpectedly received visual tensors")
 
         step_positions = [positions.to(device) for positions in tokenized.step_positions]
+        channel_positions = [
+            positions.to(device) for positions in tokenized.channel_positions
+        ]
         joint_positions = [positions.to(device) for positions in tokenized.joint_positions]
         fixed_positions = [positions.to(device) for positions in tokenized.fixed_positions]
         for index in range(input_ids.shape[0]):
             if step_hints[index].shape[0] != step_positions[index].numel():
                 raise AssertionError("Step hint count changed between prompt and encoder")
+            if channel_hints[index].shape[0] != channel_positions[index].numel():
+                raise AssertionError("Channel hint count changed between prompt and encoder")
             if fixed_hints[index].shape[0] != fixed_positions[index].numel():
                 raise AssertionError("Fixed hint count changed between prompt and encoder")
             if joint_hints is not None and joint_positions[index].numel() != 1:
@@ -665,6 +843,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
                 output[index, step_positions[source_index]] = step_hints[source_index].to(
                     device=output.device, dtype=output.dtype
                 )
+                output[index, channel_positions[source_index]] = channel_hints[
+                    source_index
+                ].to(device=output.device, dtype=output.dtype)
                 if joint_hints is not None:
                     output[index, joint_positions[source_index]] = joint_hints[source_index].to(
                         device=output.device, dtype=output.dtype
@@ -750,6 +931,8 @@ class MultiAxisForConditionalGeneration(nn.Module):
         intervals: Sequence[Tuple[int, int]],
         channel_counts: Sequence[int],
         window_values: Sequence[Sequence[Sequence[int]]],
+        channel_means: Sequence[Sequence[float]],
+        channel_stds: Sequence[Sequence[float]],
         channel_ids: Sequence[Sequence[str]],
         question_groups: Sequence[str],
         image_paths: Sequence[Optional[str]],
@@ -761,23 +944,26 @@ class MultiAxisForConditionalGeneration(nn.Module):
             questions,
             intervals,
             window_values,
+            channel_means,
+            channel_stds,
             channel_ids,
             question_groups,
             image_paths,
             answers=answers,
         )
-        step, joint, fixed = self._hint_embeddings(
+        step, channel, joint, fixed = self._hint_embeddings(
             normalized_series,
             time_mask,
             channel_mask,
             intervals,
             channel_counts,
+            questions,
             prototype_override,
             timercd_override,
         )
         device = normalized_series.device
         model_inputs, labels, hint_hook = self._model_inputs_and_hint_hook(
-            tokenized, step, joint, fixed, device
+            tokenized, step, channel, joint, fixed, device
         )
         if labels is None:
             raise ValueError("Training forward requires answer labels")
@@ -810,6 +996,8 @@ class MultiAxisForConditionalGeneration(nn.Module):
         intervals: Sequence[Tuple[int, int]],
         channel_counts: Sequence[int],
         window_values: Sequence[Sequence[Sequence[int]]],
+        channel_means: Sequence[Sequence[float]],
+        channel_stds: Sequence[Sequence[float]],
         channel_ids: Sequence[Sequence[str]],
         question_groups: Sequence[str],
         image_paths: Sequence[Optional[str]],
@@ -822,6 +1010,8 @@ class MultiAxisForConditionalGeneration(nn.Module):
             questions,
             intervals,
             window_values,
+            channel_means,
+            channel_stds,
             channel_ids,
             question_groups,
             image_paths,
@@ -834,17 +1024,18 @@ class MultiAxisForConditionalGeneration(nn.Module):
             else contextlib.nullcontext()
         )
         with autocast_context:
-            step, joint, fixed = self._hint_embeddings(
+            step, channel, joint, fixed = self._hint_embeddings(
                 normalized_series,
                 time_mask,
                 channel_mask,
                 intervals,
                 channel_counts,
+                questions,
                 prototype_override,
                 timercd_override,
             )
             model_inputs, _, hint_hook = self._model_inputs_and_hint_hook(
-                tokenized, step, joint, fixed, device
+                tokenized, step, channel, joint, fixed, device
             )
             kwargs = asdict(self.config.generation)
             if generation_overrides:
@@ -890,7 +1081,11 @@ class MultiAxisForConditionalGeneration(nn.Module):
         self, epoch: int, global_step: int, metadata: Dict[str, Any]
     ) -> Dict[str, Any]:
         return {
-            "format": "multi-axis-vl-hints-v2" if self.config.llm.model_name == QWEN3_VL_MODEL_ID else "multi-axis-hints-v1",
+            "format": (
+                "multi-axis-vl-hints-v3-channel-question"
+                if self.config.llm.model_name == QWEN3_VL_MODEL_ID
+                else "multi-axis-hints-v2-channel-question"
+            ),
             "epoch": epoch,
             "global_step": global_step,
             "config": self.config.to_dict(),
@@ -904,9 +1099,9 @@ class MultiAxisForConditionalGeneration(nn.Module):
     ) -> Dict[str, Any]:
         payload = torch.load(path, map_location="cpu", weights_only=False)
         expected_format = (
-            "multi-axis-vl-hints-v2"
+            "multi-axis-vl-hints-v3-channel-question"
             if self.config.llm.model_name == QWEN3_VL_MODEL_ID
-            else "multi-axis-hints-v1"
+            else "multi-axis-hints-v2-channel-question"
         )
         if payload.get("format") != expected_format:
             raise ValueError("Not a Multi-AXIS hint checkpoint")

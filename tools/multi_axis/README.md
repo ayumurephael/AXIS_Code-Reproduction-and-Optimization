@@ -5,23 +5,25 @@ This branch extends the multivariate AXIS Phase-II pipeline according to `多元
 ## Registered formal protocol
 
 - Formal backbone: exactly `Qwen/Qwen3-VL-8B-Instruct`, loaded with `Qwen3VLForConditionalGeneration` and `AutoProcessor`.
-- Full-VLM and image-off controls use the same Qwen3-VL backbone and native chat template. The 25-epoch formal experiment uses Full-VLM only.
-- The official processor range is 65,536–16,777,216 pixels, as recorded by the model's [preprocessor configuration](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct/blob/main/preprocessor_config.json). The formal runtime cap is a separately audited value inside that range (4,194,304 pixels in the registered benchmark configurations), and every processor call receives it explicitly because Transformers 4.57 can otherwise recover the construction-time maximum from tokenizer init metadata. Every run records both official bounds, the runtime cap, and post-resize visual-token counts.
+- Full-VLM and image-off controls use the same Qwen3-VL backbone and native chat template. The current 20-epoch formal experiment uses Full-VLM only.
+- The official processor range is 65,536–16,777,216 pixels, as recorded by the model's [preprocessor configuration](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct/blob/main/preprocessor_config.json). The formal runtime cap is 2,097,152 pixels, and every processor call receives it explicitly because Transformers 4.57 can otherwise recover the construction-time maximum from tokenizer init metadata. Every run records both official bounds, the runtime cap, and post-resize visual-token counts.
 - Offline images consume the exact already-normalized `normalized_series`: one channel per row, all rows with global time axes, context black, target dark blue, target background pale yellow, half-open boundaries `s-0.5/e-0.5`, Times New Roman, and 600 dpi. They contain no labels, score curve, root-cause annotation, or detector decision.
 - Frozen multivariate TimeRCD encoder and anomaly head, loaded strictly from the supplied checkpoint.
-- Full Phase D architecture: Step-Local, anomaly evidence, Joint-Local, 30 Fixed hints, 1,024 vocabulary prototypes.
+- Full Phase D architecture: Step-Local, one Channel-Local overview token per channel, question-conditioned Joint-Local, anomaly evidence, 30 Fixed hints, and 1,024 vocabulary prototypes. The complete Window + Step evidence remains present; Channel Routing is not implemented.
+- Numeric windows are approximately reversible: every channel header carries the full-valid-series mean and standard deviation plus the exact normalization epsilon.
+- Frozen-VLM language states for the exact question text are detached and disk-cached by model and tokenizer. The question-semantic path trains only the zero-initialized bias-free `A_q`.
 - All ordinary cross-attention uses the CUDA FlashAttention backend; CPU exists only as a unit-test fallback.
 - Teacher supervision is answer-only NLL over the natural-language `model_answer` field only. The 17 empty `model_answer` rows are filtered; short-label fields are never used as a training fallback.
 - Training alignment follows the authoritative 62-shard teacher summary: 67,773 rows are matched one-to-one by normalized question text within each shard, and the remaining 47 are supplied by a SHA-256-audited same-index recovery bundle derived from the raw teacher records.
 - Split is by `base_sample_id`, 90/10, seed 42, with zero group overlap.
-- VLM formal experiment: exactly 25 epochs with a global 8×H800 world formed by two nodes and four allocated H800s per node, seed 42, grouped 90/10 manifests, no early stopping, and minimum validation answer-token NLL selected only after epoch 25.
+- VLM formal experiment: exactly 20 epochs with a global 8×H800 world formed by two nodes and four allocated H800s per node, seed 42, grouped 90/10 manifests, no early stopping, and minimum validation answer-token NLL selected only after epoch 20.
 - Formal inference covers 478new, SMD, SWaT, LEMMA-RCA, and VTA.
 - MC and TF use final-label exact match; OE uses parseability. Results are emitted overall, by question type, and by dataset.
 - Five Judges score every test set. GPT-5.4 is the only Judge used for baseline deltas; the other four are used for cross-Judge robustness.
 
-The checked-in formal configuration records the actual world size and effective batch size. Registered 8-GPU candidates are micro/accumulation 1/4, 2/2, and 4/1, all with global batch 32. Benchmark each in a separate directory and use the fastest candidate that fits all eight H800s; do not change the selected configuration after formal launch.
+The checked-in current formal configuration records world 8, micro batch 2, accumulation 2, and effective batch 32. Benchmark alternatives in separate directories; do not silently change the selected configuration inside an existing run.
 
-The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. The 8-process/25-epoch profile keeps effective batch size 32 and registers micro-batch/accumulation candidates 1/4, 2/2, and 4/1. Model construction audits the resolved text and vision attention backends, every identified VLM attention module, both FlashAttention kernel imports, and all Hint Tuner cross-attention modules; any eager fallback terminates the run.
+The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=256), the largest head dimension supported by FlashAttention-2. Model construction audits the resolved text and vision attention backends, every identified VLM attention module, both FlashAttention kernel imports, and all Hint Tuner cross-attention modules; any eager fallback terminates the run.
 
 ## Components
 
@@ -29,7 +31,7 @@ The formal 4096-dimensional prototype cross-attention uses 16 heads (head_dim=25
 - `tools/multi_axis/build_training_recovery.py`: reproducibly derives the 47-row, SHA-256-audited recovery bundle from the registered raw teacher records.
 - `tools/multi_axis/build_manifests.py`: deterministic pairing, filtering, grouped split, source hashes, random-access indices, and the five evaluation manifests.
 - `tools/multi_axis/render_images.py`: deterministic, resumable, SHA-256-audited offline rendering from the exact normalized model array.
-- `tools/multi_axis/train.py`: registered eight-process manual data parallelism, bounded frozen-encoder cache, native multimodal forward with sparse exact answer NLL, eval-safe non-reentrant activation recomputation for the frozen 36-layer language decoder, 25-epoch checkpoints, profile benchmark mode, FlashAttention audit, and crash resume.
+- `tools/multi_axis/train.py`: registered eight-process manual data parallelism, bounded frozen-encoder cache, disk-cached question semantics, native multimodal forward with sparse exact answer NLL, eval-safe non-reentrant activation recomputation for the frozen 36-layer language decoder, architecture migration/warm-up, profile benchmark mode, FlashAttention audit, and crash resume.
 - `tools/multi_axis/infer.py`: configured eight-GPU, group-preserving, crash-resumable native multimodal generation and deterministic merge.
 - `tools/multi_axis/label_metrics.py`: exact MC/TF label metrics and OE parse rate.
 - `tools/multi_axis/geval_runner.py`: crash-resilient five-Judge scoring with provider-specific probability handling.
@@ -77,7 +79,7 @@ First render every unique train/validation/evaluation window offline. This comma
 
 ```bash
 python tools/multi_axis/render_images.py \
-  --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
+  --config experiments/multi_axis/formal_qwen3_vl_20epochs_8gpu_batch32.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
   --output-root /path/to/run/visuals
@@ -85,8 +87,8 @@ python tools/multi_axis/render_images.py \
 
 Release only the experiment's own verified reservation processes immediately before launch. Never terminate another user's process.
 
-Two-node, eight-H800 formal profile (micro batch 6, accumulation 1,
-effective batch 48); execute this once on each of the two Slurm tasks with the
+Two-node, eight-H800 formal profile (micro batch 2, accumulation 2,
+effective batch 32); execute this once on each of the two Slurm tasks with the
 shared rendezvous variables exported by the allocation launcher:
 
 ```bash
@@ -94,21 +96,16 @@ torchrun --nnodes=2 --nproc_per_node=4 \
   --node_rank="$SLURM_NODEID" \
   --rdzv_backend=c10d --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
   tools/multi_axis/train.py \
-  --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
+  --config experiments/multi_axis/formal_qwen3_vl_20epochs_8gpu_batch32.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
   --image-root /path/to/run/visuals \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
+  --question-semantic-cache-dir /path/to/run/question_semantics \
   --output-dir /path/to/run/training
 ```
 
-The audited memory-safe fallback is
-`formal_qwen3_vl_25epochs_8gpu_fallback_batch32.json` (micro batch 4,
-accumulation 1, effective batch 32). Use it only after preserving the failed
-batch-48 run evidence, and resume from epoch 0 in a separate experiment
-directory; never silently change batch size inside an existing run.
-
-To compare registered eight-GPU candidates, add `--benchmark-optimizer-steps N` and use a distinct output directory for each configuration. Benchmark mode writes `benchmark_summary.json` and exits without validation or formal checkpoints. To resume after an interruption, provide `--resume /path/to/run/training/last_train_state.pt`. A valid completion has `TRAINING_COMPLETE`, 25 `epochs.jsonl` records, 25 hint checkpoints, and `best_checkpoint.json` pointing to the minimum validation answer NLL.
+To compare registered eight-GPU candidates, add `--benchmark-optimizer-steps N` and use a distinct output directory for each configuration. Benchmark mode writes `benchmark_summary.json` and exits without validation or formal checkpoints. To resume a checkpoint produced by this architecture, provide `--resume /path/to/run/training/last_train_state.pt`. To migrate the completed Epoch-4 legacy checkpoint, also pass `--migrate-legacy-architecture --new-module-warmup-epochs 1`; Epoch 5 then updates only Channel/A_q modules and Epoch 6 restores the full Hint Tuner while retaining old module weights, Adam moments, scheduler state, and global step. A valid completion has `TRAINING_COMPLETE`, 20 `epochs.jsonl` records, 20 hint checkpoints, and `best_checkpoint.json` pointing to the minimum validation answer NLL.
 
 ## Eight-GPU inference
 
@@ -119,12 +116,13 @@ torchrun --nnodes=2 --nproc_per_node=4 \
   --node_rank="$SLURM_NODEID" \
   --rdzv_backend=c10d --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
   tools/multi_axis/infer.py \
-  --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
+  --config experiments/multi_axis/formal_qwen3_vl_20epochs_8gpu_batch32.json \
   --data-root /path/to/multi-axis-assets \
   --manifest-dir /path/to/run/manifests \
   --image-root /path/to/run/visuals \
   --timercd-checkpoint /path/to/pretrain_checkpoint_best_multi.pth \
   --hint-checkpoint /path/to/run/training/hint_epoch_XX.pt \
+  --question-semantic-cache-dir /path/to/run/question_semantics \
   --output-dir /path/to/run/predictions
 ```
 
@@ -170,7 +168,7 @@ python tools/multi_axis/aggregate_geval.py \
   --output-dir /path/to/run/aggregate
 
 python tools/multi_axis/audit_experiment.py \
-  --config experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json \
+  --config experiments/multi_axis/formal_qwen3_vl_20epochs_8gpu_batch32.json \
   --manifest-dir /path/to/run/manifests \
   --image-root /path/to/run/visuals \
   --run-dir /path/to/run/training \
