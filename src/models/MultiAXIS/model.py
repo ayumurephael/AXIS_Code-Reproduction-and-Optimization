@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .attention import FlashCrossAttention
+from .channel_ids import canonicalize_question_channel_references
 from .config import MultiAxisConfig
 from .prompting import HINT_TOKENS, MultiAxisPromptBuilder, TokenizedPrompts
 from .question_semantics import QuestionSemanticDiskCache, question_semantic_text
@@ -753,6 +754,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
         timercd_override: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ):
         self.assert_freeze_contract()
+        questions = [canonicalize_question_channel_references(q) for q in questions]
         tokenized = self.prompt_builder.tokenize(
             questions,
             intervals,
@@ -811,6 +813,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
         generation_overrides: Optional[Mapping[str, Any]] = None,
     ) -> List[str]:
         self.eval()
+        questions = [canonicalize_question_channel_references(q) for q in questions]
         tokenized = self.prompt_builder.tokenize(
             questions,
             intervals,

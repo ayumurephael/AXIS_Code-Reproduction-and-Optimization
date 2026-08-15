@@ -13,6 +13,7 @@ import torch
 
 from src.models.AXIS.ts_encoder_bi_bias import TimeSeriesEncoder
 from src.models.MultiAXIS.attention import FlashCrossAttention
+from src.models.MultiAXIS.channel_ids import canonicalize_question_channel_references
 from src.models.MultiAXIS.config import MultiAxisConfig, TrainingConfig
 from src.models.MultiAXIS.data import (
     extract_channel_ids,
@@ -166,6 +167,13 @@ def test_channel_identifier_protocol_normalizes_aliases_and_rejects_names():
     assert extract_channel_ids(row, 4) == ["ch_8", "ch_9", "ch_10", "ch_11"]
     with pytest.raises(ValueError, match="expected ch_<non-negative integer>"):
         extract_channel_ids({"channels": ["temperature"]}, 1)
+
+
+def test_question_channel_references_use_the_same_canonical_protocol():
+    question = "Compare ch0, channel 2, Channel_10, and ch_11; do not alter channelize."
+    assert canonicalize_question_channel_references(question) == (
+        "Compare ch_0, ch_2, ch_10, and ch_11; do not alter channelize."
+    )
 
 
 def test_formal_teacher_target_does_not_fall_back_to_short_label():

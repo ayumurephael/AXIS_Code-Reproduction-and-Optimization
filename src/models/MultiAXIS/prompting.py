@@ -6,7 +6,10 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
-from .channel_ids import canonical_channel_ids
+from .channel_ids import (
+    canonical_channel_ids,
+    canonicalize_question_channel_references,
+)
 from .response_contracts import OUTPUT_CONTRACTS
 
 
@@ -163,6 +166,7 @@ class MultiAxisPromptBuilder:
     ) -> str:
         if not question or not question.strip():
             raise ValueError("Question is empty")
+        question = canonicalize_question_channel_references(question)
         length = int(end) - int(start)
         if length <= 0:
             raise ValueError(f"Invalid target interval [{start}, {end})")

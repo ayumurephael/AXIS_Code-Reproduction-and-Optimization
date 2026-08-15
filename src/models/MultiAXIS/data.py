@@ -9,7 +9,10 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from .channel_ids import canonical_channel_ids
+from .channel_ids import (
+    canonical_channel_ids,
+    canonicalize_question_channel_references,
+)
 from .response_contracts import canonicalize_teacher_answer, response_contract_error
 
 
@@ -207,9 +210,11 @@ class ManifestDataset(Dataset):
             answer = canonical
             if response_contract_error(answer, record["question_group"]) is not None:
                 raise AssertionError("Canonicalized teacher answer violates its output contract")
+        question = canonicalize_question_channel_references(record["question"])
         sample = {
             "normalized_series": normalized,
-            "question": record["question"],
+            "question": question,
+            "question_was_canonicalized": question != record["question"],
             "answer": answer,
             "answer_was_canonicalized": answer_was_canonicalized,
             "interval": interval,
@@ -266,5 +271,8 @@ def collate_multiaxis(samples: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
         "label_references": [sample.get("label_reference") for sample in samples],
         "answer_was_canonicalized": [
             sample.get("answer_was_canonicalized", False) for sample in samples
+        ],
+        "question_was_canonicalized": [
+            sample.get("question_was_canonicalized", False) for sample in samples
         ],
     }
