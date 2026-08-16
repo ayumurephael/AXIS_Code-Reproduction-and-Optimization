@@ -1,0 +1,27 @@
+{
+  "scale": {"min": 1, "max": 5},
+  "rubrics": {
+    "multiple_choice": {
+      "weights": {"correctness": 0.7, "reasoning_quality": 0.3},
+      "dimensions": {
+        "correctness": {"description": "How accurate is the generated response compared to the expected answer?", "guidelines": ["5: Perfect match, completely correct", "4: Mostly correct; minor deviations not affecting core meaning", "3: Partially correct; captures some key aspects but misses important details", "2: Somewhat relevant but with significant errors or omissions", "1: Incorrect or completely irrelevant"]},
+        "reasoning_quality": {"description": "How well does the response demonstrate logical reasoning and explanation?", "guidelines": ["5: Clear, logical, comprehensive reasoning fully explains the choice", "4: Good reasoning with minor gaps", "3: Adequate reasoning; lacks depth or has inconsistencies", "2: Weak reasoning; significant gaps or flawed logic", "1: No clear reasoning or completely flawed logic"]}
+      }
+    },
+    "open_ended": {
+      "weights": {"relevance": 0.3, "completeness": 0.35, "accuracy": 0.35},
+      "dimensions": {
+        "relevance": {"description": "How relevant and on-topic is the generated response?", "guidelines": ["5: Completely relevant; directly addresses all aspects", "4: Highly relevant; minor omissions", "3: Moderately relevant; addresses core aspects but misses details", "2: Somewhat relevant; off-topic content or key omissions", "1: Irrelevant or off-topic"]},
+        "completeness": {"description": "How complete and comprehensive is the response?", "guidelines": ["5: Fully comprehensive; covers all necessary aspects", "4: Mostly complete; minor gaps", "3: Adequately complete; missing some important details", "2: Incomplete; significant information missing", "1: Very incomplete"]},
+        "accuracy": {"description": "How factually accurate is the response?", "guidelines": ["5: Completely accurate; no factual errors", "4: Mostly accurate; very minor inaccuracies", "3: Generally accurate; some notable errors", "2: Several factual errors affecting reliability", "1: Major factual errors or mostly inaccurate"]}
+      }
+    },
+    "true_false": {
+      "weights": {"correctness": 0.6, "justification_quality": 0.4},
+      "dimensions": {
+        "correctness": {"description": "How correct is the true/false judgment and supporting explanation?", "guidelines": ["5: Perfect judgment; excellent supporting explanation", "4: Correct judgment; good explanation", "3: Correct judgment; adequate explanation", "2: Incorrect judgment; reasonable attempt at explanation", "1: Incorrect judgment; poor or no explanation"]},
+        "justification_quality": {"description": "How well does the response justify the decision?", "guidelines": ["5: Excellent justification with clear evidence and reasoning", "4: Good justification with solid evidence", "3: Adequate justification with some evidence", "2: Weak justification with little evidence", "1: No meaningful justification"]}
+      }
+    }
+  }
+}

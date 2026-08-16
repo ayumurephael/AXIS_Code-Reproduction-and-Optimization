@@ -1,0 +1,25 @@
+{
+  "exact_files": [
+    "external_checkpoints/timercd/best_model/pretrain_checkpoint_best_multi.pth",
+    "question/question_smd_axis_v1_no_root_200_gpt54_bias_neutralized_20260713c/questions_200.jsonl",
+    "teacheranswer/teacher_smd_axis_v1_no_root_200_gpt54_bias_neutralized_20260713a/teacher_gpt54.answers.jsonl",
+    "question/question_swat_axis_v1_eval92_regular_184_gpt54_bias_neutralized_20260712c/questions_184.jsonl",
+    "teacheranswer/teacher_swat_axis_v1_eval92_regular_184_gpt54_20260712a/teacher_gpt54.answers.jsonl",
+    "question/question_lemma_rca_cloud_curated_onset_v1_no_root_12_gpt54_bias_neutralized_openfirst_20260713b/questions_12.jsonl",
+    "teacheranswer/teacher_lemma_rca_cloud_curated_onset_v1_no_root_12_gpt54_bias_neutralized_openfirst_20260713a/teacher_gpt54.answers.jsonl",
+    "question/question_vta_articulary_axis_v1_no_root_200_gpt54_llm2_bias_neutralized_openfirst_20260713b/questions_200.jsonl",
+    "teacheranswer/teacher_vta_articulary_axis_v1_no_root_200_gpt54_llm2_bias_neutralized_openfirst_20260713a/teacher_gpt54.answers.jsonl",
+    "derived/training_recovery/recovered_questions.jsonl",
+    "derived/training_recovery/recovery_manifest.json",
+    "code/local_X_repo_20260724/scripts/mvaxis_score_with_geval.py",
+    "code/local_X_repo_20260724/scripts/_bootstrap.py",
+    "code/local_X_repo_20260724/configs/mvaxis_geval_rubrics.json"
+  ],
+  "trees": [
+    {"path": "question/question_train", "basenames": ["questions_1000.jsonl", "questions_4000.jsonl", "summary.json"]},
+    {"path": "teacheranswer/teacher_train", "basenames": ["teacher_gpt55.answers.jsonl", "summary.json"]},
+    {"path": "question/question_eval_bias_neutralized_20260710b", "basenames": ["questions_1000.jsonl", "summary.json"]},
+    {"path": "teacheranswer/teacher_eval_bias_neutralized_20260710b", "basenames": ["teacher_gpt55.answers.jsonl", "summary.json"]},
+    {"path": "code/local_X_repo_20260724/src/mvaxis", "basenames": null}
+  ]
+}
