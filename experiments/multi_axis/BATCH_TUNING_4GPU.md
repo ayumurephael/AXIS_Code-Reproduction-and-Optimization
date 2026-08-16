@@ -11,9 +11,9 @@ Fixed controls: DeepSeek-R1-0528-Qwen3-8B, seed 42, the same grouped 90/10 train
 
 The runtime audit resolved all 36 Qwen3Attention modules to flash_attention_2, imported both dense and variable-length FlashAttention kernels from flash-attn 2.7.4.post1, found two fail-closed Hint Tuner FlashCrossAttention modules, and recorded fallback_allowed=false.
 
-The unconstrained-memory decision remains `micro_batch_size=2` and
-`accumulation_steps=4`: it keeps the effective batch at 32 and is the fastest
-registered candidate that completed on four otherwise-free GPUs.
+On four completely free H100s, `micro_batch_size=2` and
+`accumulation_steps=4` remains the fastest registered candidate at effective
+batch 32.
 
 The first prompt-v2 attempt had to fall back to `micro_batch_size=1` and
 `accumulation_steps=8` while one selected H100 coexisted with a pre-existing
@@ -25,9 +25,15 @@ The main prompt-v2 regression was redundant serialization: every value/hint
 pair repeated its global index, `t=`, `value=`, punctuation, and a line break.
 The compact representation retains the exact half-open interval, channel IDs,
 ordered value/hint pairs, and a lossless offset-to-global-time mapping while
-removing those repeated tokens. The formal candidate is restored to
-`micro_batch_size=2` and `accumulation_steps=4`, preserving global batch 32.
-It must pass a four-GPU memory and throughput benchmark on the actual shared
-allocation before a new formal run is launched. No process owned by another
+removing those repeated tokens. A later formal Channel-Local + Joint-Local run
+demonstrated that the shared fourth rank can still encounter a larger dynamic
+batch: after global step 1060 it required another 932 MiB while only about
+840 MiB was free. The failure occurred during backward with finite loss and
+gradients; it was a capacity failure, not divergence.
+
+Therefore the checked-in shared-allocation formal profile is
+`micro_batch_size=1`, `accumulation_steps=8`, preserving global batch 32. This
+is the fail-closed profile whenever one selected H100 coexists with the
+pre-existing process owned by another account. No process owned by another
 account may be stopped. The original five-GPU, 40-epoch configuration is
 unchanged.
