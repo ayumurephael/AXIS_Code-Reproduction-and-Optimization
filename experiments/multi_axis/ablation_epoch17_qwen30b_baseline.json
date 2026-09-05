@@ -1,0 +1,31 @@
+{
+  "variant": "multi_axis",
+  "status": "reused_existing_result",
+  "provenance": {
+    "source": "ablation_experiments.md first table; user confirmed same checkpoint and dataset",
+    "trained_source_commit": "303ca1d49303eff4ab161fafd6117c3f1c010b3a",
+    "checkpoint_epoch": 17,
+    "checkpoint_sha256": "3a1c6e912371635f5f8b2f736224d42b0f7d023eab044fd078ffae745d2937be",
+    "dataset": "478new",
+    "dataset_examples": 478,
+    "dataset_sha256": "a5f919294545cc96b0d3a834d9dd4b223c440a26f32edd40d8eb663571b75a26",
+    "judge": "qwen3-30b-a3b-instruct-2507",
+    "generation": {
+      "num_beams": 5,
+      "do_sample": false,
+      "max_new_tokens": 1000
+    }
+  },
+  "metrics": {
+    "MC Final": 3.1915,
+    "MC Corr.": 3.1250,
+    "MC Rsn.": 3.3466,
+    "OE Final": 2.0209,
+    "OE Acc.": 1.7986,
+    "OE Comp.": 2.1007,
+    "OE Rel.": 2.1871,
+    "TF Final": 2.2270,
+    "TF Corr.": 2.2393,
+    "TF Justif.": 2.2086
+  }
+}

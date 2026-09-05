@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from src.models.MultiAXIS.ablation import ABLATION_VARIANTS, FULL_VARIANT
 from src.models.MultiAXIS.response_contracts import (
     open_response_parseable,
     parse_response_label,
@@ -130,6 +131,7 @@ def parse_args():
     parser.add_argument("--manifest-dir", required=True)
     parser.add_argument("--predictions-dir", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--mode", choices=ABLATION_VARIANTS, default=FULL_VARIANT)
     parser.add_argument(
         "--datasets",
         nargs="+",
@@ -153,6 +155,8 @@ def main():
         for index, (reference, prediction) in enumerate(zip(references, predictions)):
             if prediction["index"] != index or prediction["sample_id"] != reference["sample_id"]:
                 raise RuntimeError(f"{dataset}: identity mismatch at {index}")
+            if prediction.get("ablation_variant", FULL_VARIANT) != args.mode:
+                raise RuntimeError(f"{dataset}: mode mismatch at {index}")
             group = reference["question_group"]
             predicted = parse_prediction(prediction["raw_response"], group) if group in ("MC", "TF") else None
             target = target_label(reference["label_reference"], group) if group in ("MC", "TF") else None
@@ -160,11 +164,12 @@ def main():
                 raise RuntimeError(f"{dataset}: missing target label at {index}")
             exact = predicted == target if group in ("MC", "TF") else None
             parseable = open_parseable(prediction["raw_response"]) if group == "OE" else None
-            rows.append({"dataset": dataset, "index": index, "sample_id": reference["sample_id"], "question_group": group, "predicted_label": predicted, "target_label": target, "exact_match": exact, "parseable": parseable, "contract_error": response_contract_error(prediction["raw_response"], group), "success": exact if group in ("MC", "TF") else parseable})
+            rows.append({"dataset": dataset, "index": index, "sample_id": reference["sample_id"], "mode": args.mode, "question_group": group, "predicted_label": predicted, "target_label": target, "exact_match": exact, "parseable": parseable, "contract_error": response_contract_error(prediction["raw_response"], group), "success": exact if group in ("MC", "TF") else parseable})
     with (output_dir / "label_metrics.jsonl").open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     summary = summarize(rows, datasets)
+    summary["mode"] = args.mode
     (output_dir / "label_metrics_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     (output_dir / "label_metrics.md").write_text(
         markdown(summary, datasets), encoding="utf-8"

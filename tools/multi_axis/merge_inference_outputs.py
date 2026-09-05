@@ -18,6 +18,9 @@ COMMON_FIELDS = (
     "llm",
     "vision",
     "attention_backend_audit",
+    "ablation_variant",
+    "ablation_spec",
+    "inference_source_commit",
 )
 
 

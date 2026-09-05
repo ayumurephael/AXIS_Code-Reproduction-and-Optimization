@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import time
 from datetime import timedelta
 from pathlib import Path
@@ -12,6 +13,11 @@ import torch
 import torch.distributed as dist
 
 from src.models.MultiAXIS.config import MultiAxisConfig
+from src.models.MultiAXIS.ablation import (
+    ABLATION_VARIANTS,
+    FULL_VARIANT,
+    ablation_spec,
+)
 from src.models.MultiAXIS.data import ManifestDataset, collate_multiaxis
 from src.models.MultiAXIS.model import MultiAxisForConditionalGeneration
 from src.models.MultiAXIS.response_contracts import response_contract_error
@@ -25,6 +31,20 @@ from tools.multi_axis.distributed import collect_distributed_topology
 
 
 DATASETS = OFFICIAL_BIAS_NEUTRALIZED_DATASETS
+
+
+def source_commit() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    value = result.stdout.strip().lower()
+    return value if len(value) == 40 else None
 
 
 def setup():
@@ -108,7 +128,9 @@ def run_dataset(
     device: torch.device,
     shard_count: int,
     shard_indices: tuple[int, ...],
+    ablation_variant: str,
 ):
+    spec = ablation_spec(ablation_variant)
     dataset = ManifestDataset(
         manifest_dir / f"eval_{dataset_name}.jsonl",
         data_root,
@@ -145,6 +167,7 @@ def run_dataset(
                 **inputs,
                 prototype_override=prototype,
                 timercd_override=cache["encoded"],
+                ablation_variant=ablation_variant,
             )[0]
             record = {
                 "index": index,
@@ -157,7 +180,8 @@ def run_dataset(
                 ),
                 "generation_seconds": time.monotonic() - started,
                 "model": model.config.llm.model_name,
-                "image_id": sample["image_id"] if model.config.vision.enabled else None,
+                "ablation_variant": ablation_variant,
+                "image_id": sample["image_id"] if spec.visual else None,
                 "native_generation_metadata_audit": getattr(
                     model, "last_generation_metadata_audit", None
                 ),
@@ -204,6 +228,8 @@ def run_dataset(
                     "dataset_examples": len(dataset),
                     "ranks": world,
                     "model": model.config.llm.model_name,
+                    "ablation_variant": ablation_variant,
+                    "ablation_spec": spec.to_dict(),
                     "inference_shard_count": shard_count,
                     "inference_shard_indices": list(shard_indices),
                 },
@@ -235,6 +261,23 @@ def parse_args():
         type=int,
         help="Explicit audited inference world size; defaults to the training profile.",
     )
+    parser.add_argument(
+        "--expected-inference-nodes",
+        type=int,
+        default=1,
+        help="Audited node count for this torchrun invocation (default: one host).",
+    )
+    parser.add_argument(
+        "--expected-gpu-substring",
+        choices=("A100", "A800", "H100", "H800"),
+        help="Required substring in every GPU model name for this inference worker.",
+    )
+    parser.add_argument(
+        "--ablation-variant",
+        choices=ABLATION_VARIANTS,
+        default=FULL_VARIANT,
+        help="Inference-time evidence-interface intervention.",
+    )
     parser.add_argument("--inference-shard-count", type=int, default=1)
     parser.add_argument(
         "--inference-shard-indices",
@@ -258,6 +301,8 @@ def main():
     )
     if expected_inference_world_size <= 0:
         raise ValueError("--expected-inference-world-size must be positive")
+    if args.expected_inference_nodes <= 0:
+        raise ValueError("--expected-inference-nodes must be positive")
     shard_indices = tuple(args.inference_shard_indices)
     if args.inference_shard_count <= 0:
         raise ValueError("--inference-shard-count must be positive")
@@ -273,8 +318,8 @@ def main():
         rank,
         world,
         local_rank,
-        expected_nodes=config.training.expected_nodes,
-        required_gpu_substring="H800" if config.vision.enabled else None,
+        expected_nodes=args.expected_inference_nodes,
+        required_gpu_substring=args.expected_gpu_substring,
     )
     output_dir = Path(args.output_dir).resolve()
     if rank == 0:
@@ -306,6 +351,9 @@ def main():
             "llm": config.llm.__dict__,
             "vision": config.vision.__dict__,
             "attention_backend_audit": attention_audit,
+            "inference_source_commit": source_commit(),
+            "ablation_variant": args.ablation_variant,
+            "ablation_spec": ablation_spec(args.ablation_variant).to_dict(),
             "inference_shard_count": args.inference_shard_count,
             "inference_shard_indices": list(shard_indices),
         }
@@ -325,6 +373,7 @@ def main():
             device,
             args.inference_shard_count,
             shard_indices,
+            args.ablation_variant,
         )
     if rank == 0:
         (output_dir / "INFERENCE_COMPLETE").write_text(
@@ -333,6 +382,7 @@ def main():
                     "datasets": args.datasets,
                     "inference_shard_count": args.inference_shard_count,
                     "inference_shard_indices": list(shard_indices),
+                    "ablation_variant": args.ablation_variant,
                 }
             ),
             encoding="utf-8",

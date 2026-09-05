@@ -5,6 +5,7 @@ import collections
 import json
 from pathlib import Path
 
+from src.models.MultiAXIS.ablation import ABLATION_VARIANTS
 from tools.multi_axis.aggregate_geval import JUDGES, TYPE_INFO
 from tools.multi_axis.datasets import (
     EXPECTED_DATASET_COUNTS,
@@ -39,6 +40,7 @@ def main():
     )
     parser.add_argument("--judges", nargs="+", choices=JUDGES, required=True)
     parser.add_argument("--expected-checkpoint-epoch", type=int)
+    parser.add_argument("--expected-mode", choices=ABLATION_VARIANTS)
     args = parser.parse_args()
 
     datasets = validate_datasets(args.datasets)
@@ -80,6 +82,12 @@ def main():
         inference_manifest.get("hint_checkpoint_sha256"),
     )
     check(
+        "ablation_mode",
+        args.expected_mode is None
+        or inference_manifest.get("ablation_variant") == args.expected_mode,
+        inference_manifest.get("ablation_variant"),
+    )
+    check(
         "timercd_hash",
         len(str(inference_manifest.get("timercd_sha256") or "")) == 64,
         inference_manifest.get("timercd_sha256"),
@@ -116,6 +124,12 @@ def main():
             and prediction_ids == [row.get("sample_id") for row in references],
             {"rows": len(predictions), "unique_sample_ids": len(set(prediction_ids))},
         )
+        check(
+            f"{dataset}_prediction_modes",
+            args.expected_mode is None
+            or all(row.get("ablation_variant") == args.expected_mode for row in predictions),
+            sorted({row.get("ablation_variant") for row in predictions}, key=str),
+        )
         judge_inputs = read_jsonl(judge_input_dir / f"{dataset}.judge_input.jsonl")
         expected_tasks = sum(
             len(TYPE_INFO[row["question_type"]][1]) for row in judge_inputs
@@ -132,6 +146,12 @@ def main():
             == [row.get("sample_id") for row in references],
             len(judge_inputs),
         )
+        check(
+            f"{dataset}_judge_input_modes",
+            args.expected_mode is None
+            or all(row.get("mode") == args.expected_mode for row in judge_inputs),
+            sorted({row.get("mode") for row in judge_inputs}, key=str),
+        )
         for judge in judges:
             scores = read_jsonl(judge_root / judge / f"{dataset}.jsonl")
             keys = {(row.get("record_id"), row.get("dimension")) for row in scores}
@@ -147,6 +167,10 @@ def main():
                 and all(1.0 <= float(row["score"]) <= 5.0 for row in scores)
                 and all(row.get("prompt_sha256") for row in scores)
                 and all(row.get("provider_profile") == judge for row in scores)
+                and (
+                    args.expected_mode is None
+                    or all(row.get("mode") == args.expected_mode for row in scores)
+                )
                 and all(row.get("requested_model") for row in scores)
                 and all(
                     len(str(row.get("endpoint_host_sha256") or "")) == 64
@@ -165,6 +189,19 @@ def main():
                 ),
                 {"expected": expected_tasks, "rows": len(scores), "unique": len(keys)},
             )
+            if judge in {"qwen3.5-397b-a17b", "qwen3-30b-a3b-instruct-2507"}:
+                qwen_methods = {
+                    "final_score_top_logprobs_bounded",
+                    "a_e_json_readout_top_logprobs_bounded",
+                }
+                check(
+                    f"{dataset}_{judge}_bounded_logprobs",
+                    all(row.get("method") in qwen_methods for row in scores)
+                    and all(row.get("logprobs_requested") is True for row in scores)
+                    and all(row.get("top_logprobs") == 5 for row in scores)
+                    and all(float((row.get("distribution_metadata") or {}).get("missing_mass_upper_bound", 1.0)) <= 1e-6 for row in scores),
+                    {"methods": sorted({row.get("method") for row in scores})},
+                )
             completion_path = (
                 judge_root / judge / f"{dataset}.jsonl.complete.json"
             )
@@ -211,6 +248,7 @@ def main():
     passed = all(item["passed"] for item in checks)
     payload = {
         "passed": passed,
+        "mode": args.expected_mode,
         "datasets": list(datasets),
         "judges": list(judges),
         "checks": checks,

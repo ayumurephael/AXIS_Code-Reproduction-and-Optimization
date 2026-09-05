@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from src.models.MultiAXIS.ablation import ABLATION_VARIANTS, FULL_VARIANT
 from tools.multi_axis.datasets import (
     OFFICIAL_BIAS_NEUTRALIZED_DATASETS,
     SUPPORTED_EVALUATION_DATASETS,
@@ -24,6 +25,9 @@ def main():
     parser.add_argument("--manifest-dir", required=True)
     parser.add_argument("--predictions-dir", required=True)
     parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--mode", choices=ABLATION_VARIANTS, default=FULL_VARIANT
+    )
     parser.add_argument(
         "--datasets",
         nargs="+",
@@ -46,12 +50,20 @@ def main():
             for index, (reference, prediction) in enumerate(zip(references, predictions)):
                 if prediction["index"] != index or prediction["sample_id"] != reference["sample_id"]:
                     raise RuntimeError(f"{dataset}: identity mismatch at {index}")
+                if prediction.get("ablation_variant", FULL_VARIANT) != args.mode:
+                    raise RuntimeError(
+                        f"{dataset}: prediction mode mismatch at {index}: "
+                        f"{prediction.get('ablation_variant')} != {args.mode}"
+                    )
                 question_type = TYPE_NAMES[reference["question_group"]]
                 counts[question_type] += 1
-                item = {"record_id": f"{dataset}:{index}", "index": index, "sample_id": reference["sample_id"], "dataset": dataset, "mode": "multi_axis", "question_type": question_type, "question": reference["question"], "answer": reference["teacher_answer"], "response": prediction["raw_response"]}
+                item = {"record_id": f"{dataset}:{index}", "index": index, "sample_id": reference["sample_id"], "dataset": dataset, "mode": args.mode, "question_type": question_type, "question": reference["question"], "answer": reference["teacher_answer"], "response": prediction["raw_response"]}
                 handle.write(json.dumps(item, ensure_ascii=False) + "\n")
         summary[dataset] = {"examples": len(references), "counts": counts, "path": output_path.name}
-    (output_dir / "judge_input_summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    (output_dir / "judge_input_summary.json").write_text(
+        json.dumps({"mode": args.mode, "datasets": summary}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

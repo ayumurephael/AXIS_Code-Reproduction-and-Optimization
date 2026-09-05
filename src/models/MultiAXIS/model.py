@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
 
 from .attention import FlashCrossAttention
+from .ablation import FULL_VARIANT, ablation_spec
 from .channel_ids import canonicalize_question_channel_references
 from .config import MultiAxisConfig, QWEN3_VL_MODEL_ID
 from .prompting import HINT_TOKENS, MultiAxisPromptBuilder, TokenizedPrompts
@@ -142,6 +143,8 @@ class MultiAxisHintTuner(nn.Module):
         question_semantics: Optional[torch.Tensor],
         word_embeddings: torch.Tensor,
         prototype_override: Optional[torch.Tensor] = None,
+        include_joint: bool = True,
+        question_conditioning: bool = True,
     ) -> Tuple[
         List[torch.Tensor], List[torch.Tensor], Optional[torch.Tensor], torch.Tensor
     ]:
@@ -266,21 +269,23 @@ class MultiAxisHintTuner(nn.Module):
         ]
 
         joint_hint = None
-        if self.use_joint_hint:
-            if question_semantics is None:
-                raise ValueError(
-                    "Question-conditioned Joint-Local pooling requires question semantics"
+        if self.use_joint_hint and include_joint:
+            joint_query = self.joint_query.expand(batch, -1, -1)
+            if question_conditioning:
+                if question_semantics is None:
+                    raise ValueError(
+                        "Question-conditioned Joint-Local pooling requires question semantics"
+                    )
+                expected_question_shape = (batch, self.llm_hidden_size)
+                if tuple(question_semantics.shape) != expected_question_shape:
+                    raise ValueError(
+                        f"Question semantics shape {tuple(question_semantics.shape)} != "
+                        f"{expected_question_shape}"
+                    )
+                semantic_delta = self.question_projection(
+                    rms_unit(question_semantics, self.config.representation_epsilon)
                 )
-            expected_question_shape = (batch, self.llm_hidden_size)
-            if tuple(question_semantics.shape) != expected_question_shape:
-                raise ValueError(
-                    f"Question semantics shape {tuple(question_semantics.shape)} != "
-                    f"{expected_question_shape}"
-                )
-            semantic_delta = self.question_projection(
-                rms_unit(question_semantics, self.config.representation_epsilon)
-            )
-            joint_query = self.joint_query.expand(batch, -1, -1) + semantic_delta[:, None]
+                joint_query = joint_query + semantic_delta[:, None]
             # Deliberately no residual connection from the sample-independent query.
             joint_repr = self.joint_pool(
                 joint_query,
@@ -778,6 +783,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
         questions: Sequence[str],
         prototype_override: Optional[torch.Tensor],
         timercd_override: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        ablation_variant: str = FULL_VARIANT,
     ) -> Tuple[
         List[torch.Tensor], List[torch.Tensor], Optional[torch.Tensor], torch.Tensor
     ]:
@@ -787,9 +793,12 @@ class MultiAxisForConditionalGeneration(nn.Module):
             )
         else:
             local, anomaly_logits = timercd_override
+        spec = ablation_spec(ablation_variant)
         question_semantics = (
             self._question_semantics(questions, normalized_series.device)
             if self.hint_tuner.use_joint_hint
+            and spec.joint
+            and spec.question_conditioning
             else None
         )
         return self.hint_tuner(
@@ -800,6 +809,8 @@ class MultiAxisForConditionalGeneration(nn.Module):
             question_semantics,
             self.llm.get_input_embeddings().weight,
             prototype_override=prototype_override,
+            include_joint=spec.joint,
+            question_conditioning=spec.question_conditioning,
         )
 
     def _model_inputs_and_hint_hook(
@@ -817,13 +828,15 @@ class MultiAxisForConditionalGeneration(nn.Module):
         }
         input_ids = model_inputs["input_ids"]
         labels = tokenized.labels.to(device) if tokenized.labels is not None else None
-        if self.config.vision.enabled:
+        visual_keys = {"pixel_values", "image_grid_thw", "mm_token_type_ids"}
+        present_visual_keys = visual_keys.intersection(model_inputs)
+        if present_visual_keys:
+            if not self.config.vision.enabled:
+                raise RuntimeError("Image-off model unexpectedly received visual tensors")
             required = {"pixel_values", "image_grid_thw", "mm_token_type_ids"}
             missing = sorted(required - set(model_inputs))
             if missing:
                 raise RuntimeError(f"Native Qwen3-VL inputs are incomplete: {missing}")
-        elif any(key in model_inputs for key in ("pixel_values", "image_grid_thw")):
-            raise RuntimeError("Image-off control unexpectedly received visual tensors")
 
         step_positions = [positions.to(device) for positions in tokenized.step_positions]
         channel_positions = [
@@ -832,14 +845,22 @@ class MultiAxisForConditionalGeneration(nn.Module):
         joint_positions = [positions.to(device) for positions in tokenized.joint_positions]
         fixed_positions = [positions.to(device) for positions in tokenized.fixed_positions]
         for index in range(input_ids.shape[0]):
-            if step_hints[index].shape[0] != step_positions[index].numel():
+            if step_positions[index].numel() and (
+                step_hints[index].shape[0] != step_positions[index].numel()
+            ):
                 raise AssertionError("Step hint count changed between prompt and encoder")
-            if channel_hints[index].shape[0] != channel_positions[index].numel():
+            if channel_positions[index].numel() and (
+                channel_hints[index].shape[0] != channel_positions[index].numel()
+            ):
                 raise AssertionError("Channel hint count changed between prompt and encoder")
-            if fixed_hints[index].shape[0] != fixed_positions[index].numel():
+            if fixed_positions[index].numel() and (
+                fixed_hints[index].shape[0] != fixed_positions[index].numel()
+            ):
                 raise AssertionError("Fixed hint count changed between prompt and encoder")
             if joint_hints is not None and joint_positions[index].numel() != 1:
                 raise AssertionError("Joint hint placeholder is missing")
+            if joint_hints is None and joint_positions[index].numel() != 0:
+                raise AssertionError("Joint placeholder exists without a Joint hint")
 
         def hint_hook(module, args, base_embeddings):
             del module
@@ -861,15 +882,18 @@ class MultiAxisForConditionalGeneration(nn.Module):
             output = base_embeddings.clone()
             for index in range(token_ids.shape[0]):
                 source_index = index // expansion
-                output[index, fixed_positions[source_index]] = fixed_hints[source_index].to(
-                    device=output.device, dtype=output.dtype
-                )
-                output[index, step_positions[source_index]] = step_hints[source_index].to(
-                    device=output.device, dtype=output.dtype
-                )
-                output[index, channel_positions[source_index]] = channel_hints[
-                    source_index
-                ].to(device=output.device, dtype=output.dtype)
+                if fixed_positions[source_index].numel():
+                    output[index, fixed_positions[source_index]] = fixed_hints[
+                        source_index
+                    ].to(device=output.device, dtype=output.dtype)
+                if step_positions[source_index].numel():
+                    output[index, step_positions[source_index]] = step_hints[
+                        source_index
+                    ].to(device=output.device, dtype=output.dtype)
+                if channel_positions[source_index].numel():
+                    output[index, channel_positions[source_index]] = channel_hints[
+                        source_index
+                    ].to(device=output.device, dtype=output.dtype)
                 if joint_hints is not None:
                     output[index, joint_positions[source_index]] = joint_hints[source_index].to(
                         device=output.device, dtype=output.dtype
@@ -890,7 +914,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
         deleting it merely to satisfy ``GenerationMixin`` validation.
         """
 
-        if not self.config.vision.enabled:
+        if "pixel_values" not in model_inputs:
             audit = {"required": False, "prefill_calls": 0, "metadata_present": True}
             yield audit
             self.last_generation_metadata_audit = dict(audit)
@@ -1029,6 +1053,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
         prototype_override: Optional[torch.Tensor] = None,
         timercd_override: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         generation_overrides: Optional[Mapping[str, Any]] = None,
+        ablation_variant: str = FULL_VARIANT,
     ) -> List[str]:
         self.eval()
         questions = [canonicalize_question_channel_references(q) for q in questions]
@@ -1042,6 +1067,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
             question_groups,
             image_paths,
             answers=None,
+            ablation_variant=ablation_variant,
         )
         device = normalized_series.device
         autocast_context = (
@@ -1059,6 +1085,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
                 questions,
                 prototype_override,
                 timercd_override,
+                ablation_variant=ablation_variant,
             )
             model_inputs, _, hint_hook = self._model_inputs_and_hint_hook(
                 tokenized, step, channel, joint, fixed, device

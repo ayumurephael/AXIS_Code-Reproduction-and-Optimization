@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import torch
 
+from .ablation import FULL_VARIANT, AblationSpec, ablation_spec
 from .channel_ids import (
     canonical_channel_ids,
     canonicalize_question_channel_references,
@@ -122,6 +123,131 @@ Do not treat the largest deviation as automatically being the root cause.
 Do not infer a causal direction solely from anomaly magnitude."""
 
 
+def _system_text(spec: AblationSpec, visual: bool) -> str:
+    if spec.is_full:
+        return MULTIMODAL_SYSTEM_TEXT if visual else TEXT_SYSTEM_TEXT
+    evidence = []
+    if visual:
+        evidence.append("visual")
+    if spec.numeric:
+        evidence.append("numeric")
+    if spec.contextual:
+        evidence.append("learned contextual")
+    if spec.scale_calibration:
+        evidence.append("channel-scale")
+    if spec.task_prior:
+        evidence.append("task-prior")
+    supplied = ", ".join(evidence[:-1]) + (
+        f" and {evidence[-1]}" if len(evidence) > 1 else evidence[0]
+    )
+    lines = [
+        "You are an expert in multivariate time-series analysis. Answer the exact",
+        f"question using the {supplied} evidence supplied in the user message.",
+    ]
+    if visual:
+        lines.extend(
+            [
+                "",
+                "The figure shows the complete per-channel-normalized sequence.",
+                "Use it to compare temporal shape, surrounding context, relative timing,",
+                "and co-movement across channels.",
+            ]
+        )
+    if spec.numeric:
+        lines.extend(
+            [
+                "",
+                "Use the channel-aligned Window for explicit values and exact time indices.",
+            ]
+        )
+    if spec.contextual:
+        lines.extend(
+            [
+                "",
+                "Treat learned contextual hints as supporting model evidence, not as",
+                "ground-truth labels or calibrated anomaly probabilities.",
+            ]
+        )
+    if spec.task_prior:
+        lines.extend(
+            [
+                "Treat task-prior hints as general task information rather than",
+                "sample-specific facts.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Return only the visible final answer and its evidence-based explanation.",
+            "Do not expose private chain-of-thought, scratch work, hidden-reasoning tags,",
+            (
+                "placeholder tokens, image paths, or internal representations. Follow the"
+                if visual
+                else "placeholder tokens or internal representations. Follow the"
+            ),
+            "Output Contract in the user message exactly.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _evidence_rules(spec: AblationSpec) -> str:
+    if spec.is_full:
+        return EVIDENCE_RULES
+    paragraphs = ["### Evidence-use rules"]
+    if spec.visual:
+        paragraphs.append(
+            "Use the figure for temporal shape, surrounding context, relative timing, "
+            "and co-movement across channels. Plot colors and normalized row heights do "
+            "not by themselves establish anomaly status, severity, root cause, or causal direction."
+        )
+    if spec.numeric and spec.scale_calibration:
+        paragraphs.append(
+            "For every channel, mean and std are computed from the full valid series. Each "
+            "listed integer is approximately 100 * (raw_value - mean) / (std + epsilon), "
+            "where epsilon is stated below. Use normalized integers for deviations relative "
+            "to the same channel's history. For raw levels or cross-channel magnitude "
+            "comparisons, use the stated reconstruction relation and each channel's scale."
+        )
+    elif spec.numeric:
+        paragraphs.append(
+            "Use the listed channel-aligned Window values for explicit local comparisons "
+            "and exact time indices."
+        )
+    elif spec.scale_calibration:
+        paragraphs.append(
+            "The channel scale calibration reports each channel's full-series mean and std. "
+            "Use it only as scale context."
+        )
+    if spec.step:
+        paragraphs.append(
+            "Each Step-Local hint is aligned with the stated channel and time index and "
+            "provides fine-grained contextual evidence."
+        )
+    if spec.channel:
+        paragraphs.append(
+            "Each Channel-Local hint is a question-independent, channel-anchored summary "
+            "of the complete target window. Use it for channel-level behavior and comparisons."
+        )
+    if spec.joint:
+        qualifier = "question-conditioned " if spec.question_conditioning else ""
+        paragraphs.append(
+            f"The Joint-Local hint is a {qualifier}summary derived from all channels and "
+            "all target-window steps. Use it for the overall multivariate interpretation."
+        )
+    if spec.task_prior:
+        paragraphs.append(
+            "Fixed hints contain task-level priors, not sample-specific facts. Use them only "
+            "as task-level guidance."
+        )
+    paragraphs.append(
+        "Use all supplied channels jointly when making the overall judgment. Do not treat "
+        "the largest deviation as automatically being the root cause, and do not infer "
+        "causal direction solely from anomaly magnitude."
+    )
+    return "\n\n".join(paragraphs)
+
+
 @dataclass
 class TokenizedPrompts:
     model_inputs: Dict[str, torch.Tensor]
@@ -134,6 +260,7 @@ class TokenizedPrompts:
     visual_token_counts: List[int]
     original_image_sizes: List[Optional[Tuple[int, int]]]
     padding_side: str
+    ablation_variant: str = FULL_VARIANT
 
     @property
     def input_ids(self) -> torch.Tensor:
@@ -204,6 +331,7 @@ class MultiAxisPromptBuilder:
         channel_ids: Optional[Sequence[str]] = None,
         question_group: str = "OE",
         include_visual: Optional[bool] = None,
+        ablation_variant: str = FULL_VARIANT,
     ) -> str:
         if not question or not question.strip():
             raise ValueError("Question is empty")
@@ -223,7 +351,8 @@ class MultiAxisPromptBuilder:
         if question_group not in OUTPUT_CONTRACTS:
             raise ValueError(f"Unknown question group: {question_group}")
 
-        visual = self.use_images if include_visual is None else bool(include_visual)
+        spec = ablation_spec(ablation_variant)
+        visual = (self.use_images if include_visual is None else bool(include_visual)) and spec.visual
         if visual:
             prefix, suffix = self.build_multimodal_parts(
                 question,
@@ -234,8 +363,27 @@ class MultiAxisPromptBuilder:
                 channel_stds,
                 identifiers,
                 question_group,
+                ablation_variant=ablation_variant,
             )
             return f"{prefix}\n\n{suffix}"
+
+        if not spec.is_full:
+            return "\n\n".join(
+                [
+                    USER_PREAMBLE,
+                    f"### Question\n{question.strip()}",
+                    *self._ablation_evidence_sections(
+                        spec,
+                        start,
+                        end,
+                        window_values,
+                        channel_means,
+                        channel_stds,
+                        identifiers,
+                    ),
+                    OUTPUT_CONTRACTS[question_group],
+                ]
+            )
 
         fixed, overview_lines, channel_blocks = self._evidence_fields(
             start, window_values, channel_means, channel_stds, identifiers
@@ -270,6 +418,98 @@ class MultiAxisPromptBuilder:
             )
         sections.append(OUTPUT_CONTRACTS[question_group])
         return "\n\n".join(sections)
+
+    def _ablation_evidence_sections(
+        self,
+        spec: AblationSpec,
+        start: int,
+        end: int,
+        window_values: Sequence[Sequence[int]],
+        channel_means: Sequence[float],
+        channel_stds: Sequence[float],
+        identifiers: Sequence[str],
+    ) -> List[str]:
+        """Build only the evidence fields enabled by an inference intervention."""
+
+        sections: List[str] = [_evidence_rules(spec)]
+        if spec.task_prior:
+            sections.append(
+                f"### Task-prior hints\n{' '.join([FIXED_TOKEN] * self.fixed_tokens)}"
+            )
+        if spec.channel:
+            overview = "\n".join(
+                f"{identifier}: {CHANNEL_TOKEN}" for identifier in identifiers
+            )
+            sections.append(
+                "### All-channel overview\n"
+                "Each channel appears once at overview resolution.\n"
+                + overview
+            )
+
+        length = int(end) - int(start)
+        target_lines = [
+            "### Target window",
+            f"Global interval: [{start}, {end})",
+            f"Window length: {length}",
+        ]
+        if spec.numeric and spec.scale_calibration:
+            target_lines.extend(
+                [
+                    f"Normalization epsilon: {self._format_stat(self.window_epsilon)}",
+                    "Each integer is rounded from 100 * (raw_value - mean) / "
+                    "(std + epsilon). Therefore raw_value is approximately mean + "
+                    "(std + epsilon) * integer / 100.",
+                ]
+            )
+        sections.append("\n".join(target_lines))
+
+        if spec.scale_calibration and not spec.numeric:
+            scale_lines = ["### Channel scale calibration"]
+            scale_lines.extend(
+                f"{identifier}: mean={self._format_stat(mean)}, "
+                f"std={self._format_stat(std)}"
+                for identifier, mean, std in zip(
+                    identifiers, channel_means, channel_stds
+                )
+            )
+            sections.append("\n".join(scale_lines))
+
+        if spec.numeric or spec.step:
+            if spec.numeric and spec.step:
+                title = "### Channel-aligned Window and Step-Local evidence"
+            elif spec.numeric:
+                title = "### Channel-aligned Window"
+            else:
+                title = "### Channel-aligned Step-Local evidence"
+            blocks: List[str] = []
+            for identifier, mean, std, values in zip(
+                identifiers, channel_means, channel_stds, window_values
+            ):
+                header = identifier
+                if spec.numeric and spec.scale_calibration:
+                    header += (
+                        f" [mean={self._format_stat(mean)}, "
+                        f"std={self._format_stat(std)}]"
+                    )
+                lines = [header + ":"]
+                for relative, value in enumerate(values):
+                    address = f"t={start + relative}"
+                    if spec.numeric:
+                        address += f", value={int(value)}"
+                    if spec.step:
+                        address += f" {STEP_TOKEN}" if spec.numeric else f": {STEP_TOKEN}"
+                    lines.append(address)
+                blocks.append("\n".join(lines))
+            sections.append(title + "\n" + "\n\n".join(blocks))
+
+        if spec.joint and self.include_joint:
+            title = (
+                "### Question-conditioned full-window Joint-Local evidence"
+                if spec.question_conditioning
+                else "### Full-window Joint-Local evidence"
+            )
+            sections.append(f"{title}\n{JOINT_TOKEN}")
+        return sections
 
     def _evidence_fields(
         self,
@@ -314,6 +554,7 @@ class MultiAxisPromptBuilder:
         channel_stds: Sequence[float],
         channel_ids: Sequence[str],
         question_group: str,
+        ablation_variant: str = FULL_VARIANT,
     ) -> Tuple[str, str]:
         # Reuse build_text's fail-closed validation without recursively selecting
         # the visual path.
@@ -332,6 +573,44 @@ class MultiAxisPromptBuilder:
             raise ValueError("Channel statistic count does not match the numeric Window")
         if question_group not in OUTPUT_CONTRACTS:
             raise ValueError(f"Unknown question group: {question_group}")
+        spec = ablation_spec(ablation_variant)
+        if not spec.visual:
+            raise ValueError(f"{ablation_variant} does not include visual evidence")
+        if not spec.is_full:
+            prefix = (
+                "### Question\n"
+                f"{question.strip()}\n\n"
+                "### Visual evidence\n"
+                "The following figure shows the complete per-channel-normalized "
+                "multivariate sequence. Inspect it specifically for evidence needed "
+                "to answer the question above."
+            )
+            figure_note = (
+                "### Figure note\n"
+                "Each row represents one channel, and every row label uses the exact "
+                "ch_<index> identifier used by the question and evidence addresses. "
+                "The horizontal axis is the global time index. The black curve shows "
+                "surrounding context. The dark-blue segment and pale-yellow background "
+                f"mark exactly the half-open target interval [{start}, {end}), that is, "
+                f"positions {start} through {end - 1}.\n\n"
+                "Values are normalized independently within each channel. Plot colors "
+                "indicate location and rendering roles only."
+            )
+            suffix_sections = [
+                figure_note,
+                *self._ablation_evidence_sections(
+                    spec,
+                    start,
+                    end,
+                    window_values,
+                    channel_means,
+                    channel_stds,
+                    channel_ids,
+                ),
+                OUTPUT_CONTRACTS[question_group],
+            ]
+            return prefix, "\n\n".join(suffix_sections)
+
         fixed, overview_lines, channel_blocks = self._evidence_fields(
             start, window_values, channel_means, channel_stds, channel_ids
         )
@@ -374,6 +653,7 @@ class MultiAxisPromptBuilder:
         *,
         visual_prefix: Optional[str] = None,
         visual_suffix: Optional[str] = None,
+        system_text: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         if image is None:
             # Text-only tokenizers such as DeepSeek/Qwen3 use chat templates that
@@ -390,7 +670,9 @@ class MultiAxisPromptBuilder:
         return [
             {
                 "role": "system",
-                "content": MULTIMODAL_SYSTEM_TEXT if image is not None else TEXT_SYSTEM_TEXT,
+                "content": system_text or (
+                    MULTIMODAL_SYSTEM_TEXT if image is not None else TEXT_SYSTEM_TEXT
+                ),
             },
             {"role": "user", "content": user_content},
         ]
@@ -425,11 +707,13 @@ class MultiAxisPromptBuilder:
         return sequences
 
     def _open_images(
-        self, image_paths: Sequence[Optional[str]]
+        self, image_paths: Sequence[Optional[str]], *, spec: AblationSpec
     ) -> Tuple[List[Any], List[Optional[Tuple[int, int]]]]:
         if not self.use_images:
             if any(path is not None for path in image_paths):
                 raise ValueError("Image-off control received image paths")
+            return [], [None] * len(image_paths)
+        if not spec.visual:
             return [], [None] * len(image_paths)
         if any(not path for path in image_paths):
             raise FileNotFoundError("Every image-enabled sample requires a pre-rendered image")
@@ -520,6 +804,7 @@ class MultiAxisPromptBuilder:
         question_groups: Sequence[str],
         image_paths: Sequence[Optional[str]],
         answers: Optional[Sequence[str]] = None,
+        ablation_variant: str = FULL_VARIANT,
     ) -> TokenizedPrompts:
         batch = len(questions)
         related = (
@@ -535,7 +820,9 @@ class MultiAxisPromptBuilder:
             raise ValueError("Prompt batch fields must have identical lengths")
         if answers is not None and len(answers) != batch:
             raise ValueError("Answer batch length must match questions")
-        images, original_sizes = self._open_images(image_paths)
+        spec = ablation_spec(ablation_variant)
+        include_visual = self.use_images and spec.visual
+        images, original_sizes = self._open_images(image_paths, spec=spec)
 
         prompt_texts: List[str] = []
         full_texts: List[str] = []
@@ -553,8 +840,11 @@ class MultiAxisPromptBuilder:
                     channel_ids[index],
                     question_groups[index],
                     include_visual=False,
+                    ablation_variant=ablation_variant,
                 )
-                messages = self._messages(user_text)
+                messages = self._messages(
+                    user_text, system_text=_system_text(spec, visual=False)
+                )
             else:
                 visual_prefix, visual_suffix = self.build_multimodal_parts(
                     question,
@@ -565,12 +855,14 @@ class MultiAxisPromptBuilder:
                     channel_stds[index],
                     channel_ids[index],
                     question_groups[index],
+                    ablation_variant=ablation_variant,
                 )
                 messages = self._messages(
                     "",
                     image,
                     visual_prefix=visual_prefix,
                     visual_suffix=visual_suffix,
+                    system_text=_system_text(spec, visual=True),
                 )
             prompt_text = self._render_chat(messages, add_generation_prompt=True)
             if image_paths[index] and str(image_paths[index]) in prompt_text:
@@ -584,7 +876,7 @@ class MultiAxisPromptBuilder:
                     raise ValueError("Empty teacher answer reached model forward")
                 assistant_content: Any = (
                     [{"type": "text", "text": answer.strip()}]
-                    if self.use_images
+                    if include_visual
                     else answer.strip()
                 )
                 full_messages = messages + [
@@ -644,20 +936,25 @@ class MultiAxisPromptBuilder:
             )[0]
             joint = torch.where((row_ids == self.token_ids[JOINT_TOKEN]) & valid)[0]
             fixed = torch.where((row_ids == self.token_ids[FIXED_TOKEN]) & valid)[0]
-            expected_steps = len(window_values[index]) * (intervals[index][1] - intervals[index][0])
+            expected_steps = (
+                len(window_values[index]) * (intervals[index][1] - intervals[index][0])
+                if spec.step
+                else 0
+            )
             if step.numel() != expected_steps:
                 raise AssertionError(f"STEP placeholder mismatch: {step.numel()} != {expected_steps}")
-            expected_channels = len(window_values[index])
+            expected_channels = len(window_values[index]) if spec.channel else 0
             if channel.numel() != expected_channels:
                 raise AssertionError(
                     f"CHANNEL placeholder mismatch: {channel.numel()} != {expected_channels}"
                 )
-            expected_joint = 1 if self.include_joint else 0
+            expected_joint = 1 if self.include_joint and spec.joint else 0
             if joint.numel() != expected_joint:
                 raise AssertionError(f"JOINT placeholder mismatch: {joint.numel()} != {expected_joint}")
-            if fixed.numel() != self.fixed_tokens:
+            expected_fixed = self.fixed_tokens if spec.task_prior else 0
+            if fixed.numel() != expected_fixed:
                 raise AssertionError(
-                    f"FIXED placeholder mismatch: {fixed.numel()} != {self.fixed_tokens}"
+                    f"FIXED placeholder mismatch: {fixed.numel()} != {expected_fixed}"
                 )
             step_positions.append(step)
             channel_positions.append(channel)
@@ -680,4 +977,5 @@ class MultiAxisPromptBuilder:
             visual_token_counts=visual_token_counts,
             original_image_sizes=original_sizes,
             padding_side=padding_side,
+            ablation_variant=ablation_variant,
         )
