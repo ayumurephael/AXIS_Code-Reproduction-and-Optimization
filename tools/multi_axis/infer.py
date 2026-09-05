@@ -34,6 +34,12 @@ DATASETS = OFFICIAL_BIAS_NEUTRALIZED_DATASETS
 
 
 def source_commit() -> str | None:
+    explicit = os.environ.get("MULTI_AXIS_SOURCE_COMMIT")
+    if explicit:
+        value = explicit.strip().lower()
+        if len(value) != 40 or any(char not in "0123456789abcdef" for char in value):
+            raise ValueError("MULTI_AXIS_SOURCE_COMMIT must be a full Git commit hash")
+        return value
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],

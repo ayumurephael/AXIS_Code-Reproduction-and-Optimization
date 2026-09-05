@@ -15,6 +15,7 @@ from src.models.MultiAXIS.prompting import (
     TokenizedPrompts,
 )
 from tools.multi_axis.test_multiaxis import FakeProcessor
+from tools.multi_axis.infer import source_commit
 
 
 EXPECTED_FLAGS = {
@@ -30,6 +31,19 @@ EXPECTED_FLAGS = {
     "wo_question_conditioning": (1, 1, 1, 1, 1, 1, 0, 1),
     "wo_task_prior": (1, 1, 1, 1, 1, 1, 1, 0),
 }
+
+
+def test_source_commit_accepts_only_an_explicit_full_hash(monkeypatch) -> None:
+    value = "a" * 40
+    monkeypatch.setenv("MULTI_AXIS_SOURCE_COMMIT", value.upper())
+    assert source_commit() == value
+    monkeypatch.setenv("MULTI_AXIS_SOURCE_COMMIT", "short")
+    try:
+        source_commit()
+    except ValueError as exc:
+        assert "full Git commit hash" in str(exc)
+    else:
+        raise AssertionError("An unauditable source revision was accepted")
 
 
 def _builder(*, use_images: bool = False) -> MultiAxisPromptBuilder:
