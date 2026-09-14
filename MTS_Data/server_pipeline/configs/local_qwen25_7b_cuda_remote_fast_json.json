@@ -1,0 +1,28 @@
+{
+  "provider": "local_hf",
+  "model": "/root/shared-nvme/axis_project/hf_cache/models/Qwen2.5-7B-Instruct",
+  "device": "cuda",
+  "device_map": "auto",
+  "max_memory": {
+    "0": "22000MiB",
+    "1": "22000MiB",
+    "cpu": "100GiB"
+  },
+  "offload_folder": "/root/shared-nvme/axis_project/offload/qwen25_7b",
+  "low_cpu_mem_usage": true,
+  "torch_dtype": "float16",
+  "trust_remote_code": true,
+  "temperature": 0.0,
+  "do_sample": false,
+  "use_cache": false,
+  "max_tokens": 320,
+  "axis_hints": {
+    "enabled": true,
+    "d_proj": 32,
+    "num_prototype": 256,
+    "num_fixed_tokens": 8,
+    "num_heads": 4,
+    "max_local_tokens": 48,
+    "checkpoint_path": "outputs/checkpoints/qwen25_7b_axis_perceiver_bridge_semantic_truth_v3.pt"
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "seed": 520,
+  "data": {
+    "profile": "legacy_axis_original",
+    "generator_backend": "legacy_tsad",
+    "question_provider": "bank",
+    "question_seed": 520,
+    "qa_sample_windows": true,
+    "qa_samples_per_series": 2,
+    "qa_min_window_size": 15,
+    "qa_max_window_size": 60,
+    "qa_anomaly_ratio": 0.5,
+    "output_dir": "outputs/runs/legacy_axis50_original/data",
+    "legacy_num_samples": 50,
+    "length": 180,
+    "num_channels": 10,
+    "legacy_anomaly_sample_ratio": 1.0,
+    "legacy_activate_function": false,
+    "legacy_use_attribute_set": true,
+    "train_ratio": 0.0,
+    "val_ratio": 0.0,
+    "test_ratio": 1.0
+  },
+  "model": {
+    "backend": "torch_axis",
+    "device": "auto",
+    "feature_dim": 10,
+    "metadata_dim": 10,
+    "top_k_channels": 3,
+    "batch_size": 24,
+    "dropout": 0.1,
+    "hint_hidden_dim": 64,
+    "temporal_loss_weight": 1.5,
+    "ts_encoder": {
+      "d_model": 96,
+      "d_proj": 32,
+      "patch_size": 16,
+      "num_layers": 3,
+      "num_heads": 4,
+      "dropout": 0.1,
+      "max_patches": 16
+    }
+  },
+  "train_encoder": {
+    "epochs": 30,
+    "learning_rate": 0.0008,
+    "pos_weight": 5.0,
+    "checkpoint_path": "outputs/checkpoints/encoder_semantic_scale.pt"
+  },
+  "train_hint_tuner": {
+    "epochs": 12,
+    "learning_rate": 0.0008,
+    "checkpoint_path": "outputs/checkpoints/hint_tuner_semantic_scale.pt"
+  },
+  "train_interval_proposal": {
+    "epochs": 35,
+    "learning_rate": 0.0008,
+    "weight_decay": 0.0001,
+    "pos_weight": 10.0,
+    "batch_size": 24,
+    "checkpoint_path": "outputs/checkpoints/axis_interval_proposer_data.pt"
+  },
+  "interval_proposal": {
+    "window_size": 32,
+    "stride": 8,
+    "threshold": 0.5,
+    "min_iou": 0.25
+  },
+  "outputs": {
+    "report_path": "outputs/runs/legacy_axis50_original/report.json",
+    "sample_prompt_path": "outputs/runs/legacy_axis50_original/sample_prompt.txt"
+  }
+}

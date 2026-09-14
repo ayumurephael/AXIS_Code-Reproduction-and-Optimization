@@ -1,0 +1,71 @@
+{
+  "seed": 72,
+  "data": {
+    "output_dir": "data/synthetic_torch_smoke",
+    "generator_backend": "legacy_tsad",
+    "num_base_systems": 48,
+    "length": 160,
+    "num_channels": 10,
+    "alpha_values": [0.0, 0.2, 0.6, 1.0],
+    "train_ratio": 0.70,
+    "val_ratio": 0.15,
+    "test_ratio": 0.15,
+    "noise_scale": 0.05,
+    "graph_density": 0.35,
+    "causal_graph": {
+      "graph_types": ["tree", "diamond", "fc_layer", "chain"],
+      "mechanisms": ["additive", "nonlinear"],
+      "chain_num_channels": 10,
+      "coefficient_jitter": 0.02
+    }
+  },
+  "model": {
+    "backend": "torch_axis",
+    "device": "auto",
+    "feature_dim": 10,
+    "metadata_dim": 10,
+    "top_k_channels": 3,
+    "batch_size": 12,
+    "dropout": 0.1,
+    "hint_hidden_dim": 32,
+    "temporal_loss_weight": 1.0,
+    "ts_encoder": {
+      "d_model": 64,
+      "d_proj": 32,
+      "patch_size": 16,
+      "num_layers": 2,
+      "num_heads": 4,
+      "dropout": 0.1,
+      "max_patches": 16
+    }
+  },
+  "train_encoder": {
+    "epochs": 20,
+    "learning_rate": 0.001,
+    "pos_weight": 3.0,
+    "checkpoint_path": "outputs/checkpoints/encoder_torch_smoke.pt"
+  },
+  "train_hint_tuner": {
+    "epochs": 6,
+    "learning_rate": 0.001,
+    "checkpoint_path": "outputs/checkpoints/hint_tuner_torch_smoke.pt"
+  },
+  "train_interval_proposal": {
+    "epochs": 20,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "pos_weight": 8.0,
+    "batch_size": 12,
+    "checkpoint_path": "outputs/checkpoints/axis_interval_proposer.pt"
+  },
+  "interval_proposal": {
+    "window_size": 32,
+    "stride": 8,
+    "threshold": 0.5,
+    "min_iou": 0.25
+  },
+  "outputs": {
+    "report_path": "outputs/torch_smoke_report.json",
+    "sample_prompt_path": "outputs/torch_sample_prompt.txt"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "provider": "local_hf_vl",
+  "model": "/root/axis_project/models/Qwen2.5-VL-7B-Instruct",
+  "device": "cuda:0",
+  "device_map": "auto",
+  "max_memory": {
+    "0": "22000MiB",
+    "1": "22000MiB",
+    "cpu": "100GiB"
+  },
+  "offload_folder": "/root/axis_project/offload/qwen25_vl7b",
+  "low_cpu_mem_usage": true,
+  "torch_dtype": "float16",
+  "trust_remote_code": true,
+  "temperature": 0.0,
+  "do_sample": false,
+  "max_tokens": 1024,
+  "use_cache": true,
+  "min_pixels": 200704,
+  "max_pixels": 6422528,
+  "axis_hints": {
+    "enabled": true,
+    "d_proj": 256,
+    "num_prototype": 256,
+    "num_fixed_tokens": 8,
+    "num_global_tokens": 8,
+    "max_global_tokens": 8,
+    "max_local_tokens": 16,
+    "max_channel_tokens": 16,
+    "num_heads": 4,
+    "injection_scale": 0.1,
+    "global_injection_scale": 0.1,
+    "channel_injection_scale": 0.1,
+    "checkpoint_path": "outputs/checkpoints/qwen25_7b_timercd_bridge_truth600_labelglobal_e10.pt"
+  }
+}

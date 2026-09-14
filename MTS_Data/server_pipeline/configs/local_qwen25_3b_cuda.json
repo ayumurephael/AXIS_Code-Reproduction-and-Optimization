@@ -1,0 +1,28 @@
+{
+  "provider": "local_hf",
+  "model": "X:/codex/models/Qwen2.5-3B-Instruct",
+  "device": "cuda",
+  "device_map": "auto",
+  "max_memory": {
+    "0": "4800MiB",
+    "cpu": "48GiB"
+  },
+  "offload_folder": "X:/codex/models/offload/qwen25_3b",
+  "low_cpu_mem_usage": true,
+  "torch_dtype": "float16",
+  "trust_remote_code": true,
+  "temperature": 0.0,
+  "do_sample": false,
+  "use_cache": false,
+  "max_tokens": 384,
+  "axis_hints": {
+    "enabled": true,
+    "d_proj": 32,
+    "num_prototype": 256,
+    "num_fixed_tokens": 8,
+    "num_heads": 4,
+    "max_local_tokens": 48,
+    "checkpoint_path": null
+  }
+}
+

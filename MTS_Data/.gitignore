@@ -1,0 +1,6 @@
+# Local credentials and machine-specific environments must never be committed.
+THU_IE_GPU.md
+.venv/
+**/__pycache__/
+*.py[cod]
+

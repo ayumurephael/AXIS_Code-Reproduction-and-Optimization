@@ -1,0 +1,97 @@
+{
+  "seed": 520,
+  "data": {
+    "profile": "relation_stress_v1",
+    "generator_backend": "legacy_tsad",
+    "output_dir": "outputs/runs/relation_stress_v1/data",
+    "num_base_systems": 80,
+    "length": 180,
+    "num_channels": 10,
+    "alpha_values": [0.0, 0.7, 0.95, 1.0],
+    "anomaly_strength_multiplier": 2.2,
+    "train_ratio": 0.70,
+    "val_ratio": 0.15,
+    "test_ratio": 0.15,
+    "noise_scale": 0.18,
+    "graph_density": 0.35,
+    "anomaly_types": [
+      "level_shift",
+      "variance_burst",
+      "stuck",
+      "trend_reversal",
+      "saturation",
+      "relation_break",
+      "gain_change",
+      "sign_flip",
+      "lag_shift",
+      "parent_child_decoupling",
+      "root_phase_intervention",
+      "common_cause_shock",
+      "propagation_attenuation",
+      "propagation_amplification"
+    ],
+    "causal_graph": {
+      "graph_types": ["tree", "diamond", "fc_layer"],
+      "mechanisms": ["additive", "exponential", "tanh", "mixed"],
+      "coefficient_jitter": 0.12,
+      "coefficient_scale": 0.48,
+      "lag_choices": [1, 2, 3],
+      "beta_range": [0.12, 0.55],
+      "root_driver_types": ["ar_noise", "random_walk", "pulse"],
+      "root_amplitude_range": [0.05, 0.35],
+      "root_period_range": [24.0, 48.0],
+      "random_root_phase": true,
+      "noise_divisor": 1.0,
+      "independent_noise_scale": 0.22
+    }
+  },
+  "model": {
+    "backend": "torch_axis",
+    "device": "auto",
+    "feature_dim": 10,
+    "metadata_dim": 10,
+    "top_k_channels": 3,
+    "batch_size": 24,
+    "dropout": 0.1,
+    "hint_hidden_dim": 64,
+    "temporal_loss_weight": 1.5,
+    "ts_encoder": {
+      "d_model": 96,
+      "d_proj": 32,
+      "patch_size": 16,
+      "num_layers": 3,
+      "num_heads": 4,
+      "dropout": 0.1,
+      "max_patches": 16
+    }
+  },
+  "train_encoder": {
+    "epochs": 30,
+    "learning_rate": 0.0008,
+    "pos_weight": 5.0,
+    "checkpoint_path": "outputs/checkpoints/encoder_semantic_scale.pt"
+  },
+  "train_hint_tuner": {
+    "epochs": 12,
+    "learning_rate": 0.0008,
+    "checkpoint_path": "outputs/checkpoints/hint_tuner_semantic_scale.pt"
+  },
+  "train_interval_proposal": {
+    "epochs": 35,
+    "learning_rate": 0.0008,
+    "weight_decay": 0.0001,
+    "pos_weight": 10.0,
+    "batch_size": 24,
+    "checkpoint_path": "outputs/checkpoints/axis_interval_proposer_semantic_scale.pt"
+  },
+  "interval_proposal": {
+    "window_size": 32,
+    "stride": 8,
+    "threshold": 0.5,
+    "min_iou": 0.25
+  },
+  "outputs": {
+    "report_path": "outputs/runs/relation_stress_v1/relation_stress_report.json",
+    "sample_prompt_path": "outputs/runs/relation_stress_v1/relation_stress_sample_prompt.txt"
+  }
+}

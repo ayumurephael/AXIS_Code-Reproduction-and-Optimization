@@ -1,0 +1,22 @@
+{
+  "seed": 1001,
+  "data": {
+    "output_dir": "smoke_outputs/doflow",
+    "generator_backend": "doflow",
+    "num_base_systems": 2,
+    "length": 128,
+    "num_channels": 10,
+    "alpha_values": [0.0, 1.0],
+    "train_ratio": 0.5,
+    "val_ratio": 0.0,
+    "test_ratio": 0.5,
+    "noise_scale": 0.05,
+    "graph_density": 0.35,
+    "causal_graph": {
+      "graph_types": ["tree", "diamond", "fc_layer", "chain"],
+      "mechanisms": ["additive", "nonlinear"],
+      "chain_num_channels": 10,
+      "coefficient_jitter": 0.02
+    }
+  }
+}

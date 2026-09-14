@@ -1,0 +1,42 @@
+{
+  "seed": 72,
+  "data": {
+    "output_dir": "data/synthetic_smoke",
+    "generator_backend": "legacy_tsad",
+    "num_base_systems": 60,
+    "length": 160,
+    "num_channels": 10,
+    "alpha_values": [0.0, 0.2, 0.6, 1.0],
+    "train_ratio": 0.70,
+    "val_ratio": 0.15,
+    "test_ratio": 0.15,
+    "noise_scale": 0.05,
+    "graph_density": 0.35,
+    "causal_graph": {
+      "graph_types": ["tree", "diamond", "fc_layer", "chain"],
+      "mechanisms": ["additive", "nonlinear"],
+      "chain_num_channels": 10,
+      "coefficient_jitter": 0.02
+    }
+  },
+  "model": {
+    "feature_dim": 10,
+    "metadata_dim": 10,
+    "top_k_channels": 3
+  },
+  "train_encoder": {
+    "epochs": 12,
+    "learning_rate": 0.08,
+    "pos_weight": 3.0,
+    "checkpoint_path": "outputs/checkpoints/encoder_smoke.npz"
+  },
+  "train_hint_tuner": {
+    "epochs": 14,
+    "learning_rate": 0.05,
+    "checkpoint_path": "outputs/checkpoints/hint_tuner_smoke.npz"
+  },
+  "outputs": {
+    "report_path": "outputs/smoke_report.json",
+    "sample_prompt_path": "outputs/sample_prompt.txt"
+  }
+}

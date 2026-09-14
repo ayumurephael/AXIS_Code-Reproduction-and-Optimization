@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Generated Answers: teacher_preview.jsonl</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --ink: #18202a;
+      --muted: #667085;
+      --line: #d7dde7;
+      --accent: #0f766e;
+      --good: #0f766e;
+      --warn: #b45309;
+      --bad: #b42318;
+      --code: #101828;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.55 "Segoe UI", Arial, sans-serif;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: rgba(246, 247, 249, 0.95);
+      border-bottom: 1px solid var(--line);
+      padding: 16px 24px;
+      backdrop-filter: blur(8px);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+    .subtle { color: var(--muted); }
+    main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 18px 24px 48px;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      margin: 14px 0;
+      overflow: hidden;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfe;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .badge.good { color: var(--good); border-color: #99d6cf; background: #ecfdf9; }
+    .badge.bad { color: var(--bad); border-color: #f3b7b1; background: #fff3f1; }
+    .badge.warn { color: var(--warn); border-color: #f7c56d; background: #fffaeb; }
+    .content {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(360px, 0.95fr);
+      gap: 16px;
+      padding: 14px;
+    }
+    .content.no-image { grid-template-columns: minmax(0, 1fr); }
+    h2, h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    .question {
+      font-size: 17px;
+      font-weight: 650;
+      margin: 0 0 12px;
+      white-space: pre-wrap;
+    }
+    .answer-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      margin: 10px 0;
+      background: #fcfcfd;
+    }
+    .answer-box.reference { border-left: 4px solid var(--accent); }
+    .answer-box.model { border-left: 4px solid #475467; }
+    .answer-text { white-space: pre-wrap; }
+    img {
+      width: 100%;
+      max-height: 720px;
+      object-fit: contain;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    details {
+      border-top: 1px dashed var(--line);
+      margin-top: 10px;
+      padding-top: 8px;
+    }
+    summary { cursor: pointer; color: var(--muted); }
+    pre {
+      margin: 8px 0 0;
+      padding: 10px;
+      overflow: auto;
+      max-height: 420px;
+      border-radius: 8px;
+      background: #101828;
+      color: #f2f4f7;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    a { color: #0f766e; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    @media (max-width: 980px) {
+      .content { grid-template-columns: minmax(0, 1fr); }
+      header, main { padding-left: 14px; padding-right: 14px; }
+    }
+  </style>
+</head>
+<body>
+<header><h1>Generated Answers: teacher_preview.jsonl</h1><div class="toolbar subtle">source: D:\桌面\多元AXIS\MTS_Data\server_pipeline\smoke_outputs\teacher_preview.jsonl | rows: 1</div></header><main><section class="card">
+  <div class="card-header">
+    <div class="meta"><span class="badge">#0001</span><span class="badge">base_00001_alpha_00</span><span class="badge">anomaly_frame_choice_09_root_claim_sufficiency</span><span class="badge">False</span></div>
+    <div class="meta"></div>
+  </div>
+  <div class="content no-image">
+    <div>
+      <div class="question">How strong a source-level claim is justified by the current evidence?
+Choices:
+A. no root-cause claim is justified
+B. only a local claim about one named channel is justified
+C. only a small-group claim about a concrete named group or alternative candidate cluster is justified
+D. only a broad-event claim about a larger named group is justified</div>
+      <div class="answer-box reference">
+        <h3>Reference / windows[0].answer</h3>
+        <div class="answer-text">The interval is not anomalous. No root-cause channel or affected channel should be assigned; observed channel movements should be treated as normal/background behavior.</div>
+      </div>
+      
+      <details>
+        <summary>Fact / metadata</summary>
+        <pre>{
+  &quot;fact_check&quot;: {
+    &quot;is_anomalous&quot;: false,
+    &quot;root_cause_channel&quot;: null,
+    &quot;root_cause_channels&quot;: [],
+    &quot;affected_channels&quot;: [],
+    &quot;anomaly_type&quot;: null,
+    &quot;anomaly_scope&quot;: null,
+    &quot;abnormal_edges&quot;: [],
+    &quot;causal_path&quot;: [],
+    &quot;graph_type&quot;: &quot;tree&quot;,
+    &quot;has_high_freq_oscillation&quot;: false,
+    &quot;has_over_fluctuation&quot;: false,
+    &quot;has_relation_break&quot;: false,
+    &quot;left_right_gap_level&quot;: &quot;none&quot;,
+    &quot;state_response_consistency&quot;: &quot;consistent&quot;,
+    &quot;question_id&quot;: &quot;anomaly_frame_choice_09_root_claim_sufficiency&quot;,
+    &quot;question_difficulty&quot;: &quot;anomaly_frame&quot;,
+    &quot;question_answer_type&quot;: &quot;choice&quot;,
+    &quot;question_family&quot;: &quot;root_claim_sufficiency&quot;,
+    &quot;choice_answer&quot;: &quot;A&quot;
+  },
+  &quot;target_interval&quot;: {
+    &quot;start&quot;: 20,
+    &quot;end&quot;: 40
+  },
+  &quot;parsed_student_answer&quot;: null,
+  &quot;teacher_answer_llm&quot;: null,
+  &quot;error&quot;: null
+}</pre>
+      </details>
+    </div>
+    
+  </div>
+</section></main>
+</body>
+</html>

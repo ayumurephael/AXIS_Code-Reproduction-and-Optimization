@@ -1,0 +1,2 @@
+"""Multivariate AXIS smoke workflow."""
+
