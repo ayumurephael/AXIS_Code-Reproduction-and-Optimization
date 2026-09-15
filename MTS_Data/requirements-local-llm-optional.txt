@@ -1,8 +1,0 @@
-# Optional: only needed when llm_client.py uses local_hf/local_hf_vl.
-# OpenAI-compatible GPT question/answer generation does not need these packages.
-torch
-transformers
-qwen-vl-utils
-Pillow
-jinja2
-

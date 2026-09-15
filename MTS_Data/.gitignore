@@ -3,4 +3,4 @@ THU_IE_GPU.md
 .venv/
 **/__pycache__/
 *.py[cod]
-
+outputs/

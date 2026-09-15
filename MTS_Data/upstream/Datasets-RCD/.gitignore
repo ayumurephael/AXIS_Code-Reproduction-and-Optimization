@@ -1,9 +1,0 @@
-*.DS_Store
-*__pycache__
-__pycache__/
-data_generate
-*.ipynb
-test_multi.py
-test.py
-.github/
-generate_univariate_csv.py

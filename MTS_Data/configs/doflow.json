@@ -1,0 +1,21 @@
+{
+  "seed": 1001,
+  "data": {
+    "generator_backend": "doflow",
+    "output_dir": "outputs/doflow",
+    "num_base_systems": 16,
+    "length": 180,
+    "num_channels": 10,
+    "alpha_values": [0.0, 0.2, 0.6, 1.0],
+    "train_ratio": 0.7,
+    "val_ratio": 0.15,
+    "test_ratio": 0.15,
+    "noise_scale": 0.05,
+    "causal_graph": {
+      "graph_types": ["tree", "diamond", "fc_layer", "chain"],
+      "mechanisms": ["additive", "nonlinear"],
+      "chain_num_channels": 10,
+      "coefficient_jitter": 0.04
+    }
+  }
+}
