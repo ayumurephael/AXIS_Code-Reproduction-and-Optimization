@@ -2,12 +2,113 @@ from __future__ import annotations
 
 import ast
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from .data_schema import SCHEMA_VERSION, attach_channel_scales, make_channel, validate_sample
 from .evidence import recognize_evidence
+
+
+def _json_compatible_with_type_manifest(value: Any, path: str = "$") -> Tuple[Any, Dict[str, Dict[str, Any]]]:
+    """Convert a legacy object to JSON without discarding non-JSON type information.
+
+    Datasets-RCD stores NumPy arrays/scalars and a few tuples in its pickle-style
+    output.  JSON has no native representation for these types, so the converted
+    value is accompanied by a compact path-indexed manifest.  Together, the value
+    and manifest retain everything needed to reconstruct the original container
+    and NumPy scalar/array types.
+    """
+
+    manifest: Dict[str, Dict[str, Any]] = {}
+
+    def convert(item: Any, item_path: str) -> Any:
+        if isinstance(item, np.ndarray):
+            manifest[item_path] = {
+                "python_type": "numpy.ndarray",
+                "dtype": str(item.dtype),
+                "shape": [int(v) for v in item.shape],
+            }
+            return item.tolist()
+        if isinstance(item, np.generic):
+            manifest[item_path] = {
+                "python_type": f"numpy.{type(item).__name__}",
+                "dtype": str(item.dtype),
+            }
+            return item.item()
+        if isinstance(item, tuple):
+            manifest[item_path] = {"python_type": "tuple"}
+            return [convert(child, f"{item_path}[{idx}]") for idx, child in enumerate(item)]
+        if isinstance(item, list):
+            return [convert(child, f"{item_path}[{idx}]") for idx, child in enumerate(item)]
+        if isinstance(item, dict):
+            converted: Dict[str, Any] = {}
+            for key, child in item.items():
+                key_text = str(key)
+                child_path = f"{item_path}.{key_text}"
+                converted[key_text] = convert(child, child_path)
+                if not isinstance(key, str):
+                    manifest[f"{child_path}#key"] = {"python_type": type(key).__name__}
+            return converted
+        if item is None or isinstance(item, (str, int, float, bool)):
+            return item
+        manifest[item_path] = {"python_type": f"{type(item).__module__}.{type(item).__qualname__}"}
+        return str(item)
+
+    return convert(value, path), manifest
+
+
+def _legacy_generator_record(sample: Dict[str, Any]) -> Dict[str, Any]:
+    """Preserve the four fields emitted by Datasets-RCD without decimal rounding.
+
+    The two large time-series arrays are already present in the normalized record,
+    so this block points to their canonical locations instead of duplicating them a
+    third time.  Raw one-dimensional labels and the complete attribute dictionary
+    are stored directly because they differ from the normalized channel-level
+    labels and metadata.
+    """
+
+    normal_raw = sample.get("normal_time_series")
+    observed_raw = sample.get("time_series")
+    labels_raw = sample.get("labels")
+    attribute_raw = sample.get("attribute") or {}
+
+    normal_array = None if normal_raw is None else np.asarray(normal_raw)
+    observed_array = np.asarray(observed_raw)
+    labels_array = np.asarray(labels_raw) if labels_raw is not None else np.zeros(observed_array.shape[0], dtype=int)
+    attribute_json, attribute_types = _json_compatible_with_type_manifest(attribute_raw, "$.attribute")
+
+    arrays: Dict[str, Dict[str, Any]] = {
+        "time_series": {
+            "field_ref": "series.values",
+            "dtype": str(observed_array.dtype),
+            "shape": [int(v) for v in observed_array.shape],
+        },
+        "labels": {
+            "values": labels_array.tolist(),
+            "dtype": str(labels_array.dtype),
+            "shape": [int(v) for v in labels_array.shape],
+        },
+    }
+    if normal_array is None:
+        arrays["normal_time_series"] = {"field_ref": "normal_series", "dtype": None, "shape": None}
+    else:
+        arrays["normal_time_series"] = {
+            "field_ref": "normal_series",
+            "dtype": str(normal_array.dtype),
+            "shape": [int(v) for v in normal_array.shape],
+        }
+
+    return {
+        "format": "datasets_rcd_generate_dataset_output_v1",
+        "arrays": arrays,
+        "attribute": attribute_json,
+        "attribute_type_manifest": attribute_types,
+        "serialization_note": (
+            "NumPy arrays/scalars and tuples are JSON-compatible here; their original types, dtypes, and shapes "
+            "are recorded in this block so the legacy record can be reconstructed without numeric rounding."
+        ),
+    }
 
 
 def _interval_from_labels(labels: np.ndarray) -> Dict[str, int]:
@@ -246,7 +347,8 @@ def convert_legacy_sample(sample: Dict[str, Any], sample_id: str, base_sample_id
     This adapter is intentionally conservative: unknown root cause fields are left
     null unless the old sample has an endogenous channel hint.
     """
-    values = np.asarray(sample["time_series"], dtype=float)
+    raw_values = np.asarray(sample["time_series"])
+    values = np.asarray(raw_values, dtype=float)
     if values.ndim == 1:
         values = values[:, None]
     attribute = sample.get("attribute") or {}
@@ -259,7 +361,8 @@ def convert_legacy_sample(sample: Dict[str, Any], sample_id: str, base_sample_id
     root_channel = f"ch_{root_idx}" if root_idx is not None else None
     anomaly_type = _legacy_anomaly_type(attribute, root_idx)
     root_anomaly_name = _legacy_root_anomaly_name(attribute, root_idx) if affected else None
-    normal_values = sample.get("normal_time_series")
+    raw_normal_values = sample.get("normal_time_series")
+    normal_values = raw_normal_values
     if normal_values is not None:
         normal_values = np.asarray(normal_values, dtype=float)
         if normal_values.ndim == 1:
@@ -268,7 +371,7 @@ def convert_legacy_sample(sample: Dict[str, Any], sample_id: str, base_sample_id
     abnormal_edges = [edge for edge in causal_edges if root_channel in edge] if root_channel else []
     anomaly_scope = None
     if affected:
-        anomaly_scope = "node" if len(affected) == 1 else "subgraph"
+        anomaly_scope = "node" if len(affected) == 1 else ("edge" if len(affected) <= 3 else "subgraph")
     natural_answer = _legacy_interval_answer(
         affected=affected,
         root_channel=root_channel,
@@ -281,17 +384,18 @@ def convert_legacy_sample(sample: Dict[str, Any], sample_id: str, base_sample_id
         "sample_id": sample_id,
         "base_sample_id": base_sample_id or sample_id,
         "source": "legacy_generator",
+        "legacy_generator_record": _legacy_generator_record(sample),
         "original_data": {
-            "time_series": values.round(6).tolist(),
-            "normal_series": normal_values.round(6).tolist() if normal_values is not None else None,
+            "time_series": values.tolist(),
+            "normal_series": normal_values.tolist() if normal_values is not None else None,
             "global_descriptor": "Converted from the original AXIS TSAD_dataset_gen generator.",
             "legacy_root_anomaly_name": root_anomaly_name,
             "legacy_root_anomaly_type": anomaly_type if affected else None,
         },
-        "normal_series": normal_values.round(6).tolist() if normal_values is not None else None,
+        "normal_series": normal_values.tolist() if normal_values is not None else None,
         "series": {
             "shape": [int(values.shape[0]), int(values.shape[1])],
-            "values": values.round(6).tolist(),
+            "values": values.tolist(),
             "labels": labels.astype(int).tolist(),
             "timestamps": None,
         },

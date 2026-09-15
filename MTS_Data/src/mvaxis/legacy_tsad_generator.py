@@ -95,7 +95,7 @@ def _legacy_import_context(legacy_src: Path) -> Iterator[None]:
 
 def load_legacy_tsad_generate_dataset(legacy_src: Path | None = None) -> Callable[..., List[Dict[str, Any]]]:
     """Load TSAD_dataset_gen-axis with its original generation behavior."""
-    legacy_src = legacy_src or (_repo_root() / "third_party" / "datasets_rcd")
+    legacy_src = (legacy_src or (_repo_root() / "third_party" / "datasets_rcd")).expanduser().resolve()
     _install_optional_dependency_shims()
     with _legacy_import_context(legacy_src):
         module_path = legacy_src / "src" / "generate_dataset.py"
@@ -156,6 +156,7 @@ def generate_legacy_tsad_dataset(config: Dict[str, Any]) -> Dict[str, str]:
         num_features=int(data_cfg["num_channels"]),
         activate_function=bool(data_cfg.get("activate_function", data_cfg.get("legacy_activate_function", False))),
         use_attribute_set=bool(data_cfg.get("use_attribute_set", data_cfg.get("legacy_use_attribute_set", True))),
+        num_workers=int(data_cfg.get("num_workers", data_cfg.get("legacy_num_workers", 1))),
     )
     rows = [
         convert_legacy_sample(row, sample_id=f"legacy_tsad_{idx:05d}", base_sample_id=f"legacy_tsad_{idx:05d}")

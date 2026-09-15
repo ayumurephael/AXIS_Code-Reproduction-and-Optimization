@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+import hashlib
+from importlib import metadata
 import json
+import platform
 import random
 from pathlib import Path
+import sys
 from typing import Any, Dict, Iterable, List, Sequence
 
 import numpy as np
@@ -29,6 +33,7 @@ def _ts_only_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "sample_id": row.get("sample_id"),
         "base_sample_id": row.get("base_sample_id"),
         "source": row.get("source"),
+        "legacy_generator_record": row.get("legacy_generator_record"),
         "original_data": row.get("original_data"),
         "normal_series": row.get("normal_series"),
         "series": row.get("series"),
@@ -38,6 +43,84 @@ def _ts_only_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "synthetic_label": row.get("synthetic_label"),
         "sequence_length": int(len(values)),
     }
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _source_manifest(legacy_src: Path) -> Dict[str, Any]:
+    """Fingerprint every vendored runtime/config file used by Datasets-RCD."""
+
+    source_files = sorted(
+        [path for path in legacy_src.rglob("*.py") if "__pycache__" not in path.parts]
+        + [path for path in legacy_src.rglob("*.json") if "__pycache__" not in path.parts]
+    )
+    files = []
+    tree_digest = hashlib.sha256()
+    for path in source_files:
+        relative = path.relative_to(legacy_src).as_posix()
+        file_digest = _sha256_file(path)
+        files.append({"path": relative, "bytes": int(path.stat().st_size), "sha256": file_digest})
+        tree_digest.update(relative.encode("utf-8"))
+        tree_digest.update(b"\0")
+        tree_digest.update(file_digest.encode("ascii"))
+        tree_digest.update(b"\n")
+    return {
+        "path": str(legacy_src),
+        "upstream_repository": "https://github.com/thu-sail-lab/Datasets-RCD",
+        "upstream_commit_audited": "73eb733f3026e32bf9edfde1d4c3b787358908e7",
+        "tree_sha256": tree_digest.hexdigest(),
+        "files": files,
+    }
+
+
+def _dependency_versions() -> Dict[str, str | None]:
+    packages = {
+        "numpy": "numpy",
+        "scipy": "scipy",
+        "tqdm": "tqdm",
+        "networkx": "networkx",
+        "PyWavelets": "PyWavelets",
+        "statsmodels": "statsmodels",
+        "matplotlib": "matplotlib",
+    }
+    versions: Dict[str, str | None] = {}
+    for output_name, distribution_name in packages.items():
+        try:
+            versions[output_name] = metadata.version(distribution_name)
+        except metadata.PackageNotFoundError:
+            versions[output_name] = None
+    return versions
+
+
+def _write_generation_schedule(
+    path: Path,
+    *,
+    seed: int,
+    seq_lens: Sequence[int],
+    feature_counts: Sequence[int],
+) -> Dict[str, Any]:
+    schedule = {
+        "dataset_seed": int(seed),
+        "sequence_length_rng_seed": int(seed),
+        "feature_count_rng_seed": int(seed) + 1009,
+        "sampling": "independent inclusive discrete uniform draws when a min/max range is configured",
+        "entries": [
+            {
+                "global_sample_index": int(index),
+                "seq_len": int(seq_len),
+                "num_features": int(feature_count),
+            }
+            for index, (seq_len, feature_count) in enumerate(zip(seq_lens, feature_counts))
+        ],
+    }
+    save_json(schedule, path)
+    return {"path": str(path), "sha256": _sha256_file(path), "num_entries": len(schedule["entries"])}
 
 
 def _with_order_metadata(row: Dict[str, Any], *, global_index: int, shard_index: int | None, index_in_shard: int | None) -> Dict[str, Any]:
@@ -113,6 +196,9 @@ def _summary(
     sampled_feature_counts: Sequence[int] | None = None,
     shard_size: int = 0,
     shard_manifest: List[Dict[str, Any]] | None = None,
+    num_workers: int = 1,
+    generation_schedule: Dict[str, Any] | None = None,
+    generation_provenance: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     seq_lens = list(sampled_seq_lens or [])
     if not seq_lens and seq_len is not None:
@@ -163,6 +249,7 @@ def _summary(
         "num_features": int(num_features) if num_features is not None else None,
         "feature_count_summary": feature_summary,
         "seed": int(seed),
+        "num_workers": int(num_workers),
         "legacy_anomaly_sample_ratio": float(anomaly_ratio),
         "anomalous_series_count": int(anomalous_series_count),
         "normal_series_count": int(normal_series_count),
@@ -171,6 +258,8 @@ def _summary(
         "shard_size": int(shard_size),
         "num_shards": len(shard_manifest or []),
         "shards": shard_manifest or [],
+        "generation_schedule": generation_schedule or {},
+        "generation_provenance": generation_provenance or {},
     }
 
 
@@ -224,6 +313,7 @@ def _generate_variable_length_dataset(
     anomaly_ratio: float,
     activate_function: bool,
     use_attribute_set: bool,
+    num_workers: int,
 ) -> List[Dict[str, Any]]:
     """Generate legacy rows while preserving per-sample length/channel schedules."""
 
@@ -241,6 +331,7 @@ def _generate_variable_length_dataset(
             num_features=int(feature_count),
             activate_function=bool(activate_function),
             use_attribute_set=bool(use_attribute_set),
+            num_workers=int(num_workers),
         )
         buckets[(int(seq_len), int(feature_count))].extend(bucket_rows)
 
@@ -272,12 +363,24 @@ def main() -> None:
     parser.add_argument("--num-features-max", type=int, default=None, help="If set with --num-features-min, sample one channel count per sample from this inclusive range.")
     parser.add_argument("--anomaly-ratio", type=float, default=1.0)
     parser.add_argument("--activate-function", action="store_true")
-    parser.add_argument("--use-attribute-set", action="store_true", default=True)
+    attribute_group = parser.add_mutually_exclusive_group()
+    attribute_group.add_argument("--use-attribute-set", dest="use_attribute_set", action="store_true", help="Sample attributes from the weighted ALL_ATTRIBUTE_SET bank (default).")
+    attribute_group.add_argument("--use-metric-config", dest="use_attribute_set", action="store_false", help="Sample controlled metric definitions from third_party/datasets_rcd/config/synthetic.json.")
+    parser.set_defaults(use_attribute_set=True)
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=1,
+        help="Datasets-RCD worker count. The default 1 gives deterministic serial generation; values >1 improve throughput but completion-order scheduling can change row order.",
+    )
     parser.add_argument("--seed", type=int, default=531)
     parser.add_argument("--sample-id-prefix", default=None, help="Prefix for sample_id/base_sample_id. Defaults to the output directory name.")
     parser.add_argument("--shard-size", type=int, default=0, help="If > 0, also write JSONL shards with this many rows each.")
     parser.add_argument("--progress-step-percent", type=float, default=2.5)
     args = parser.parse_args()
+
+    if int(args.num_workers) <= 0:
+        parser.error("--num-workers must be greater than 0")
 
     random.seed(int(args.seed))
     np.random.seed(int(args.seed))
@@ -289,6 +392,8 @@ def main() -> None:
     sample_id_prefix = str(args.sample_id_prefix or output_dir.name)
     raw_path = output_dir / "raw_series.jsonl"
     summary_path = output_dir / "dataset_summary.json"
+    schedule_path = output_dir / "generation_schedule.json"
+    provenance_path = output_dir / "generation_provenance.json"
     shards_dir = output_dir / "shards"
 
     print(
@@ -306,6 +411,9 @@ def main() -> None:
                 "anomaly_ratio": float(args.anomaly_ratio),
                 "seed": int(args.seed),
                 "sample_id_prefix": sample_id_prefix,
+                "num_workers": int(args.num_workers),
+                "activate_function": bool(args.activate_function),
+                "use_attribute_set": bool(args.use_attribute_set),
             },
             ensure_ascii=False,
             indent=2,
@@ -313,7 +421,9 @@ def main() -> None:
         flush=True,
     )
 
-    generate_dataset = load_legacy_tsad_generate_dataset(Path(args.legacy_src))
+    legacy_src = Path(args.legacy_src).expanduser().resolve()
+    source_manifest = _source_manifest(legacy_src)
+    generate_dataset = load_legacy_tsad_generate_dataset(legacy_src)
     seq_len_rng = random.Random(int(args.seed))
     sampled_seq_lens = _sample_sequence_lengths(
         num_samples=int(args.num_samples),
@@ -330,6 +440,12 @@ def main() -> None:
         num_features_max=args.num_features_max,
         rng=feature_rng,
     )
+    schedule_info = _write_generation_schedule(
+        schedule_path,
+        seed=int(args.seed),
+        seq_lens=sampled_seq_lens,
+        feature_counts=sampled_feature_counts,
+    )
     legacy_rows = _generate_variable_length_dataset(
         generate_dataset=generate_dataset,
         seq_lens=sampled_seq_lens,
@@ -337,6 +453,7 @@ def main() -> None:
         anomaly_ratio=float(args.anomaly_ratio),
         activate_function=bool(args.activate_function),
         use_attribute_set=bool(args.use_attribute_set),
+        num_workers=int(args.num_workers),
     )
 
     progress = ProgressPrinter(
@@ -376,6 +493,17 @@ def main() -> None:
                 shard_index=None,
                 index_in_shard=None,
             )
+            generation_record = {
+                "dataset_seed": int(args.seed),
+                "scheduled_seq_len": int(sampled_seq_lens[idx]),
+                "scheduled_num_features": int(sampled_feature_counts[idx]),
+                "legacy_anomaly_sample_ratio": float(args.anomaly_ratio),
+                "activate_function": bool(args.activate_function),
+                "use_attribute_set": bool(args.use_attribute_set),
+                "num_workers": int(args.num_workers),
+                "generator_source_tree_sha256": source_manifest["tree_sha256"],
+            }
+            raw_row["generation_record"] = generation_record
             raw_handle.write(json.dumps(raw_row, ensure_ascii=False) + "\n")
 
             if int(args.shard_size) > 0:
@@ -404,6 +532,7 @@ def main() -> None:
                     shard_index=shard_index,
                     index_in_shard=idx - current_shard_start,
                 )
+                shard_row["generation_record"] = dict(generation_record)
                 current_shard_handle.write(json.dumps(shard_row, ensure_ascii=False) + "\n")
                 current_shard_rows += 1
 
@@ -430,6 +559,48 @@ def main() -> None:
             }
         )
 
+    provenance = {
+        "format": "mvaxis_generation_provenance_v1",
+        "generation_arguments": {
+            "num_samples": int(args.num_samples),
+            "seq_len": int(args.seq_len),
+            "seq_len_min": None if args.seq_len_min is None else int(args.seq_len_min),
+            "seq_len_max": None if args.seq_len_max is None else int(args.seq_len_max),
+            "num_features": int(args.num_features),
+            "num_features_min": None if args.num_features_min is None else int(args.num_features_min),
+            "num_features_max": None if args.num_features_max is None else int(args.num_features_max),
+            "anomaly_ratio": float(args.anomaly_ratio),
+            "activate_function": bool(args.activate_function),
+            "use_attribute_set": bool(args.use_attribute_set),
+            "num_workers": int(args.num_workers),
+            "seed": int(args.seed),
+            "sample_id_prefix": sample_id_prefix,
+            "shard_size": int(args.shard_size),
+        },
+        "reproducibility_note": (
+            "With num_workers=1, Python and NumPy RNG calls are serial and repeatable under the recorded source/environment. "
+            "With num_workers>1, Datasets-RCD returns futures in completion order, so row ordering can vary across runs."
+        ),
+        "environment": {
+            "python_version": sys.version,
+            "python_implementation": platform.python_implementation(),
+            "executable": sys.executable,
+            "platform": platform.platform(),
+            "dependencies": _dependency_versions(),
+        },
+        "generator_source": source_manifest,
+        "generation_schedule": schedule_info,
+        "outputs": {
+            "raw_series": {"path": str(raw_path), "sha256": _sha256_file(raw_path)},
+            "shards": [
+                {**entry, "sha256": _sha256_file(Path(entry["path"]))}
+                for entry in shard_manifest
+            ],
+        },
+    }
+    save_json(provenance, provenance_path)
+    provenance_info = {"path": str(provenance_path), "sha256": _sha256_file(provenance_path)}
+
     summary = _summary(
         output_dir=output_dir,
         raw_path=raw_path,
@@ -446,6 +617,9 @@ def main() -> None:
         sampled_feature_counts=sampled_feature_counts,
         shard_size=int(args.shard_size),
         shard_manifest=shard_manifest,
+        num_workers=int(args.num_workers),
+        generation_schedule=schedule_info,
+        generation_provenance=provenance_info,
     )
     save_json(summary, summary_path)
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)

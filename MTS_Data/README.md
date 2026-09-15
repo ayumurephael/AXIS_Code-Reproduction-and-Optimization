@@ -70,7 +70,7 @@ MTS_Data/
 └── README.md
 ```
 
-`third_party/datasets_rcd` 是实际运行所需的精简 vendored 代码，不需要再克隆 Time-RCD 或 Datasets-RCD。
+`third_party/datasets_rcd` 是按“生成运行时”裁出的 vendored 副本，而不是功能压缩版。目录共保留 9 个上游文件：`src/` 下全部 6 个实现文件、`config/synthetic.json`、`requirements.txt` 和上游 README；只省略与执行无关的上游 `.gitignore`。正常过程、20 类局部异常、22 类可选季节异常、DAG、滞后 ARX、内生/外生注入和多进程入口均在。与 Datasets-RCD 提交 `73eb733f3026e32bf9edfde1d4c3b787358908e7` 比较时，其中 8 个文件逐字节一致；唯一代码差异位于 `src/generate_dataset.py`，即 Windows 下默认 worker 数由 80 改为 1，以规避 Windows `ProcessPoolExecutor` 限制。主入口仍显式提供 `--num-workers`，无需再克隆 Time-RCD 或 Datasets-RCD。
 
 ## 3. 环境安装
 
@@ -112,6 +112,7 @@ python scripts/01_generate_series.py `
   --seq-len 128 `
   --num-features 3 `
   --anomaly-ratio 1.0 `
+  --num-workers 1 `
   --seed 531
 ```
 
@@ -119,15 +120,29 @@ python scripts/01_generate_series.py `
 
 - `normal_time_series`：未注入异常的正常对照序列；
 - `time_series`：注入异常后的多变量序列；
-- `labels`：逐时刻、逐通道标签矩阵；
+- `labels`：底层生成器原生的一维逐时刻标签；
 - `attribute`：每个通道的信号属性、异常参数、随机 DAG 和内生/外生异常信息。
 
-`legacy_adapter.py` 随后把这些字段整理为统一结构，包括 `series.values`、`series.labels`、`channels`、`causal_graph`、`root_cause` 和 `synthetic_label`。这一步不是重新生成异常，而是把底层真值变成后续窗口与问答代码都能稳定读取的格式。
+`legacy_adapter.py` 随后把这些字段整理为统一结构，包括 `series.values`、二维 `series.labels`、`channels`、`causal_graph`、`root_cause` 和 `synthetic_label`。二维标签由“观测序列与正常反事实的逐通道差异”在原生时间标签范围内恢复；这一步不重新注入异常。
+
+底层有六类持续水平偏移模板：`sudden increase`、`sudden decrease` 以及四类 `* after * spike`。这些模板的数值偏移持续到序列末端，但原生 `position_end` / `labels` 只覆盖尖峰和过渡段；适配器严格保留该标签语义，不把后续尾部自行扩标。研究者若希望把持续尾部也算作异常，应另行定义标签修订规则，并与原始 `legacy_generator_record` 区分。
+
+为了不让统一化过程丢失底层信息，输出同时保留以下两层：
+
+- `legacy_generator_record` 保存原生一维 `labels`、完整 `attribute`，以及 `normal_time_series` / `time_series` 对应字段的原始 dtype 和 shape；NumPy 类型和 tuple 的 JSON 转换路径记录在 `attribute_type_manifest` 中。
+- `series.values`、`normal_series` 和 `original_data` 使用 Python/JSON 的完整浮点表示，不再执行 6 位小数截断。
+- `generation_record` 在每条样本中保存种子、计划长度、计划通道数、异常比例、属性模式、worker 数和生成器源码树哈希。
+
+完整 `attribute` 不只是“异常类型”四个字。它包含顶层 `attribute_list`、`num_features`、`is_endogenous`、`dag`；每个通道还保存趋势、周期、频率、噪声、异常区间，以及 `full_attribute_pool` 中的幅度、周期、分段、异常参数、背景周期尖峰、周期噪声调制和统计量。
 
 主要输出：
 
 - `outputs/series/raw_series.jsonl`
 - `outputs/series/dataset_summary.json`
+- `outputs/series/generation_schedule.json`：逐样本记录计划的长度和通道数；
+- `outputs/series/generation_provenance.json`：记录完整 CLI 参数、Python/依赖版本、平台、全部底层运行文件 SHA-256 及输出文件 SHA-256。
+
+默认 `--num-workers 1` 是有意的：底层 Python/NumPy 随机调用按固定顺序执行，便于在相同源码和环境下重放。设置大于 1 的值可提高吞吐量，但底层按 future 完成顺序收集结果，样本行顺序可能随调度变化；该值会被明确写入 provenance。
 
 ### 阶段 2：候选窗口抽取与绘图
 
@@ -208,7 +223,9 @@ python scripts/05_generate_answers.py `
   --stop-on-error
 ```
 
-GPT-5.4 不负责重新出题。它接收已经生成的题干、题型和选项，同时获得目标窗口数值、通道信息、窗口图像、目标区间、异常真值、根因/受影响通道、异常类型及参考答案等信息。因此，相比题干生成阶段，它多得到的是用于判定正确答案和组织解释的完整真值与参考答案上下文。
+GPT-5.4 不负责重新出题。它接收已经生成的题干、题型和选项，同时获得目标窗口图像、逐位置观测值与正常反事实值、目标区间，以及异常真值、根因/受影响通道、异常类型、范围、异常边和传播辅助字段。它并不直接接收 `windows[0].answer` 这一结构化参考答案；该字段只在生成完成后与模型答案一起写入 answer-only 文件。相比 GPT-5.5，GPT-5.4 最关键的新增输入是逐点数值—反事实对和更完整的教师真值 JSON。
+
+默认数值表覆盖目标窗口全部时刻并保留三位小数；答案请求默认最多尝试 3 次。脚本会清理 think 标签，但不会程序化验证 MC/TF 首行或 OE 三段式的语义与格式，因此正式发布前仍需对教师答案作格式审计和内容抽查。
 
 主要输出：
 
@@ -251,7 +268,8 @@ DoFlow 是替代性的底层数据来源，不是主流程的额外必经步骤�
 
 ## 7. 可复现性与安全事项
 
-- 固定各阶段 `--seed` / `--question-seed`，可复现窗口选择、题型轴和模板抽样；GPT 输出仍可能受远端服务影响。
+- 固定各阶段 `--seed` / `--question-seed`，并在阶段 1 使用 `--num-workers 1`，可复现底层随机调用顺序、窗口选择、题型轴和模板抽样；GPT 输出仍可能受远端服务版本与采样影响。
+- 发布或归档 `raw_series.jsonl` 时应同时保留 `generation_schedule.json`、`generation_provenance.json` 和 `dataset_summary.json`；三者共同给出逐样本配置、源码/环境身份和文件完整性。
 - `outputs/`、虚拟环境、缓存和本机服务器说明均被 `.gitignore` 排除。
 - 配置中只写密钥环境变量名，绝不写真实密钥。
 - `--resume` 用于续跑 GPT 阶段；大批量生成建议同时使用 `--stop-on-error`，避免跳过失败行后造成行号错位。
