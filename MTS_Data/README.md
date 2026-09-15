@@ -201,11 +201,12 @@ python scripts/04_generate_questions.py `
 此阶段先确定 `question-bank`（`regular` 或 `hard`），再为每行分配 MC、TF、OE 之一。`question_provider.py` 根据 frame、题型和题库进入相应的设问角度池；池中的每个条目包含：
 
 - `key`：设问角度的稳定标识；
+- `focus_type`：便于归类设问语义的粗粒度类别；
 - `template`：希望问题覆盖的语义目标；
 - `instruction`：对措辞、观察范围以及禁问内容的约束；
 - `choices`：仅 MC 使用的选项语义锚点。
 
-它们不是依次再次随机选择的四层对象，而是同一个“设问角度条目”的四个字段。选中一个条目后，程序把图片、目标区间、frame、MC/TF/OE、regular/hard、条目字段和样本上下文一次性组装为视觉 prompt，交给 GPT-5.5。模型输出经题型解析和校验后写入样本；MC 必须成功解析出指定数量的选项。
+它们不是依次再次随机选择的多层对象，而是同一个“设问角度条目”的绑定字段。选中后，frame、regular/hard 和 `key` 在程序侧决定题池、条件规则与问题 ID；实际发送给 GPT-5.5 的文本直接包含目标区间、题型、事实摘要、`template`、`instruction` 以及 MC 的 `choices` 锚点，并附上图片。`focus_type` 不以字段名写入 Prompt。模型输出经题型解析后写入样本；MC 必须成功解析出指定数量的选项。
 
 主要输出：
 
