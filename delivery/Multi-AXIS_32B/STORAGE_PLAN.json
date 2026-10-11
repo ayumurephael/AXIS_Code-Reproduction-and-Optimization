@@ -20,7 +20,7 @@
   "timercd_checkpoint": 444841116,
   "times_new_roman_fonts": 4231996,
   "source_checkout_tar_bytes": 7075840,
-  "source_complete_git_bundle_bytes": 4997861,
+  "source_complete_git_bundle_bytes_estimate": 5000000,
   "estimated_complete_usb_payload_with_archives_and_expanded_data": 164089072723,
   "note": "Final total will be replaced by DELIVERY_MANIFEST.json after copying and SHA-256 audit."
 }
