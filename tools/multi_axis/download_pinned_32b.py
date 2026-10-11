@@ -90,6 +90,11 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--max-workers", type=int, default=8)
     parser.add_argument(
+        "--audit-only",
+        action="store_true",
+        help="Validate an already transferred snapshot without contacting a registry.",
+    )
+    parser.add_argument(
         "--source",
         choices=("huggingface", "modelscope"),
         default="huggingface",
@@ -99,7 +104,13 @@ def main() -> None:
     target = args.output_dir.resolve()
     target.mkdir(parents=True, exist_ok=True)
 
-    if args.source == "huggingface":
+    if args.audit_only:
+        source_revision = (
+            QWEN3_VL_32B_REVISION
+            if args.source == "huggingface"
+            else MODELSCOPE_AUDITED_COMMIT
+        )
+    elif args.source == "huggingface":
         info = HfApi().model_info(
             QWEN3_VL_MODEL_ID,
             revision=QWEN3_VL_32B_REVISION,

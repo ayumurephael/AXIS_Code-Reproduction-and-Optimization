@@ -97,6 +97,17 @@ python -m tools.multi_axis.download_pinned_32b \
 SHA-256；镜像只改变传输路径，不改变被接受的模型内容。若公司安全策略不允许
 第三方镜像，使用默认 Hugging Face 或已随 U 盘交付的本地快照。
 
+对离线复制或跨服务器传输后的现有快照，不需要联网重下，使用：
+
+```bash
+python -m tools.multi_axis.download_pinned_32b \
+  --source modelscope --audit-only \
+  --output-dir /fast/storage/models/Qwen3-VL-32B-Instruct-0cfaf48183f5
+```
+
+该模式仍执行 14 个分片的固定字节数与 SHA-256、文件数和总字节数审计，只有
+全部通过才写入 `SNAPSHOT_MANIFEST.json` 与 `SNAPSHOT_COMPLETE`。
+
 ## 32B 架构差异
 
 - 文本隐藏宽度：5120；词表：151,936；文本层：64。
