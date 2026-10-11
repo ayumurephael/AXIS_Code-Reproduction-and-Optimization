@@ -51,6 +51,20 @@ python -m tools.multi_axis.download_pinned_32b \
 该命令固定 repo/revision/总字节数/14 个分片并生成逐文件 SHA-256；不要改用
 浮动 `main` revision。
 
+如果公司网络无法访问 Hugging Face，可使用 Qwen 官方 ModelScope 镜像：
+
+```bash
+pip install -r environment/requirements-multi-axis-32b-modelscope.txt
+python -m tools.multi_axis.download_pinned_32b \
+  --source modelscope \
+  --output-dir /fast/storage/models/Qwen3-VL-32B-Instruct-0cfaf48183f5
+```
+
+ModelScope SDK 只接受命名 revision，不能直接锁 commit；因此脚本记录已审计 commit
+`8d6f46b05db6abe0cb3a5ca8c817929cc0fa2d5a`，并对 14 个分片逐一按固定大小和
+SHA-256 与 Hugging Face revision `0cfaf481...` 做 fail-closed 等价校验。任一分片
+变化都会拒绝写入完成标记。
+
 ## 32B 架构差异
 
 - 文本隐藏宽度：5120；词表：151,936；文本层：64。

@@ -21,3 +21,7 @@ FlashAttention, and NCCL ABI selection depends on the GPU/driver information
 that will only be known at the company. The exact Python dependency pins are
 included; record the installed wheel filenames and `pip freeze` in the run
 directory after hardware discovery.
+
+`requirements-multi-axis-32b-modelscope.txt` is optional and is needed only when
+the audited Qwen ModelScope mirror must be used to reconstruct a missing local
+backbone snapshot. It is not imported by training or evaluation.
