@@ -8,7 +8,17 @@ from typing import Any, Dict
 
 DEEPSEEK_MODEL_ID = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
 QWEN35_MODEL_ID = "Qwen/Qwen3.5-9B"
-QWEN3_VL_MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+QWEN3_VL_8B_MODEL_ID = "Qwen/Qwen3-VL-8B-Instruct"
+QWEN3_VL_32B_MODEL_ID = "Qwen/Qwen3-VL-32B-Instruct"
+QWEN3_VL_32B_REVISION = "0cfaf48183f594c314753d30a4c4974bc75f3ccb"
+# Compatibility name used throughout the implementation.  This branch is
+# intentionally pinned to the 32B backbone; the 8B identifier is retained only
+# so checkpoint/load guards can issue an explicit migration error.
+QWEN3_VL_MODEL_ID = QWEN3_VL_32B_MODEL_ID
+QWEN3_VL_TEXT_HIDDEN_SIZE = 5120
+QWEN3_VL_VOCAB_SIZE = 151_936
+QWEN3_VL_TEXT_LAYERS = 64
+QWEN3_VL_MAX_POSITION_EMBEDDINGS = 262_144
 SUPPORTED_LLM_IDS = (DEEPSEEK_MODEL_ID, QWEN35_MODEL_ID, QWEN3_VL_MODEL_ID)
 FORMAL_DISTRIBUTED_PROFILES = {
     (4, 1, 8, 20): 32,
@@ -21,6 +31,7 @@ FORMAL_DISTRIBUTED_PROFILES = {
     (8, 6, 1, 25): 48,
     (32, 1, 1, 25): 32,
     (8, 2, 2, 20): 32,
+    (8, 1, 4, 20): 32,
     (8, 3, 1, 20): 24,
     (8, 3, 2, 20): 48,
     (8, 4, 1, 20): 32,
@@ -48,7 +59,8 @@ class TimeRCDConfig:
 @dataclass
 class HintConfig:
     num_prototypes: int = 1024
-    prototype_heads: int = 16
+    # 5120 / 20 = 256, the largest FlashAttention-2-compatible head width.
+    prototype_heads: int = 20
     fixed_tokens: int = 30
     channel_heads: int = 4
     joint_heads: int = 4
@@ -61,7 +73,8 @@ class HintConfig:
 
 @dataclass
 class LLMConfig:
-    model_name: str = DEEPSEEK_MODEL_ID
+    model_name: str = QWEN3_VL_MODEL_ID
+    revision: str = QWEN3_VL_32B_REVISION
     torch_dtype: str = "bfloat16"
     max_context_tokens: int = 32768
     trust_remote_code: bool = True
@@ -80,6 +93,16 @@ class LLMConfig:
             raise ValueError(
                 "The documented architecture requires at least a 32768-token context."
             )
+        if self.model_name == QWEN3_VL_MODEL_ID:
+            if self.revision != QWEN3_VL_32B_REVISION:
+                raise ValueError(
+                    "Formal 32B runs require the immutable Qwen3-VL-32B revision "
+                    f"{QWEN3_VL_32B_REVISION}."
+                )
+            if self.max_context_tokens > QWEN3_VL_MAX_POSITION_EMBEDDINGS:
+                raise ValueError(
+                    "max_context_tokens exceeds the pinned 32B backbone limit."
+                )
 
 
 @dataclass
@@ -97,7 +120,7 @@ class VisionConfig:
     def validate(self, model_name: str) -> None:
         if self.enabled and model_name != QWEN3_VL_MODEL_ID:
             raise ValueError(
-                "Image-enabled Multi-AXIS requires Qwen/Qwen3-VL-8B-Instruct."
+                "Image-enabled Multi-AXIS-32B requires Qwen/Qwen3-VL-32B-Instruct."
             )
         if self.min_pixels != 65_536 or self.max_pixels != 16_777_216:
             raise ValueError(
@@ -200,7 +223,7 @@ class MultiAxisConfig:
     vision: VisionConfig = field(default_factory=VisionConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
-    schema_version: str = "multi-axis-1.0"
+    schema_version: str = "multi-axis-vl-32b-1.0-channel-question"
 
     def validate(self) -> None:
         self.llm.validate()
@@ -216,6 +239,12 @@ class MultiAxisConfig:
             raise ValueError(
                 "The specified architecture fixes K_F=30 and N_proto=1024."
             )
+        if self.llm.model_name == QWEN3_VL_MODEL_ID:
+            if self.hints.prototype_heads != 20:
+                raise ValueError(
+                    "Qwen3-VL-32B requires 20 prototype heads so the 5120-wide "
+                    "cross-attention uses a FlashAttention-2-compatible head_dim=256."
+                )
 
         if self.hints.ablation_phase not in {"A", "B", "C", "D"}:
             raise ValueError("Ablation phase must be A, B, C, or D (full model).")
@@ -237,7 +266,9 @@ class MultiAxisConfig:
             vision=VisionConfig(**raw.get("vision", {})),
             training=TrainingConfig(**raw.get("training", {})),
             generation=GenerationConfig(**raw.get("generation", {})),
-            schema_version=raw.get("schema_version", "multi-axis-1.0"),
+            schema_version=raw.get(
+                "schema_version", "multi-axis-vl-32b-1.0-channel-question"
+            ),
         )
 
     @classmethod

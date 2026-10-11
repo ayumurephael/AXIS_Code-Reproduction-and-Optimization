@@ -317,7 +317,7 @@ def git_revision() -> Dict[str, str]:
         if len(commit) == 40 and all(character in "0123456789abcdef" for character in commit.lower()):
             return {
                 "commit": commit.lower(),
-                "branch": branch or "multi-axis-VL",
+                "branch": branch or "multi-axis-VL-32B",
                 "dirty": False,
                 "source": "audited-git-archive",
                 "archive_sha256": archive_sha256.lower(),
@@ -345,6 +345,7 @@ def environment_manifest(
         "gpu_names": [item["gpu_name"] for item in topology["ranks"]],
         "distributed_topology": topology,
         "config": config.to_dict(),
+        "backbone_identity": model.backbone_identity,
         "pretrained_source": getattr(model, "pretrained_source", config.llm.model_name),
         "actual_effective_batch_size": config.training.micro_batch_size
         * config.training.accumulation_steps
@@ -362,7 +363,7 @@ def environment_manifest(
             "official_max_pixels": config.vision.max_pixels,
             "runtime_min_pixels": config.vision.min_pixels,
             "runtime_max_pixels": config.vision.runtime_max_pixels,
-            "source": "official Qwen/Qwen3-VL-8B-Instruct preprocessor_config.json plus audited runtime cap",
+            "source": "official Qwen/Qwen3-VL-32B-Instruct preprocessor_config.json plus audited runtime cap",
         },
         "llm_gradient_checkpointing": config.llm.gradient_checkpointing,
         "eval_safe_checkpointed_decoder_layers": getattr(
@@ -554,13 +555,17 @@ def main():
         raise ValueError("--new-module-warmup-epochs must be non-negative")
     if args.new_module_warmup_epochs and not args.migrate_legacy_architecture:
         raise ValueError("New-module warm-up is only valid for a legacy migration")
+    if args.migrate_legacy_architecture:
+        raise ValueError(
+            "The 32B branch forbids migration from an 8B Hint Tuner; start Epoch 0."
+        )
     if args.stop_after_epoch is not None:
         if not 1 <= args.stop_after_epoch <= config.training.epochs:
             raise ValueError("--stop-after-epoch must be within configured epochs")
         if args.benchmark_optimizer_steps:
             raise ValueError("Benchmark mode cannot use --stop-after-epoch")
     if config.llm.model_name != QWEN3_VL_MODEL_ID:
-        raise ValueError("The VLM branch trains Qwen3-VL-8B-Instruct only")
+        raise ValueError("The 32B branch trains Qwen3-VL-32B-Instruct only")
     if config.vision.enabled and not args.image_root:
         raise ValueError("--image-root is required for image-enabled formal training")
     rank, world_size, local_rank, device = distributed_setup()
@@ -573,7 +578,7 @@ def main():
         world_size,
         local_rank,
         expected_nodes=config.training.expected_nodes,
-        required_gpu_substring="H800" if config.vision.enabled else None,
+        required_gpu_substring=None,
     )
     # Every rank must start from bit-identical Hint Tuner and special-token weights.
     seed_everything(config.training.seed, 0)
@@ -672,6 +677,14 @@ def main():
     migration_audit = None
     if args.resume:
         resume = torch.load(args.resume, map_location="cpu", weights_only=False)
+        if resume.get("format") != "multi-axis-vl-32b-training-state-v1":
+            raise ValueError(
+                "Resume state is not a native 32B state; 8B checkpoints are forbidden."
+            )
+        if resume.get("backbone_identity") != model.backbone_identity:
+            raise ValueError("Resume-state backbone identity does not match exactly")
+        if resume.get("config") != config.to_dict():
+            raise ValueError("Resume-state configuration does not match exactly")
         if args.migrate_legacy_architecture:
             migration_audit = migrate_legacy_training_state(
                 model, optimizer, scheduler, resume
@@ -986,7 +999,7 @@ def main():
                 json.dumps(best_record, indent=2), encoding="utf-8"
             )
             train_state = {
-                "format": "multi-axis-training-state-v2-channel-question",
+                "format": "multi-axis-vl-32b-training-state-v1",
                 "architecture": "step-channel-question-conditioned-joint-v1",
                 "completed_epoch": epoch,
                 "global_step": global_step,
@@ -996,6 +1009,7 @@ def main():
                 "optimizer_state_dict": optimizer.state_dict(),
                 "scheduler_state_dict": scheduler.state_dict(),
                 "config": config.to_dict(),
+                "backbone_identity": model.backbone_identity,
             }
             atomic_torch_save(train_state, output_dir / "last_train_state.pt")
         dist.barrier()

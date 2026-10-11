@@ -5,7 +5,14 @@ import collections
 import json
 from pathlib import Path
 
-from src.models.MultiAXIS.config import MultiAxisConfig, QWEN3_VL_MODEL_ID
+from src.models.MultiAXIS.config import (
+    MultiAxisConfig,
+    QWEN3_VL_32B_REVISION,
+    QWEN3_VL_MODEL_ID,
+    QWEN3_VL_TEXT_HIDDEN_SIZE,
+    QWEN3_VL_TEXT_LAYERS,
+    QWEN3_VL_VOCAB_SIZE,
+)
 from src.models.MultiAXIS.data import visual_image_id, visual_image_relpath
 from src.models.MultiAXIS.timercd import sha256_file
 from tools.multi_axis.aggregate_geval import DATASETS, JUDGES, TYPE_INFO
@@ -56,15 +63,21 @@ def main():
     config = MultiAxisConfig.load_json(args.config)
     check(
         "formal_model",
-        config.llm.model_name == QWEN3_VL_MODEL_ID and config.vision.enabled,
-        {"model": config.llm.model_name, "vision_enabled": config.vision.enabled},
+        config.llm.model_name == QWEN3_VL_MODEL_ID
+        and config.llm.revision == QWEN3_VL_32B_REVISION
+        and config.vision.enabled
+        and config.hints.prototype_heads == 20,
+        {
+            "model": config.llm.model_name,
+            "revision": config.llm.revision,
+            "vision_enabled": config.vision.enabled,
+            "prototype_heads": config.hints.prototype_heads,
+        },
     )
     check(
         "configured_epochs",
-        config.training.epochs == 25
-        and config.training.expected_world_size == 8
-        and config.training.expected_nodes == 2
-        and config.training.effective_batch_size in {32, 48}
+        config.training.epochs == 20
+        and config.training.effective_batch_size == 32
         and not config.training.early_stopping,
         config.training.__dict__,
     )
@@ -139,16 +152,10 @@ def main():
     check(
         "native_vlm_runtime",
         run_manifest.get("modality") == "image+numeric-window+soft-hints"
-        and run_manifest.get("actual_effective_batch_size") in {32, 48}
-        and run_manifest.get("world_size") == 8
-        and topology.get("node_count") == 2
-        and topology.get("gpus_per_node") == 4
-        and len(topology.get("nodes", [])) == 2
-        and all(
-            "H800" in gpu_name
-            for node in topology.get("nodes", [])
-            for gpu_name in node.get("gpu_names", [])
-        )
+        and run_manifest.get("actual_effective_batch_size") == 32
+        and run_manifest.get("world_size") == config.training.expected_world_size
+        and topology.get("node_count") == config.training.expected_nodes
+        and len(topology.get("nodes", [])) == config.training.expected_nodes
         and run_manifest.get("qwen3_vl_pixel_budget", {}).get("official_min_pixels") == 65_536
         and run_manifest.get("qwen3_vl_pixel_budget", {}).get("official_max_pixels") == 16_777_216
         and run_manifest.get("qwen3_vl_pixel_budget", {}).get("runtime_min_pixels") == 65_536
@@ -156,7 +163,14 @@ def main():
         <= run_manifest.get("qwen3_vl_pixel_budget", {}).get("runtime_max_pixels", 0)
         <= 16_777_216
         and run_manifest.get("llm_gradient_checkpointing") is True
-        and run_manifest.get("eval_safe_checkpointed_decoder_layers") == 36,
+        and run_manifest.get("eval_safe_checkpointed_decoder_layers")
+        == QWEN3_VL_TEXT_LAYERS
+        and run_manifest.get("backbone_identity", {}).get("revision")
+        == QWEN3_VL_32B_REVISION
+        and run_manifest.get("backbone_identity", {}).get("text_hidden_size")
+        == QWEN3_VL_TEXT_HIDDEN_SIZE
+        and run_manifest.get("backbone_identity", {}).get("vocab_size")
+        == QWEN3_VL_VOCAB_SIZE,
         {
             "modality": run_manifest.get("modality"),
             "world_size": run_manifest.get("world_size"),

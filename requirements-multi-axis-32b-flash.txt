@@ -1,0 +1,3 @@
+# Install only after the CUDA-specific PyTorch build and base requirements.
+# Use: pip install --no-build-isolation -r requirements-multi-axis-32b-flash.txt
+flash-attn==2.8.3

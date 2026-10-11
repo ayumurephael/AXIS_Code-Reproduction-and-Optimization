@@ -187,7 +187,7 @@ def main():
         "",
         "## Outcome",
         "",
-        f"The formal student is Qwen3-VL-8B-Instruct with one native time-series image, the exact numeric Window, and Step/Joint/Fixed AXIS hints. TimeRCD and the complete VLM remain frozen in eval mode; only the documented Hint Tuner parameters are optimized for all {configured_epochs} configured epochs.",
+        f"The formal student is Qwen3-VL-32B-Instruct with one native time-series image, the exact numeric Window, and Step/Channel/Joint/Fixed AXIS hints. TimeRCD and the complete VLM remain frozen in eval mode; only the documented Hint Tuner parameters are optimized for all {configured_epochs} configured epochs.",
         "",
         "### GPT-5.4 results used for baseline comparison",
         "",

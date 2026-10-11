@@ -274,7 +274,7 @@ def main():
         world,
         local_rank,
         expected_nodes=config.training.expected_nodes,
-        required_gpu_substring="H800" if config.vision.enabled else None,
+        required_gpu_substring=None,
     )
     output_dir = Path(args.output_dir).resolve()
     if rank == 0:
@@ -292,6 +292,7 @@ def main():
         manifest = {
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "model": config.llm.model_name,
+            "backbone_identity": model.backbone_identity,
             "pretrained_source": getattr(model, "pretrained_source", config.llm.model_name),
             "hint_checkpoint": str(Path(args.hint_checkpoint).resolve()),
             "hint_checkpoint_sha256": sha256_file(args.hint_checkpoint),

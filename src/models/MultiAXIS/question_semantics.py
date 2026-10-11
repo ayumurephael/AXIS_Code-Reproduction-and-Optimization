@@ -11,7 +11,7 @@ from typing import Dict, Optional
 import torch
 
 
-CACHE_SCHEMA = "multi-axis-question-semantics-v1"
+CACHE_SCHEMA = "multi-axis-question-semantics-v2-revision-pinned"
 
 
 def question_semantic_text(question: str) -> str:
@@ -24,9 +24,19 @@ def question_semantic_text(question: str) -> str:
 
 def tokenizer_fingerprint(tokenizer) -> str:
     template = getattr(tokenizer, "chat_template", "")
+    backend = getattr(tokenizer, "backend_tokenizer", None)
+    if backend is not None and hasattr(backend, "to_str"):
+        vocabulary_payload = backend.to_str()
+    elif hasattr(tokenizer, "get_vocab"):
+        vocabulary_payload = json.dumps(
+            tokenizer.get_vocab(), ensure_ascii=False, sort_keys=True
+        )
+    else:
+        vocabulary_payload = json.dumps(
+            {"length": int(len(tokenizer))}, sort_keys=True
+        )
     payload = {
         "class": type(tokenizer).__name__,
-        "name_or_path": str(getattr(tokenizer, "name_or_path", "")),
         "length": int(len(tokenizer)),
         "pad_token_id": getattr(tokenizer, "pad_token_id", None),
         "eos_token_id": getattr(tokenizer, "eos_token_id", None),
@@ -35,6 +45,9 @@ def tokenizer_fingerprint(tokenizer) -> str:
         ),
         "chat_template_sha256": hashlib.sha256(
             json.dumps(template, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "vocabulary_sha256": hashlib.sha256(
+            vocabulary_payload.encode("utf-8")
         ).hexdigest(),
     }
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -49,6 +62,7 @@ class QuestionSemanticDiskCache:
         root: str | Path,
         *,
         model_id: str,
+        model_revision: str,
         tokenizer,
         hidden_size: int,
         memory_entries: int = 4096,
@@ -56,6 +70,7 @@ class QuestionSemanticDiskCache:
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.model_id = str(model_id)
+        self.model_revision = str(model_revision)
         self.tokenizer_sha256 = tokenizer_fingerprint(tokenizer)
         self.hidden_size = int(hidden_size)
         self.memory_entries = max(0, int(memory_entries))
@@ -69,6 +84,7 @@ class QuestionSemanticDiskCache:
         payload = {
             "schema": CACHE_SCHEMA,
             "model_id": self.model_id,
+            "model_revision": self.model_revision,
             "tokenizer_sha256": self.tokenizer_sha256,
             "question_text": text,
         }
@@ -104,6 +120,7 @@ class QuestionSemanticDiskCache:
             "schema": CACHE_SCHEMA,
             "key": key,
             "model_id": self.model_id,
+            "model_revision": self.model_revision,
             "tokenizer_sha256": self.tokenizer_sha256,
             "hidden_size": self.hidden_size,
         }
@@ -139,6 +156,7 @@ class QuestionSemanticDiskCache:
             "schema": CACHE_SCHEMA,
             "key": key,
             "model_id": self.model_id,
+            "model_revision": self.model_revision,
             "tokenizer_sha256": self.tokenizer_sha256,
             "hidden_size": self.hidden_size,
             "question_sha256": hashlib.sha256(
@@ -163,6 +181,7 @@ class QuestionSemanticDiskCache:
             "schema": CACHE_SCHEMA,
             "root": str(self.root),
             "model_id": self.model_id,
+            "model_revision": self.model_revision,
             "tokenizer_sha256": self.tokenizer_sha256,
             "hidden_size": self.hidden_size,
             "memory_entries": self.memory_entries,

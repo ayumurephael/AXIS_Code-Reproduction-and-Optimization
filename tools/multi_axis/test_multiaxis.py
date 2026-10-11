@@ -16,7 +16,12 @@ import torch
 from src.models.AXIS.ts_encoder_bi_bias import TimeSeriesEncoder
 from src.models.MultiAXIS.attention import FlashCrossAttention
 from src.models.MultiAXIS.channel_ids import canonicalize_question_channel_references
-from src.models.MultiAXIS.config import MultiAxisConfig, TrainingConfig
+from src.models.MultiAXIS.config import (
+    MultiAxisConfig,
+    QWEN3_VL_32B_REVISION,
+    QWEN3_VL_MODEL_ID,
+    TrainingConfig,
+)
 from src.models.MultiAXIS.data import (
     extract_channel_ids,
     normalize_and_serialize,
@@ -63,6 +68,8 @@ from tools.multi_axis.label_metrics import (
 )
 from tools.multi_axis.infer import dataset_indices
 from tools.multi_axis import merge_sharded_inference_outputs
+from tools.multi_axis.delivery_manifest import build as build_delivery_manifest
+from tools.multi_axis.delivery_manifest import verify as verify_delivery_manifest
 from tools.multi_axis.train import compute_timercd_cached, migrate_legacy_training_state
 from tools.multi_axis.render_images import render_normalized_series
 
@@ -383,11 +390,8 @@ def test_checked_in_four_and_five_gpu_configs():
         root / "experiments/multi_axis/benchmark_deepseek_20epochs_4gpu_micro4.json"
     )
     vlm = MultiAxisConfig.load_json(
-        root / "experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu.json"
-    )
-    vlm_fallback = MultiAxisConfig.load_json(
         root
-        / "experiments/multi_axis/formal_qwen3_vl_25epochs_8gpu_fallback_batch32.json"
+        / "experiments/multi_axis/formal_qwen3_vl_32b_20epochs_hardware_template.json"
     )
     assert (
         five_gpu.training.epochs,
@@ -422,15 +426,9 @@ def test_checked_in_four_and_five_gpu_configs():
         vlm.vision.max_pixels,
         vlm.vision.runtime_max_pixels,
         vlm.llm.gradient_checkpointing,
-    ) == (25, 8, 2, 6, 1, 48, True, 65_536, 16_777_216, 4_194_304, True)
-    assert (
-        vlm_fallback.training.epochs,
-        vlm_fallback.training.expected_world_size,
-        vlm_fallback.training.expected_nodes,
-        vlm_fallback.training.micro_batch_size,
-        vlm_fallback.training.accumulation_steps,
-        vlm_fallback.training.effective_batch_size,
-    ) == (25, 8, 2, 4, 1, 32)
+    ) == (20, 8, 1, 1, 4, 32, True, 65_536, 16_777_216, 2_097_152, True)
+    assert vlm.hints.prototype_heads == 20
+    assert vlm.llm.model_name == "Qwen/Qwen3-VL-32B-Instruct"
 
 
 def test_two_node_four_gpu_topology_validation():
@@ -1202,6 +1200,7 @@ def test_question_semantic_disk_cache_uses_exact_text_and_detaches(tmp_path):
     cache = QuestionSemanticDiskCache(
         tmp_path / "question-cache",
         model_id="frozen-model-a",
+        model_revision="revision-a",
         tokenizer=tokenizer,
         hidden_size=16,
     )
@@ -1212,6 +1211,127 @@ def test_question_semantic_disk_cache_uses_exact_text_and_detaches(tmp_path):
     assert stored.dtype == torch.bfloat16 and torch.equal(stored, loaded)
     assert cache.key("Exact question?") != cache.key("exact question?")
     assert cache.key("Exact question?") != cache.key(" Exact question?")
+
+
+def test_question_semantic_cache_key_is_revision_scoped(tmp_path):
+    tokenizer = FakeTokenizer()
+    first = QuestionSemanticDiskCache(
+        tmp_path / "cache-a",
+        model_id=QWEN3_VL_MODEL_ID,
+        model_revision="revision-a",
+        tokenizer=tokenizer,
+        hidden_size=16,
+    )
+    second = QuestionSemanticDiskCache(
+        tmp_path / "cache-b",
+        model_id=QWEN3_VL_MODEL_ID,
+        model_revision="revision-b",
+        tokenizer=tokenizer,
+        hidden_size=16,
+    )
+    assert first.key("Exact question?") != second.key("Exact question?")
+
+
+def test_qwen3_vl_32b_config_and_backbone_identity_contract():
+    config = MultiAxisConfig.load_json(
+        Path(__file__).resolve().parents[2]
+        / "experiments/multi_axis/formal_qwen3_vl_32b_20epochs_hardware_template.json"
+    )
+    assert config.llm.model_name == QWEN3_VL_MODEL_ID
+    assert config.llm.revision == QWEN3_VL_32B_REVISION
+    assert 5120 // config.hints.prototype_heads == 256
+
+    text_config = SimpleNamespace(
+        hidden_size=5120,
+        intermediate_size=25600,
+        num_hidden_layers=64,
+        num_attention_heads=64,
+        num_key_value_heads=8,
+        head_dim=128,
+        vocab_size=151936,
+    )
+    vision_config = SimpleNamespace(
+        hidden_size=1152,
+        depth=27,
+        num_heads=16,
+        out_hidden_size=5120,
+        patch_size=16,
+        spatial_merge_size=2,
+    )
+    embedding = SimpleNamespace(weight=SimpleNamespace(shape=(151936, 5120)))
+    wrapper = MultiAxisForConditionalGeneration.__new__(
+        MultiAxisForConditionalGeneration
+    )
+    torch.nn.Module.__init__(wrapper)
+    wrapper.config = config
+    wrapper.llm = SimpleNamespace(
+        config=SimpleNamespace(
+            architectures=["Qwen3VLForConditionalGeneration"],
+            text_config=text_config,
+            vision_config=vision_config,
+        ),
+        get_input_embeddings=lambda: embedding,
+        get_output_embeddings=lambda: embedding,
+    )
+    identity = wrapper._assert_backbone_identity()
+    assert identity["text_hidden_size"] == 5120
+    assert identity["text_layers"] == 64
+
+
+def test_32b_loader_rejects_legacy_8b_hint_checkpoint(tmp_path):
+    path = tmp_path / "legacy-8b.pt"
+    torch.save({"format": "multi-axis-vl-hints-v3-channel-question"}, path)
+    wrapper = MultiAxisForConditionalGeneration.__new__(
+        MultiAxisForConditionalGeneration
+    )
+    torch.nn.Module.__init__(wrapper)
+    wrapper.config = SimpleNamespace(
+        llm=SimpleNamespace(model_name=QWEN3_VL_MODEL_ID)
+    )
+    wrapper.backbone_identity = {"model_id": QWEN3_VL_MODEL_ID}
+    with pytest.raises(ValueError, match="8B Hint Tuner"):
+        wrapper.load_hint_checkpoint(path)
+
+
+def test_local_32b_snapshot_requires_exact_audit_markers(tmp_path):
+    config = MultiAxisConfig.load_json(
+        Path(__file__).resolve().parents[2]
+        / "experiments/multi_axis/formal_qwen3_vl_32b_20epochs_hardware_template.json"
+    )
+    with pytest.raises(RuntimeError, match="lacks SNAPSHOT_MANIFEST"):
+        MultiAxisForConditionalGeneration._validate_local_snapshot_identity(
+            tmp_path, config
+        )
+    (tmp_path / "SNAPSHOT_COMPLETE").write_text(
+        QWEN3_VL_32B_REVISION + "\n", encoding="utf-8"
+    )
+    (tmp_path / "SNAPSHOT_MANIFEST.json").write_text(
+        json.dumps(
+            {
+                "repo_id": QWEN3_VL_MODEL_ID,
+                "revision": QWEN3_VL_32B_REVISION,
+                "weight_shards": 14,
+                "total_bytes": 66_726_519_322,
+            }
+        ),
+        encoding="utf-8",
+    )
+    MultiAxisForConditionalGeneration._validate_local_snapshot_identity(
+        tmp_path, config
+    )
+
+
+def test_delivery_manifest_detects_byte_changes(tmp_path):
+    (tmp_path / "payload").mkdir()
+    file_path = tmp_path / "payload" / "file.bin"
+    file_path.write_bytes(b"audited")
+    manifest = build_delivery_manifest(tmp_path)
+    assert manifest["file_count"] == 1
+    assert verify_delivery_manifest(tmp_path)["passed"] is True
+    file_path.write_bytes(b"changed")
+    audit = verify_delivery_manifest(tmp_path)
+    assert audit["passed"] is False
+    assert audit["mismatched"] == ["payload/file.bin"]
 
 
 def test_legacy_migration_expands_prototype_and_adam_state_with_zero_aq():

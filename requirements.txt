@@ -2,9 +2,10 @@ torch==2.5.1
 torchvision==0.20.1
 torchaudio==2.5.1
 
-transformers==4.45.2
+transformers==4.57.1
 accelerate==1.8.1
 deepspeed==0.17.1
+flash-attn==2.8.3
 
 numpy==1.26.4
 scipy==1.15.3
@@ -19,7 +20,8 @@ matplotlib==3.10.3
 
 datasets==4.0.0
 
-tokenizers>=0.13.0
+Pillow==11.3.0
+tokenizers>=0.22.0,<0.23.0
 safetensors>=0.4.0
 huggingface-hub>=0.20.0
 

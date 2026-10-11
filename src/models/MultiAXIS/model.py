@@ -14,7 +14,14 @@ from torch.utils.checkpoint import checkpoint
 
 from .attention import FlashCrossAttention
 from .channel_ids import canonicalize_question_channel_references
-from .config import MultiAxisConfig, QWEN3_VL_MODEL_ID
+from .config import (
+    MultiAxisConfig,
+    QWEN3_VL_32B_REVISION,
+    QWEN3_VL_MODEL_ID,
+    QWEN3_VL_TEXT_HIDDEN_SIZE,
+    QWEN3_VL_TEXT_LAYERS,
+    QWEN3_VL_VOCAB_SIZE,
+)
 from .prompting import HINT_TOKENS, MultiAxisPromptBuilder, TokenizedPrompts
 from .question_semantics import QuestionSemanticDiskCache, question_semantic_text
 from .timercd import FrozenTimeRCD
@@ -306,6 +313,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
         self.llm = llm
         self.processor = processor
         self.tokenizer = getattr(processor, "tokenizer", processor)
+        self.backbone_identity = self._assert_backbone_identity()
         self._prepare_tokenizer()
         self._freeze_llm()
         hidden_size = self._hidden_size()
@@ -347,6 +355,8 @@ class MultiAxisForConditionalGeneration(nn.Module):
             raise FileNotFoundError(
                 f"MULTI_AXIS_MODEL_PATH is not a directory: {source}"
             )
+        if source != config.llm.model_name:
+            cls._validate_local_snapshot_identity(Path(source), config)
         kwargs = dict(
             token=token,
             trust_remote_code=config.llm.trust_remote_code,
@@ -354,17 +364,24 @@ class MultiAxisForConditionalGeneration(nn.Module):
             low_cpu_mem_usage=True,
             attn_implementation=config.llm.attention_implementation,
         )
+        if source == config.llm.model_name:
+            kwargs["revision"] = config.llm.revision
         if device is not None:
             kwargs["device_map"] = {"": str(device)}
         if config.llm.model_name == QWEN3_VL_MODEL_ID:
             from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
 
-            processor = AutoProcessor.from_pretrained(
-                source,
+            processor_kwargs = dict(
                 token=token,
                 trust_remote_code=config.llm.trust_remote_code,
                 min_pixels=config.vision.min_pixels,
                 max_pixels=config.vision.max_pixels,
+            )
+            if source == config.llm.model_name:
+                processor_kwargs["revision"] = config.llm.revision
+            processor = AutoProcessor.from_pretrained(
+                source,
+                **processor_kwargs,
             )
             llm = Qwen3VLForConditionalGeneration.from_pretrained(source, **kwargs)
         else:
@@ -379,11 +396,16 @@ class MultiAxisForConditionalGeneration(nn.Module):
             transformers_import_utils._torchvision_available = False
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
-            processor = AutoTokenizer.from_pretrained(
-                source,
+            tokenizer_kwargs = dict(
                 token=token,
                 trust_remote_code=config.llm.trust_remote_code,
                 use_fast=True,
+            )
+            if source == config.llm.model_name:
+                tokenizer_kwargs["revision"] = config.llm.revision
+            processor = AutoTokenizer.from_pretrained(
+                source,
+                **tokenizer_kwargs,
             )
             try:
                 llm = AutoModelForCausalLM.from_pretrained(source, **kwargs)
@@ -395,18 +417,143 @@ class MultiAxisForConditionalGeneration(nn.Module):
         instance.pretrained_source = str(source)
         return instance
 
+    @staticmethod
+    def _validate_local_snapshot_identity(
+        source: Path, config: MultiAxisConfig
+    ) -> None:
+        """Require the audited offline-package markers before loading 66 GB/rank."""
+
+        manifest_path = source / "SNAPSHOT_MANIFEST.json"
+        complete_path = source / "SNAPSHOT_COMPLETE"
+        if not manifest_path.is_file() or not complete_path.is_file():
+            raise RuntimeError(
+                "Local 32B snapshot lacks SNAPSHOT_MANIFEST.json/SNAPSHOT_COMPLETE; "
+                "run tools.multi_axis.download_pinned_32b first."
+            )
+        import json
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        expected = {
+            "repo_id": config.llm.model_name,
+            "revision": config.llm.revision,
+            "weight_shards": 14,
+            "total_bytes": 66_726_519_322,
+        }
+        mismatches = {
+            key: {"expected": value, "observed": manifest.get(key)}
+            for key, value in expected.items()
+            if manifest.get(key) != value
+        }
+        marker = complete_path.read_text(encoding="utf-8").strip()
+        if marker != config.llm.revision:
+            mismatches["SNAPSHOT_COMPLETE"] = {
+                "expected": config.llm.revision,
+                "observed": marker,
+            }
+        if mismatches:
+            raise RuntimeError(f"Local 32B snapshot identity mismatch: {mismatches}")
+
     def _hidden_size(self) -> int:
         if hasattr(self.llm.config, "hidden_size"):
             return int(self.llm.config.hidden_size)
         text_config = getattr(self.llm.config, "text_config", None)
         if text_config is not None and hasattr(text_config, "hidden_size"):
             hidden_size = int(text_config.hidden_size)
-            if self.config.llm.model_name == QWEN3_VL_MODEL_ID and hidden_size != 4096:
+            if (
+                self.config.llm.model_name == QWEN3_VL_MODEL_ID
+                and hidden_size != QWEN3_VL_TEXT_HIDDEN_SIZE
+            ):
                 raise ValueError(
-                    f"Qwen3-VL-8B text hidden size must be 4096, got {hidden_size}"
+                    "Qwen3-VL-32B text hidden size must be "
+                    f"{QWEN3_VL_TEXT_HIDDEN_SIZE}, got {hidden_size}"
                 )
             return hidden_size
         raise AttributeError("Could not determine the LLM text hidden size")
+
+    def _assert_backbone_identity(self) -> Dict[str, Any]:
+        """Fail closed before allocating any trainable 32B-specific modules."""
+
+        if self.config.llm.model_name != QWEN3_VL_MODEL_ID:
+            return {
+                "model_id": self.config.llm.model_name,
+                "revision": self.config.llm.revision,
+            }
+        llm_config = self.llm.config
+        text = getattr(llm_config, "text_config", None)
+        vision = getattr(llm_config, "vision_config", None)
+        if text is None or vision is None:
+            raise ValueError("Pinned Qwen3-VL-32B config lacks text_config/vision_config")
+        architecture = tuple(getattr(llm_config, "architectures", ()) or ())
+        observed = {
+            "model_id": self.config.llm.model_name,
+            "revision": self.config.llm.revision,
+            "architectures": list(architecture),
+            "text_hidden_size": int(getattr(text, "hidden_size", -1)),
+            "text_intermediate_size": int(getattr(text, "intermediate_size", -1)),
+            "text_layers": int(getattr(text, "num_hidden_layers", -1)),
+            "text_attention_heads": int(getattr(text, "num_attention_heads", -1)),
+            "text_kv_heads": int(getattr(text, "num_key_value_heads", -1)),
+            "text_head_dim": int(getattr(text, "head_dim", -1)),
+            "vocab_size": int(getattr(text, "vocab_size", -1)),
+            "vision_hidden_size": int(getattr(vision, "hidden_size", -1)),
+            "vision_depth": int(getattr(vision, "depth", -1)),
+            "vision_attention_heads": int(getattr(vision, "num_heads", -1)),
+            "vision_output_hidden_size": int(
+                getattr(vision, "out_hidden_size", -1)
+            ),
+            "vision_patch_size": int(getattr(vision, "patch_size", -1)),
+            "vision_spatial_merge_size": int(
+                getattr(vision, "spatial_merge_size", -1)
+            ),
+        }
+        expected = {
+            "text_hidden_size": QWEN3_VL_TEXT_HIDDEN_SIZE,
+            "text_intermediate_size": 25_600,
+            "text_layers": QWEN3_VL_TEXT_LAYERS,
+            "text_attention_heads": 64,
+            "text_kv_heads": 8,
+            "text_head_dim": 128,
+            "vocab_size": QWEN3_VL_VOCAB_SIZE,
+            "vision_hidden_size": 1152,
+            "vision_depth": 27,
+            "vision_attention_heads": 16,
+            "vision_output_hidden_size": QWEN3_VL_TEXT_HIDDEN_SIZE,
+            "vision_patch_size": 16,
+            "vision_spatial_merge_size": 2,
+        }
+        if "Qwen3VLForConditionalGeneration" not in architecture:
+            raise ValueError(f"Unexpected 32B architecture: {architecture}")
+        mismatches = {
+            field: {"expected": value, "observed": observed[field]}
+            for field, value in expected.items()
+            if observed[field] != value
+        }
+        input_shape = tuple(self.llm.get_input_embeddings().weight.shape)
+        output_shape = tuple(self.llm.get_output_embeddings().weight.shape)
+        observed["input_embedding_shape"] = list(input_shape)
+        observed["output_embedding_shape"] = list(output_shape)
+        expected_embedding_shape = (
+            QWEN3_VL_VOCAB_SIZE,
+            QWEN3_VL_TEXT_HIDDEN_SIZE,
+        )
+        if input_shape != expected_embedding_shape:
+            mismatches["input_embedding_shape"] = {
+                "expected": list(expected_embedding_shape),
+                "observed": list(input_shape),
+            }
+        if output_shape != expected_embedding_shape:
+            mismatches["output_embedding_shape"] = {
+                "expected": list(expected_embedding_shape),
+                "observed": list(output_shape),
+            }
+        if self.config.llm.revision != QWEN3_VL_32B_REVISION:
+            mismatches["revision"] = {
+                "expected": QWEN3_VL_32B_REVISION,
+                "observed": self.config.llm.revision,
+            }
+        if mismatches:
+            raise ValueError(f"Pinned Qwen3-VL-32B identity mismatch: {mismatches}")
+        return observed
 
     def _prepare_tokenizer(self) -> None:
         added = self.tokenizer.add_special_tokens(
@@ -417,15 +564,23 @@ class MultiAxisForConditionalGeneration(nn.Module):
                 raise ValueError("Tokenizer has neither pad nor EOS token")
             self.tokenizer.pad_token = self.tokenizer.eos_token
         embedding_rows = int(self.llm.get_input_embeddings().weight.shape[0])
-        if added and (
-            not self.config.vision.enabled or len(self.tokenizer) > embedding_rows
-        ):
+        if added and self.config.vision.enabled and len(self.tokenizer) > embedding_rows:
+            raise RuntimeError(
+                "Hint tokens exceed the frozen 32B embedding table; resizing the "
+                "formal backbone is forbidden."
+            )
+        if added and not self.config.vision.enabled:
             self.llm.resize_token_embeddings(len(self.tokenizer))
         for token in HINT_TOKENS:
             ids = self.tokenizer.encode(token, add_special_tokens=False)
             if len(ids) != 1:
                 raise AssertionError(
                     f"Registered hint token {token} is not atomic: {ids}"
+                )
+            if ids[0] >= int(self.llm.get_input_embeddings().weight.shape[0]):
+                raise AssertionError(
+                    f"Registered hint token {token} id {ids[0]} is outside the "
+                    "frozen embedding table"
                 )
 
     def _freeze_llm(self) -> None:
@@ -683,6 +838,7 @@ class MultiAxisForConditionalGeneration(nn.Module):
         self.question_semantic_cache = QuestionSemanticDiskCache(
             cache_dir,
             model_id=self.config.llm.model_name,
+            model_revision=self.config.llm.revision,
             tokenizer=self.tokenizer,
             hidden_size=self._hidden_size(),
         )
@@ -1108,13 +1264,14 @@ class MultiAxisForConditionalGeneration(nn.Module):
     ) -> Dict[str, Any]:
         return {
             "format": (
-                "multi-axis-vl-hints-v3-channel-question"
+                "multi-axis-vl-32b-hints-v1-channel-question"
                 if self.config.llm.model_name == QWEN3_VL_MODEL_ID
                 else "multi-axis-hints-v2-channel-question"
             ),
             "epoch": epoch,
             "global_step": global_step,
             "config": self.config.to_dict(),
+            "backbone_identity": self.backbone_identity,
             "timercd_sha256": self.timercd.checkpoint_sha256,
             "hint_tuner_state_dict": self.hint_tuner.state_dict(),
             "metadata": metadata,
@@ -1125,12 +1282,17 @@ class MultiAxisForConditionalGeneration(nn.Module):
     ) -> Dict[str, Any]:
         payload = torch.load(path, map_location="cpu", weights_only=False)
         expected_format = (
-            "multi-axis-vl-hints-v3-channel-question"
+            "multi-axis-vl-32b-hints-v1-channel-question"
             if self.config.llm.model_name == QWEN3_VL_MODEL_ID
             else "multi-axis-hints-v2-channel-question"
         )
         if payload.get("format") != expected_format:
-            raise ValueError("Not a Multi-AXIS hint checkpoint")
+            raise ValueError(
+                "Checkpoint is not compatible with the 32B Multi-AXIS branch; "
+                "8B Hint Tuner checkpoints must never be migrated."
+            )
+        if payload.get("backbone_identity") != self.backbone_identity:
+            raise ValueError("Hint checkpoint backbone identity does not match exactly")
         expected_hash = payload.get("timercd_sha256")
         if expected_hash and self.timercd.checkpoint_sha256 != expected_hash:
             raise ValueError(
