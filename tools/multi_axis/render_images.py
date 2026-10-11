@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
+import multiprocessing
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -23,6 +25,15 @@ TARGET_COLOR = "#173f7a"
 TARGET_BACKGROUND = "#fff2b2"
 RENDER_FORMAT = "multi-axis-vl-image-manifest-v1"
 TIMES_FONT_FILES = ("times.ttf", "timesbd.ttf", "timesi.ttf", "timesbi.ttf")
+
+
+_PARALLEL_DATASETS: Dict[str, ManifestDataset] = {}
+_PARALLEL_DATA_ROOT: Path | None = None
+_PARALLEL_OUTPUT_ROOT: Path | None = None
+_PARALLEL_WINDOW_EPSILON = 1e-5
+_PARALLEL_WINDOW_SCALE = 100
+_PARALLEL_RENDERER_VERSION = ""
+_PARALLEL_DPI = 600
 
 
 def sha256_file(path: Path) -> str:
@@ -199,6 +210,89 @@ def render_normalized_series(
     }
 
 
+def _parallel_worker_init(
+    data_root: str,
+    output_root: str,
+    window_epsilon: float,
+    window_scale: int,
+    renderer_version: str,
+    dpi: int,
+    font_dir: str,
+) -> None:
+    global _PARALLEL_DATASETS
+    global _PARALLEL_DATA_ROOT
+    global _PARALLEL_OUTPUT_ROOT
+    global _PARALLEL_WINDOW_EPSILON
+    global _PARALLEL_WINDOW_SCALE
+    global _PARALLEL_RENDERER_VERSION
+    global _PARALLEL_DPI
+
+    if font_dir:
+        os.environ["MULTI_AXIS_TIMES_FONT_DIR"] = font_dir
+    _PARALLEL_DATASETS = {}
+    _PARALLEL_DATA_ROOT = Path(data_root)
+    _PARALLEL_OUTPUT_ROOT = Path(output_root)
+    _PARALLEL_WINDOW_EPSILON = float(window_epsilon)
+    _PARALLEL_WINDOW_SCALE = int(window_scale)
+    _PARALLEL_RENDERER_VERSION = str(renderer_version)
+    _PARALLEL_DPI = int(dpi)
+    require_times_new_roman()
+
+
+def _parallel_render_task(task: Dict[str, Any]) -> Dict[str, Any]:
+    if _PARALLEL_DATA_ROOT is None or _PARALLEL_OUTPUT_ROOT is None:
+        raise RuntimeError("Parallel image worker was not initialized")
+    manifest_path = str(task["manifest_path"])
+    dataset = _PARALLEL_DATASETS.get(manifest_path)
+    if dataset is None:
+        dataset = ManifestDataset(
+            manifest_path,
+            _PARALLEL_DATA_ROOT,
+            window_epsilon=_PARALLEL_WINDOW_EPSILON,
+            window_scale=_PARALLEL_WINDOW_SCALE,
+            renderer_version=_PARALLEL_RENDERER_VERSION,
+        )
+        _PARALLEL_DATASETS[manifest_path] = dataset
+    sample = dataset[int(task["index"])]
+    interval = tuple(map(int, sample["interval"]))
+    expected_id = visual_image_id(
+        sample["base_sample_id"], interval, _PARALLEL_RENDERER_VERSION
+    )
+    if task["image_id"] != expected_id:
+        raise RuntimeError("Manifest image id does not match its series/window identity")
+    relative = visual_image_relpath(expected_id)
+    output_path = _PARALLEL_OUTPUT_ROOT / relative
+    render_audit = render_normalized_series(
+        sample["normalized_series"],
+        interval,
+        sample["channel_ids"],
+        output_path,
+        dpi=_PARALLEL_DPI,
+    )
+    return {
+        "format": RENDER_FORMAT,
+        "image_id": expected_id,
+        "image_relpath": relative,
+        "base_sample_id": sample["base_sample_id"],
+        "interval": list(interval),
+        "time_count": sample["time_count"],
+        "channel_count": sample["channel_count"],
+        "channel_ids": sample["channel_ids"],
+        "normalized_series_sha256": normalized_series_sha256(sample["normalized_series"]),
+        "renderer_version": _PARALLEL_RENDERER_VERSION,
+        "dpi": _PARALLEL_DPI,
+        "half_open_boundaries": [interval[0] - 0.5, interval[1] - 0.5],
+        "contains_anomaly_score": False,
+        "contains_label_annotation": False,
+        "colors": {
+            "context": CONTEXT_COLOR,
+            "target": TARGET_COLOR,
+            "target_background": TARGET_BACKGROUND,
+        },
+        **render_audit,
+    }
+
+
 def iter_manifest_paths(manifest_dir: Path, requested: Sequence[str]) -> Iterable[Path]:
     if requested:
         for name in requested:
@@ -366,6 +460,208 @@ def render_manifests(
     return summary
 
 
+def render_manifests_parallel(
+    config: MultiAxisConfig,
+    data_root: Path,
+    manifest_dir: Path,
+    output_root: Path,
+    manifest_names: Sequence[str],
+    workers: int,
+) -> Dict[str, Any]:
+    """Render unique images in parallel while keeping a deterministic final audit order."""
+    if not config.vision.enabled:
+        raise ValueError("Image rendering requires vision.enabled=true")
+    if workers < 2:
+        raise ValueError("Parallel rendering requires workers >= 2")
+    font_audit = require_times_new_roman()
+    font_dir = os.environ.get("MULTI_AXIS_TIMES_FONT_DIR", "")
+    if not font_dir:
+        raise RuntimeError(
+            "Parallel rendering requires MULTI_AXIS_TIMES_FONT_DIR so every worker "
+            "uses the same auditable font bundle"
+        )
+    output_root.mkdir(parents=True, exist_ok=True)
+    existing_records: Dict[str, Dict[str, Any]] = {}
+    existing_manifest = output_root / "image_manifest.jsonl"
+    progress_manifest = output_root / "image_manifest.progress.jsonl"
+    for audit_path in (existing_manifest, progress_manifest):
+        if not audit_path.is_file():
+            continue
+        with audit_path.open(encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                item = json.loads(line)
+                image_id = str(item["image_id"])
+                if image_id in existing_records and existing_records[image_id] != item:
+                    raise RuntimeError(f"Conflicting existing image manifest id: {image_id}")
+                existing_records[image_id] = item
+
+    tasks: List[Dict[str, Any]] = []
+    seen: Dict[str, Dict[str, Any]] = {}
+    manifest_counts: Dict[str, int] = {}
+    for manifest_path in iter_manifest_paths(manifest_dir, manifest_names):
+        dataset = ManifestDataset(
+            manifest_path,
+            data_root,
+            window_epsilon=config.hints.window_epsilon,
+            window_scale=config.hints.window_scale,
+            renderer_version=config.vision.renderer_version,
+        )
+        manifest_counts[manifest_path.name] = len(dataset)
+        for index in range(len(dataset)):
+            row = dataset._manifest_record(index)
+            interval = tuple(map(int, row["interval"]))
+            image_id = str(
+                row.get("image_id")
+                or visual_image_id(
+                    str(row["base_sample_id"]),
+                    interval,
+                    config.vision.renderer_version,
+                )
+            )
+            identity = {
+                "base_sample_id": str(row["base_sample_id"]),
+                "interval": list(interval),
+            }
+            if image_id in seen:
+                if seen[image_id] != identity:
+                    raise RuntimeError(f"Image-id collision for {image_id}")
+                continue
+            seen[image_id] = identity
+            tasks.append(
+                {
+                    "manifest_path": str(manifest_path.resolve()),
+                    "index": index,
+                    "image_id": image_id,
+                }
+            )
+
+    records_by_id: Dict[str, Dict[str, Any]] = {}
+    pending: List[Dict[str, Any]] = []
+    resume_datasets: Dict[str, ManifestDataset] = {}
+    for task in tasks:
+        image_id = task["image_id"]
+        previous = existing_records.get(image_id)
+        output_path = output_root / visual_image_relpath(image_id)
+        if previous is None or not output_path.is_file():
+            # A hard stop may occur after a worker atomically publishes a PNG but
+            # before the parent appends its audit row. Such an unaudited orphan is
+            # safe to regenerate; audited files remain strictly immutable below.
+            pending.append(task)
+            continue
+        manifest_path = str(task["manifest_path"])
+        dataset = resume_datasets.get(manifest_path)
+        if dataset is None:
+            dataset = ManifestDataset(
+                manifest_path,
+                data_root,
+                window_epsilon=config.hints.window_epsilon,
+                window_scale=config.hints.window_scale,
+                renderer_version=config.vision.renderer_version,
+            )
+            resume_datasets[manifest_path] = dataset
+        sample = dataset[int(task["index"])]
+        expected_fields = {
+            "image_relpath": visual_image_relpath(image_id),
+            "base_sample_id": sample["base_sample_id"],
+            "interval": list(sample["interval"]),
+            "normalized_series_sha256": normalized_series_sha256(
+                sample["normalized_series"]
+            ),
+            "renderer_version": config.vision.renderer_version,
+            "dpi": config.vision.renderer_dpi,
+            "font_family": font_audit["family"],
+            "font_bundle_sha256": font_audit["bundle_sha256"],
+        }
+        mismatched = {
+            key: (previous.get(key), value)
+            for key, value in expected_fields.items()
+            if previous.get(key) != value
+        }
+        actual_sha = sha256_file(output_path)
+        if previous.get("sha256") != actual_sha:
+            mismatched["sha256"] = (previous.get("sha256"), actual_sha)
+        if mismatched:
+            raise RuntimeError(
+                f"Existing render audit mismatch for {image_id}: {mismatched}. "
+                "Use a fresh output root; this command never overwrites audited images."
+            )
+        records_by_id[image_id] = previous
+
+    if pending:
+        context = multiprocessing.get_context("spawn")
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=context,
+            initializer=_parallel_worker_init,
+            initargs=(
+                str(data_root),
+                str(output_root),
+                config.hints.window_epsilon,
+                config.hints.window_scale,
+                config.vision.renderer_version,
+                config.vision.renderer_dpi,
+                str(Path(font_dir).resolve()),
+            ),
+        ) as executor:
+            task_iter = iter(pending)
+            future_to_task: Dict[concurrent.futures.Future, Dict[str, Any]] = {}
+            for _ in range(min(len(pending), workers * 2)):
+                task = next(task_iter)
+                future_to_task[executor.submit(_parallel_render_task, task)] = task
+            with progress_manifest.open("a", encoding="utf-8") as handle:
+                while future_to_task:
+                    completed, _ = concurrent.futures.wait(
+                        future_to_task,
+                        return_when=concurrent.futures.FIRST_COMPLETED,
+                    )
+                    for future in completed:
+                        task = future_to_task.pop(future)
+                        try:
+                            record = future.result()
+                        except Exception as exc:
+                            for outstanding in future_to_task:
+                                outstanding.cancel()
+                            raise RuntimeError(
+                                f"Parallel render failed for {task['image_id']}"
+                            ) from exc
+                        records_by_id[record["image_id"]] = record
+                        handle.write(
+                            json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+                            + "\n"
+                        )
+                        handle.flush()
+                        next_task = next(task_iter, None)
+                        if next_task is not None:
+                            future_to_task[
+                                executor.submit(_parallel_render_task, next_task)
+                            ] = next_task
+
+    records = [records_by_id[task["image_id"]] for task in tasks]
+    manifest_output = output_root / "image_manifest.jsonl"
+    temporary = manifest_output.with_name(manifest_output.name + ".tmp")
+    with temporary.open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+    os.replace(temporary, manifest_output)
+    summary = {
+        "format": RENDER_FORMAT,
+        "renderer_version": config.vision.renderer_version,
+        "dpi": config.vision.renderer_dpi,
+        "unique_images": len(records),
+        "manifest_rows": manifest_counts,
+        "normalization": "consumed ManifestDataset.normalized_series without re-normalization",
+        "font": font_audit,
+        "workers": workers,
+        "image_manifest_sha256": sha256_file(manifest_output),
+    }
+    (output_root / "image_manifest_summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return summary
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Offline deterministic Multi-AXIS VLM renderer")
     parser.add_argument("--config", required=True)
@@ -373,17 +669,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest-dir", required=True)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--manifests", nargs="*", default=[])
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Renderer processes. Use 1 for the original serial implementation.",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    summary = render_manifests(
-        MultiAxisConfig.load_json(args.config),
+    config = MultiAxisConfig.load_json(args.config)
+    common = (
+        config,
         Path(args.data_root).resolve(),
         Path(args.manifest_dir).resolve(),
         Path(args.output_root).resolve(),
         args.manifests,
+    )
+    summary = (
+        render_manifests(*common)
+        if args.workers == 1
+        else render_manifests_parallel(*common, workers=args.workers)
     )
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
 

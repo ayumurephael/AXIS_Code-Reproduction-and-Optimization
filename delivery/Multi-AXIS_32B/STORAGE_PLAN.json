@@ -5,22 +5,25 @@
   "selected_dataset_archives": {
     "multi-axis-transfer.tar.zst": 1663011000,
     "multi-axis-supplement.tar.zst": 163705648,
-    "compressed_total": 1826716648,
-    "expanded_file_bytes": 27985697915
+    "missing-eval478.tar.zst": 41892880,
+    "compressed_total": 1868609528,
+    "expanded_file_bytes": 28818318700
   },
   "formal_pre_rendered_images": {
-    "bytes": 66968617881,
+    "file_bytes": 66962953113,
     "files": 34354,
-    "png_images": 34351
+    "png_images": 34351,
+    "transfer_tar_bytes": 67024609280
   },
   "formal_manifests": {
-    "bytes": 120374144,
-    "files": 32
+    "file_bytes": 120370048,
+    "files": 32,
+    "transfer_tar_zst_bytes": 22118949
   },
   "timercd_checkpoint": 444841116,
   "times_new_roman_fonts": 4231996,
   "source_checkout_tar_bytes": 7075840,
   "source_complete_git_bundle_bytes_estimate": 5000000,
-  "estimated_complete_usb_payload_with_archives_and_expanded_data": 164089072723,
+  "estimated_complete_usb_payload_with_archives_and_expanded_data": 164957917524,
   "note": "Final total will be replaced by DELIVERY_MANIFEST.json after copying and SHA-256 audit."
 }

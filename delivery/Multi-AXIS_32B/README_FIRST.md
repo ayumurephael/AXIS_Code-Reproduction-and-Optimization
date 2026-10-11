@@ -15,7 +15,7 @@ Multi-AXIS_32B/
   SHA256SUMS.txt
   source/                 # 可直接运行的源码快照、git bundle
   models/Qwen3-VL-32B-Instruct-0cfaf48183f5/
-  datasets/archives/      # 两份原始审计归档
+  datasets/archives/      # 三份原始审计归档（含 eval_478 源数据补包）
   datasets/extracted/     # 训练/验证/五测试集所需原始 JSONL
   manifests/              # seed42 grouped 90/10 与正式测试 manifests
   images/                 # 34,351 张正式预渲染 PNG 与 image_manifest.jsonl
@@ -41,6 +41,24 @@ Multi-AXIS_32B/
    benchmark。只有 benchmark 无 OOM、FlashAttention-2 审计通过、显存有安全余量
    后，才能固定 `world/micro/accumulation/nodes` 并启动正式 20 Epoch。
 
+如需重新生成图像，先固定 `NumPy==1.26.4`、`Pillow==11.3.0`、
+`Matplotlib==3.10.3`，设置四字体目录，再使用可断点续跑的并行渲染器：
+
+```bash
+export MULTI_AXIS_TIMES_FONT_DIR=/path/to/Multi-AXIS_32B/assets/fonts
+python -m tools.multi_axis.render_images \
+  --config experiments/multi_axis/formal_qwen3_vl_32b_20epochs_hardware_template.json \
+  --data-root /path/to/Multi-AXIS_32B/datasets/extracted \
+  --manifest-dir /path/to/Multi-AXIS_32B/manifests \
+  --output-root /fast/storage/images \
+  --workers 6
+```
+
+`image_manifest.progress.jsonl` 是逐图断点审计；最终
+`image_manifest.jsonl` 按 manifest 首次出现顺序确定性写出。不同操作系统的
+FreeType/PNG 栈可能令 PNG 文件 SHA-256 不同，但归一化时序哈希、字体包哈希、
+尺寸、区间边界和无标签渲染合同必须一致。
+
 若权重目录需要重新获取，唯一注册入口是：
 
 ```bash
@@ -64,6 +82,20 @@ ModelScope SDK 只接受命名 revision，不能直接锁 commit；因此脚本�
 `8d6f46b05db6abe0cb3a5ca8c817929cc0fa2d5a`，并对 14 个分片逐一按固定大小和
 SHA-256 与 Hugging Face revision `0cfaf481...` 做 fail-closed 等价校验。任一分片
 变化都会拒绝写入完成标记。
+
+若公司允许使用国内 Hugging Face 只读镜像，也可在执行同一个下载器前设置：
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+export HF_HUB_DISABLE_XET=1
+export NO_PROXY='*'
+python -m tools.multi_axis.download_pinned_32b \
+  --output-dir /fast/storage/models/Qwen3-VL-32B-Instruct-0cfaf48183f5
+```
+
+下载器仍要求 API 解析到精确官方 commit、总字节数一致，并逐分片校验固定
+SHA-256；镜像只改变传输路径，不改变被接受的模型内容。若公司安全策略不允许
+第三方镜像，使用默认 Hugging Face 或已随 U 盘交付的本地快照。
 
 ## 32B 架构差异
 
