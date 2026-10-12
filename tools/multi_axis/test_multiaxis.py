@@ -72,6 +72,7 @@ from tools.multi_axis.delivery_manifest import build as build_delivery_manifest
 from tools.multi_axis.delivery_manifest import verify as verify_delivery_manifest
 from tools.multi_axis.train import compute_timercd_cached, migrate_legacy_training_state
 from tools.multi_axis.render_images import render_normalized_series
+from tools.multi_axis import download_pinned_32b
 
 
 class FakeTokenizer:
@@ -1319,6 +1320,45 @@ def test_local_32b_snapshot_requires_exact_audit_markers(tmp_path):
     MultiAxisForConditionalGeneration._validate_local_snapshot_identity(
         tmp_path, config
     )
+
+
+def test_32b_audit_only_does_not_modify_snapshot(tmp_path, monkeypatch, capsys):
+    shard_name = "model-00001-of-00014.safetensors"
+    shard_bytes = b"small auditable shard"
+    metadata_bytes = b"{}"
+    (tmp_path / shard_name).write_bytes(shard_bytes)
+    (tmp_path / "config.json").write_bytes(metadata_bytes)
+    manifest_path = tmp_path / "SNAPSHOT_MANIFEST.json"
+    complete_path = tmp_path / "SNAPSHOT_COMPLETE"
+    manifest_path.write_text("leave unchanged", encoding="utf-8")
+    complete_path.write_text("leave unchanged", encoding="utf-8")
+    monkeypatch.setattr(download_pinned_32b, "EXPECTED_WEIGHT_SHARDS", 1)
+    monkeypatch.setattr(
+        download_pinned_32b,
+        "EXPECTED_SHARDS",
+        {
+            shard_name: (
+                len(shard_bytes),
+                download_pinned_32b.hashlib.sha256(shard_bytes).hexdigest(),
+            )
+        },
+    )
+    monkeypatch.setattr(
+        download_pinned_32b, "EXPECTED_BYTES", len(shard_bytes) + len(metadata_bytes)
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["download_pinned_32b", "--audit-only", "--output-dir", str(tmp_path)],
+    )
+
+    download_pinned_32b.main()
+
+    assert json.loads(capsys.readouterr().out)["total_bytes"] == (
+        len(shard_bytes) + len(metadata_bytes)
+    )
+    assert manifest_path.read_text(encoding="utf-8") == "leave unchanged"
+    assert complete_path.read_text(encoding="utf-8") == "leave unchanged"
 
 
 def test_delivery_manifest_detects_byte_changes(tmp_path):

@@ -102,7 +102,11 @@ def main() -> None:
     )
     args = parser.parse_args()
     target = args.output_dir.resolve()
-    target.mkdir(parents=True, exist_ok=True)
+    if args.audit_only:
+        if not target.is_dir():
+            raise FileNotFoundError(f"Snapshot directory does not exist: {target}")
+    else:
+        target.mkdir(parents=True, exist_ok=True)
 
     if args.audit_only:
         source_revision = (
@@ -192,12 +196,13 @@ def main() -> None:
         "weight_shards": len(shards),
         "files": files,
     }
-    (target / "SNAPSHOT_MANIFEST.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    (target / "SNAPSHOT_COMPLETE").write_text(
-        QWEN3_VL_32B_REVISION + "\n", encoding="utf-8"
-    )
+    if not args.audit_only:
+        (target / "SNAPSHOT_MANIFEST.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        (target / "SNAPSHOT_COMPLETE").write_text(
+            QWEN3_VL_32B_REVISION + "\n", encoding="utf-8"
+        )
     print(
         json.dumps(
             {
