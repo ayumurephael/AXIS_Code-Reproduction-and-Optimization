@@ -105,8 +105,9 @@ python -m tools.multi_axis.download_pinned_32b \
   --output-dir /fast/storage/models/Qwen3-VL-32B-Instruct-0cfaf48183f5
 ```
 
-该模式仍执行 14 个分片的固定字节数与 SHA-256、文件数和总字节数审计，只有
-全部通过才写入 `SNAPSHOT_MANIFEST.json` 与 `SNAPSHOT_COMPLETE`。
+该模式只读地执行 14 个分片的固定字节数与 SHA-256、文件数和总字节数审计，
+不会改写模型目录。`SNAPSHOT_MANIFEST.json` 与 `SNAPSHOT_COMPLETE` 由下载模式
+生成，并已随本离线包交付。
 
 ## 32B 架构差异
 
